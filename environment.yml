@@ -1,0 +1,10 @@
+name: pacman_encoder
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - matplotlib
+  - pandas
+  - ipympl
+prefix: C:\Users\Localadmin_pabflore\miniconda3\envs\pacman_encoder
