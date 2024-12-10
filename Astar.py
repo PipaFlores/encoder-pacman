@@ -5,69 +5,32 @@ def manhattan_distance(pos1, pos2):
     return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
 
 def transform_to_grid(pos):
-    """Transform a pacman, or ghost, position to the grid frame of reference."""
-    return (round(pos[0] - 0.5), round(pos[1] + 0.5))
+    """Transform a pacman, or ghost, position to the grid frame of reference.
+    It rounds the position to the nearest 0.5 unit.
+    This ensures that Astar pathfinding works accurately with 0.5 unit steps.
+    """
+    return (round(pos[0] * 2) / 2, round(pos[1] * 2) / 2)
+    # return (round(pos[0] - 0.5), round(pos[1] + 0.5))
 
-@timer
-def generate_intermediate_walls(wall_positions):
-    """Generate additional wall positions between close wall points."""
-    intermediate_walls = set()
-    expanded_walls = set()
-    corner_walls = set()
-    wall_list = list(wall_positions)
+def generate_squared_walls(wall_positions):
+    """
+    Generate a grid of walls by adding the vertices of the squares,
+    The inputted positions are the upper left corner of the squares as given by unity maze data.
+    This ensures that Astar pathfinding works accurately with 0.5 unit steps.
+    """
+
+    squared_walls = set(wall_positions)
+
+    for wall in wall_positions:
+        for direction in [(0.5,0), (0,-0.5), (0.5,-0.5)]: # Fill the adjacent sides and diagonal.
+            squared_walls.add((wall[0] + direction[0], wall[1] + direction[1]))
+            squared_walls.add((wall[0] + (direction[0]*2), wall[1] + (direction[1]*2)))
+        for direction in [(1,-0.5), (0.5,-1)]: # fill the opposite sides of the square.
+            squared_walls.add((wall[0] + direction[0], wall[1] + direction[1]))
+    return squared_walls
 
 
-    # Add intermediate points between adjacent points
-    for i, pos1 in enumerate(wall_list):
-        for pos2 in wall_list[i+1:]:
-            # Calculate distance between points
-            dist = manhattan_distance(pos1, pos2)
-            if dist == 1:  # If points are directly adjacent (not diagonal)
-                # Generate intermediate point
-                if pos1[0] == pos2[0]:  # Same x-coordinate, vertical adjacency
-                    y = (pos1[1] + pos2[1]) / 2
-                    intermediate_walls.add((pos1[0], y))
-                elif pos1[1] == pos2[1]:  # Same y-coordinate, horizontal adjacency
-                    x = (pos1[0] + pos2[0]) / 2
-                    intermediate_walls.add((x, pos1[1]))
-    
-    filled_walls = intermediate_walls.union(wall_positions)
-
-    # TODO : Figure out how to fill corners
-
-    # # Add the four adjacent points to the set
-    # for pos in filled_walls:
-    #     expanded_walls.add((pos[0] + .5, pos[1]))
-    #     expanded_walls.add((pos[0] - .5, pos[1]))
-    #     expanded_walls.add((pos[0], pos[1] + .5))
-    #     expanded_walls.add((pos[0], pos[1] - .5))
-
-    # filled_walls = filled_walls.union(expanded_walls)
-
-    # # Fill corners
-    # for pos in filled_walls:
-    #     for direction in [(0.5,0), (0,-0.5), (-0.5,0), (0,0.5)]:
-    #         for step in range(1,4):
-    #             if (pos[0] + direction[0]*step, pos[1] + direction[1]*step) in filled_walls:
-    #                 if step < 3:
-    #                     break  # Skip to the next direction if a wall is found at step 1 or 2
-    #                 elif step == 3:
-    #                     corner_walls.add((pos[0] + direction[0], pos[1] + direction[1]))
-
-        # counter = 0
-        # for quadrant in [(0.5,0.5), (0.5,-0.5), (-0.5,0.5), (-0.5,-0.5)]:
-        #     if (pos[0] + quadrant[0], pos[1] + quadrant[1]) in filled_walls:
-        #         counter += 1
-        #     else:
-        #         unfilled_corner = (pos[0] + quadrant[0], pos[1] + quadrant[1])
-        # if counter == 3:
-        #     corner_walls.add(unfilled_corner)
-
-    # filled_walls = filled_walls.union(corner_walls)
-
-    return filled_walls
-
-def get_neighbors(pos, wall_positions, step=1):
+def get_neighbors(pos, wall_positions, step):
     """Get valid neighboring positions (up, right, down, left)."""
     x, y = pos
     neighbors = [
@@ -78,22 +41,21 @@ def get_neighbors(pos, wall_positions, step=1):
     ]
     return [(x, y) for (x, y) in neighbors if (x, y) not in wall_positions]
 
-def calculate_path_and_distance(start, goal, wall_positions):
+def calculate_path_and_distance(start, goal, grid):
     """
     Calculate shortest path and distance between two points using A* algorithm.
     
     Args:
         start (tuple): Starting position (x, y)
         goal (tuple): Goal position (x, y)
-        wall_positions (set): Set of wall positions to avoid
+        grid (set): Set of wall positions, discretized to 0.5 units.
         
     Returns:
         tuple: (path, distance) where path is a list of positions and distance is the path length
     """
     from heapq import heappush, heappop
     
-    wall_positions = set(wall_positions)
-    step = 1
+    STEP = 0.5
     frontier = []
     heappush(frontier, (0, start))
     
@@ -112,8 +74,8 @@ def calculate_path_and_distance(start, goal, wall_positions):
             path.reverse()
             return path, cost_so_far[goal]
             
-        for next_pos in get_neighbors(current, wall_positions, step):
-            new_cost = cost_so_far[current] + step
+        for next_pos in get_neighbors(current, grid, STEP):
+            new_cost = cost_so_far[current] + STEP
             
             if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
                 cost_so_far[next_pos] = new_cost
@@ -124,25 +86,25 @@ def calculate_path_and_distance(start, goal, wall_positions):
     return [], float('inf')  # No path found
 
 
-def calculate_ghost_paths_and_distances(pacman_pos, ghost_positions, wall_positions):
+def calculate_ghost_paths_and_distances(pacman_pos, ghost_positions, grid):
     """
     Calculate the shortest paths and distances between Pacman and all ghosts.
     
     Args:
         pacman_pos (tuple): Pacman's position (x, y)
         ghost_positions (list): List of ghost positions [(x, y), ...]
-        wall_positions (set): Set of wall positions
+        grid (set): Set of wall positions, discretized to 0.5 units.
         
     Returns:
         list: Tuples of (path, distance) to each ghost, in the same order as ghost_positions
     """
     # Round and transform positions to grid frame of reference.
-    pacman_pos_scaled = transform_to_grid(pacman_pos)
-    ghost_pos_scaled = [transform_to_grid(ghost_pos) for ghost_pos in ghost_positions]
+    pacman_pos_transformed = transform_to_grid(pacman_pos)
+    ghost_pos_transformed = [transform_to_grid(ghost_pos) for ghost_pos in ghost_positions]
 
     results = []
-    for ghost_pos in ghost_pos_scaled:
-        path, distance = calculate_path_and_distance(ghost_pos, pacman_pos_scaled, wall_positions)
+    for ghost_pos in ghost_pos_transformed:
+        path, distance = calculate_path_and_distance(ghost_pos, pacman_pos_transformed, grid)
         results.append(([(pos[0], pos[1]) for pos in path], distance)) 
     return results
 
@@ -162,7 +124,8 @@ if __name__ == "__main__":
 
     ghost_pos = [(row[f'Ghost{i+1}_X'], row[f'Ghost{i+1}_Y']) for i in range(3)]
     print(f'Red ghost position: {ghost_pos[0]}')
-    wall_pos, _ = utils.load_maze_data()
+    wall_pos = generate_squared_walls(utils.load_maze_data()[0])
+
     
     results = calculate_ghost_paths_and_distances(pacman_pos, ghost_pos, wall_pos)
     print(f'Distance to red: {results[0][1]}')
