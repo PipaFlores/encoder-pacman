@@ -25,7 +25,7 @@ class SessionVisualizer:
         self.full_data = data
         self.game_id = game_id
         self.default_columns = ['game_state_id', 'game_id', 'time_elapsed', 'Pacman_X', 'Pacman_Y', 'Ghost1_X', 'Ghost1_Y',
-                              'Ghost2_X', 'Ghost2_Y', 'Ghost3_X', 'Ghost3_Y', 'Ghost4_X', 'Ghost4_Y', 'score', 'lives']
+                              'Ghost2_X', 'Ghost2_Y', 'Ghost3_X', 'Ghost3_Y', 'Ghost4_X', 'Ghost4_Y', 'score', 'lives', 'level']
         self.columns = columns if columns else self.default_columns
 
         # Animation
@@ -126,6 +126,11 @@ class SessionVisualizer:
                                    fontsize=10,
                                    color='white')
         
+        level_text = ax_game.text(0.02, 0.74, '', transform=ax_game.transAxes,
+                                   verticalalignment='top',
+                                   fontsize=10,
+                                   color='white')
+        
 
         
         # Game Selector
@@ -153,12 +158,13 @@ class SessionVisualizer:
             time_elapsed_text.set_text('')
             score_text.set_text('')
             lives_text.set_text('')
+            level_text.set_text('')
 
-            return [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, *path_lines]
+            return [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, level_text, *path_lines]
         
         def update(frame):
             if not self.is_playing:
-                return [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, *path_lines,*[p[0] for p in self.pellet_objects]]
+                return [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, level_text, *path_lines,*[p[0] for p in self.pellet_objects]]
             
 
             try:
@@ -208,12 +214,14 @@ class SessionVisualizer:
                 score_text.set_text(f'Score: {int(row["score"])}')
                 lives_text.set_text(f'Lives: {int(row["lives"])}')
 
+                level_text.set_text(f'Level: {int(row["level"])}')
+
                 if frame == len(self.data) - 2:
                     self.anim.event_source.stop()
                     self.finalized = True
                     self.is_playing = False
                 # Return all artists that need to be redrawn
-                artists = [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, *[p[0] for p in self.pellet_objects]]
+                artists = [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, level_text, *[p[0] for p in self.pellet_objects]]
                 for path_line in path_lines:
                     if path_line is not None:
                         artists.append(path_line)
@@ -224,7 +232,7 @@ class SessionVisualizer:
                 self.anim.event_source.stop()
                 self.is_playing = False
                 self.finalized = True
-                return [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, *[p[0] for p in self.pellet_objects]]
+                return [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, level_text, *[p[0] for p in self.pellet_objects]]
         
         def on_game_select(text):
             try:
@@ -280,11 +288,14 @@ if __name__ == "__main__":
     parser.add_argument('-g', '--game-id', type=int, default=None, help="Game ID to visualize")
     parser.add_argument('--playback-speed', type=float, default=2.0, help="Playback speed multiplier")
     parser.add_argument('--data-path', type=str, default='data/gamestate.csv', help="Path to the game state data")
+    parser.add_argument('--gamedata-path', type=str, default='data/game.csv', help="Path to the game data")
     parser.add_argument('--no-pellets', action='store_false', dest='pellets', help="Disable pellets")
     parser.add_argument('--no-pathfinding', action='store_false', dest='pathfinding', help="Disable A* path finding calculation")
     parser.add_argument('--verbose', action='store_true', default=False, help="Print verbose logging")
     parser.add_argument('--grid',action= 'store_true', default=False, help="Show grid")
     args = parser.parse_args()
     gamestate_df = pd.read_csv(args.data_path, converters={'user_id': lambda x: int(x)})
+    game_df = pd.read_csv(args.gamedata_path, converters={'user_id': lambda x: int(x)})
+    gamestate_df = pd.merge(gamestate_df, game_df, on='game_id', how='left')
     visualizer = SessionVisualizer(gamestate_df, game_id=args.game_id, playback_speed=args.playback_speed, verbose=args.verbose, pellets=args.pellets, pathfinding=args.pathfinding, show_grid=args.grid)
     visualizer.animate_session()
