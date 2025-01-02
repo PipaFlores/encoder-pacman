@@ -124,6 +124,31 @@ def parse_sql_table(sql_file, table_name):
     df = pd.DataFrame(values, columns=columns)
     return df
 
+def read_data():
+    """
+    Read all data from CSV files.
+
+    Returns:
+        tuple: (user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df)
+        user_df: DataFrame with user data
+        ip_df: DataFrame with IP data
+        redcap_df: DataFrame with REDCap data
+        game_df: DataFrame with game data
+        gamestate_df: DataFrame with gamestate data
+        psychometrics_df: DataFrame with psychometrics data
+    """
+    user_df = pd.read_csv('data/user.csv')
+    ip_df = pd.read_csv('data/userip.csv')
+    redcap_df = pd.read_csv('data/redcapdata.csv')
+    game_df = pd.read_csv('data/game.csv', converters={'date_played': lambda x: pd.to_datetime(x)})
+    game_df = game_df[game_df['user_id'] != 42] # Remove user 42 (myself)
+    # game_df = game_df[game_df['user_id'] != 47]
+    gamestate_df = pd.read_csv('data/gamestate.csv', converters={'user_id': lambda x: int(x)})
+    gamestate_df = gamestate_df[~gamestate_df['game_id'].isin(game_df.loc[game_df['user_id'] == 42, 'game_id'])] # Remove games associated with userid 42 (myself)
+    psychometrics_df = pd.read_csv('data/psych/psych.csv')
+
+    return user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df
+
 def parse_unity_tilemap(file_content):
     """
     Parse Unity tilemap file content to extract tile positions.
