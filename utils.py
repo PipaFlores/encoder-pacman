@@ -5,6 +5,8 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.widgets import Slider, Button, TextBox
 import functools
 import time
+import stumpy
+import numpy as np
 
 def timer(func):
     @functools.wraps(func)
@@ -210,3 +212,79 @@ def load_maze_data(walls_file='grid/walls.unity', pellets_file= 'grid/pellets.un
     return wall_positions, pellet_positions
 
 
+def plot_ts(ts, title):
+    fig, axs = plt.subplots(ts.shape[1], sharex=True, gridspec_kw={'hspace': 0})
+    plt.suptitle(title, fontsize='30')
+
+    for i in range(ts.shape[1]):
+        axs[i].set_ylabel(f'{ts.columns[i]}', fontsize='8')
+        axs[i].set_xlabel('Step', fontsize ='20')
+        axs[i].plot(ts.iloc[:,i])
+        
+    plt.show()
+
+def find_motif(ts, m, plot=True):
+    """
+    Find motifs and plot themin a time series.
+    
+    Args:
+        ts (pd.DataFrame): Time series data
+        m (int): Window size for motif detection
+        plot (bool): Whether to plot the motifs
+        
+    Returns:
+        tuple: (mps, motifs_idx) where mps is a dictionary of matrix profiles and motifs_idx is a dictionary of motif index locations
+    """
+    mps = {}  # Store the 1-dimensional matrix profiles
+    motifs_idx = {}  # Store the index locations for each pair of 1-dimensional motifs (i.e., the index location of two smallest matrix profile values within each dimension)
+    for dim_name in ts.columns:
+        mps[dim_name] = stumpy.stump(ts[dim_name], m)
+        motif_distance = np.round(mps[dim_name][:, 0].astype(float).min(), 1)
+        print(f"The motif pair matrix profile value in {dim_name} is {motif_distance}")
+        motifs_idx[dim_name] = np.argsort(mps[dim_name][:, 0])[:2]
+
+    if plot:
+        fig, axs = plt.subplots(len(mps), sharex=True, gridspec_kw={'hspace': 0})
+        for i, dim_name in enumerate(list(mps.keys())):
+            axs[i].set_ylabel(dim_name, fontsize='8')
+            axs[i].plot(ts[dim_name])
+            axs[i].set_xlabel('Step', fontsize ='20')
+            for idx in motifs_idx[dim_name]:
+                axs[i].plot(ts[dim_name].iloc[idx:idx+m], c='red', linewidth=4)
+                axs[i].axvline(x=idx, linestyle="dashed", c='black')
+            
+        plt.show()
+    return mps, motifs_idx
+
+
+def pos_mirroring(df, return_quadrant=False):
+    """
+    Mirror the positions of Pacman
+    on each quadrant of the maze. Each quadrant
+    will mimic the first quadrant (upper right).
+    If return_quadrant is True, add a column
+    'quadrant' to the dataframe with the quadrant
+    that the Pacman is in.
+    """
+    MIRROR_X = 0.0
+    MIRROR_Y = -0.5
+
+    mirrored_df = df.copy()
+    if return_quadrant:
+        mirrored_df['quadrant'] = np.float64(0)
+    for i, row in mirrored_df.iterrows():
+        if row['Pacman_X'] < MIRROR_X:
+            mirrored_df.loc[i, 'Pacman_X'] = (MIRROR_X - row['Pacman_X']) + MIRROR_X
+        if row['Pacman_Y'] < MIRROR_Y:
+            mirrored_df.loc[i, 'Pacman_Y'] = (MIRROR_Y - row['Pacman_Y']) + MIRROR_Y
+        if return_quadrant:
+            if row['Pacman_X'] >= MIRROR_X and row['Pacman_Y'] >= MIRROR_Y:
+                mirrored_df.loc[i, 'quadrant'] = 1.0
+            elif row['Pacman_X'] <= MIRROR_X and row['Pacman_Y'] >= MIRROR_Y:
+                mirrored_df.loc[i, 'quadrant'] = 2.0
+            elif row['Pacman_X'] <= MIRROR_X and row['Pacman_Y'] <= MIRROR_Y:
+                mirrored_df.loc[i, 'quadrant'] = 3.0
+            elif row['Pacman_X'] >= MIRROR_X and row['Pacman_Y'] <= MIRROR_Y:
+                mirrored_df.loc[i, 'quadrant'] = 4.0
+
+    return mirrored_df
