@@ -8,7 +8,7 @@ import Astar
 import logging
 
 class SessionVisualizer:
-    def __init__(self, data, game_id=None, playback_speed=1.0, columns=None, verbose = False, pathfinding=True, pellets=True, show_grid=False):
+    def __init__(self, data, game_id=None, playback_speed=1.0, stats_columns=None, verbose = False, pathfinding=True, pellets=True, show_grid=False):
         """
         Initialize the visualizer with data.
         
@@ -16,7 +16,7 @@ class SessionVisualizer:
             data (DataFrame): Game state data with columns [time, Pacman_X, Pacman_Y, Ghost1_X, Ghost1_Y, ...].
             game_id (int): Game ID to visualize. If None, the first game ID will be used.
             playback_speed (float): Initial speed multiplier for the playback.
-            columns (list): List of columns to use for the animation. If None, the default columns will be used.
+            stats_columns (list): List of columns to use for the stats panel. If None, the default columns will be used.
             verbose (bool): Whether to print verbose logging.
             pathfinding (bool): Whether to calculate A* pathfinding.
             pellets (bool): Whether to show pellets.
@@ -24,9 +24,11 @@ class SessionVisualizer:
         """
         self.full_data = data
         self.game_id = game_id
-        self.default_columns = ['game_state_id', 'game_id', 'time_elapsed', 'Pacman_X', 'Pacman_Y', 'Ghost1_X', 'Ghost1_Y',
-                              'Ghost2_X', 'Ghost2_Y', 'Ghost3_X', 'Ghost3_Y', 'Ghost4_X', 'Ghost4_Y', 'score', 'lives', 'level']
-        self.columns = columns if columns else self.default_columns
+        self.animation_columns = ['game_state_id','Pacman_X', 'Pacman_Y', 'Ghost1_X', 'Ghost1_Y',
+                              'Ghost2_X', 'Ghost2_Y', 'Ghost3_X', 'Ghost3_Y', 'Ghost4_X', 'Ghost4_Y']
+        self.stats_columns = ['game_id', 'time_elapsed', 'score', 'lives', 'level', 'movement_direction', 'input_direction']
+        self.stats_columns += stats_columns if stats_columns else []
+        self.columns = self.animation_columns + self.stats_columns
 
         # Animation
         self.playback_speed = playback_speed
@@ -63,15 +65,21 @@ class SessionVisualizer:
         Creates an interactive animation window with controls.
         """
         # Create the main figure and grid layout
-        fig = plt.figure(figsize=(6, 6))
-        gs = fig.add_gridspec(2, 1, height_ratios=[10, 1], hspace=0.1)
+        fig = plt.figure(figsize=(9, 6))
+        gs = fig.add_gridspec(2, 2,width_ratios=[3, 1], height_ratios=[10, 1], hspace=0.1)
         
         # Game display axis
-        ax_game = fig.add_subplot(gs[0])
+        ax_game = fig.add_subplot(gs[0,0])
         ax_game.set_xlim(-15, 15)
         ax_game.set_ylim(-18, 15)
         ax_game.set_aspect('equal')
         ax_game.set_facecolor('black')
+
+        # Stats panel (right side)
+        ax_stats = fig.add_subplot(gs[0,1])
+        ax_stats.set_facecolor('black')
+        ax_stats.set_xticks([])
+        ax_stats.set_yticks([])
 
         
         if self.show_grid:
@@ -81,7 +89,7 @@ class SessionVisualizer:
 
 
         # Controls axis
-        ax_controls = fig.add_subplot(gs[1])
+        ax_controls = fig.add_subplot(gs[1, :])
         ax_controls.set_visible(False)  # Hide the actual axis
         
          # Initialize plot elements
@@ -105,31 +113,13 @@ class SessionVisualizer:
 
         path_lines = [ax_game.plot([], [], 'o', color=ghost_colors[i], alpha=0.5, markersize=2)[0] for i in range(len(ghost_dots))]
         # Add game ID text label
-        game_id_text = ax_game.text(0.02, 0.98, '', transform=ax_game.transAxes,
-                                   verticalalignment='top',
-                                   fontsize=10,
-                                   color='white')
-        
-        # Add time elapsed text label
-        time_elapsed_text = ax_game.text(0.02, 0.92, '', transform=ax_game.transAxes,
-                                   verticalalignment='top',
-                                   fontsize=10,
-                                   color='white')
 
-        score_text = ax_game.text(0.02, 0.86, '', transform=ax_game.transAxes,
-                                   verticalalignment='top',
-                                   fontsize=10,
-                                   color='white')
-        
-        lives_text = ax_game.text(0.02, 0.80, '', transform=ax_game.transAxes,
-                                   verticalalignment='top',
-                                   fontsize=10,
-                                   color='white')
-        
-        level_text = ax_game.text(0.02, 0.74, '', transform=ax_game.transAxes,
-                                   verticalalignment='top',
-                                   fontsize=10,
-                                   color='white')
+        # Stats panel
+        stats_text_objects = []
+
+        for i, column in enumerate(self.stats_columns):
+            stats_text_objects.append(ax_stats.text(0.1, 0.9 - i * 0.1, '', 
+                                    color='white', fontsize=10))
         
 
         
@@ -154,17 +144,15 @@ class SessionVisualizer:
             for path_line in path_lines:
                 path_line.set_data([], [])
 
-            game_id_text.set_text('')
-            time_elapsed_text.set_text('')
-            score_text.set_text('')
-            lives_text.set_text('')
-            level_text.set_text('')
+            for text_object in stats_text_objects:
+                text_object.set_text('')
 
-            return [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, level_text, *path_lines]
+            return [pacman_dot, *ghost_dots, *path_lines, *stats_text_objects]
+
         
         def update(frame):
             if not self.is_playing:
-                return [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, level_text, *path_lines,*[p[0] for p in self.pellet_objects]]
+                return [pacman_dot, *ghost_dots, *stats_text_objects, *path_lines,*[p[0] for p in self.pellet_objects]]
             
 
             try:
@@ -206,22 +194,25 @@ class SessionVisualizer:
                     ghost_dot.set_data([row[f'Ghost{i+1}_X']], [row[f'Ghost{i+1}_Y']])
 
                 current_game_id = row['game_id']
-                game_id_text.set_text(f'Game ID: {int(current_game_id)}')
+                stats_text_objects[0].set_text(f'Game ID: {int(current_game_id)}')
 
                 time_elapsed = row['time_elapsed']
-                time_elapsed_text.set_text(f'Time Elapsed: {time_elapsed:.2f}')
+                stats_text_objects[1].set_text(f'Time Elapsed: {time_elapsed:.2f}')
 
-                score_text.set_text(f'Score: {int(row["score"])}')
-                lives_text.set_text(f'Lives: {int(row["lives"])}')
+                stats_text_objects[2].set_text(f'Score: {int(row["score"])}')
+                stats_text_objects[3].set_text(f'Lives: {int(row["lives"])}')
 
-                level_text.set_text(f'Level: {int(row["level"])}')
+                stats_text_objects[4].set_text(f'Level: {int(row["level"])}')
+
+                for i, column in enumerate(self.stats_columns[5:]):
+                    stats_text_objects[i+5].set_text(f'{column}: {row[column]}')
 
                 if frame == len(self.data) - 2:
                     self.anim.event_source.stop()
                     self.finalized = True
                     self.is_playing = False
                 # Return all artists that need to be redrawn
-                artists = [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, level_text, *[p[0] for p in self.pellet_objects]]
+                artists = [pacman_dot, *ghost_dots, *stats_text_objects, *path_lines,*[p[0] for p in self.pellet_objects]]
                 for path_line in path_lines:
                     if path_line is not None:
                         artists.append(path_line)
@@ -232,7 +223,7 @@ class SessionVisualizer:
                 self.anim.event_source.stop()
                 self.is_playing = False
                 self.finalized = True
-                return [pacman_dot, *ghost_dots, game_id_text, time_elapsed_text, score_text, lives_text, level_text, *[p[0] for p in self.pellet_objects]]
+                return [pacman_dot, *ghost_dots, *stats_text_objects, *path_lines,*[p[0] for p in self.pellet_objects]]
         
         def on_game_select(text):
             try:
@@ -293,9 +284,17 @@ if __name__ == "__main__":
     parser.add_argument('--no-pathfinding', action='store_false', dest='pathfinding', help="Disable A* path finding calculation")
     parser.add_argument('--verbose', action='store_true', default=False, help="Print verbose logging")
     parser.add_argument('--grid',action= 'store_true', default=False, help="Show grid")
+    parser.add_argument('--stats', type=str, default=None, help="Add stats columns to the stats panel")
     args = parser.parse_args()
     gamestate_df = pd.read_csv(args.data_path, converters={'user_id': lambda x: int(x)})
     game_df = pd.read_csv(args.gamedata_path, converters={'user_id': lambda x: int(x)})
     gamestate_df = pd.merge(gamestate_df, game_df, on='game_id', how='left')
-    visualizer = SessionVisualizer(gamestate_df, game_id=args.game_id, playback_speed=args.playback_speed, verbose=args.verbose, pellets=args.pellets, pathfinding=args.pathfinding, show_grid=args.grid)
+    visualizer = SessionVisualizer(gamestate_df, 
+                                   game_id=args.game_id, 
+                                   playback_speed=args.playback_speed, 
+                                   verbose=args.verbose, 
+                                   pellets=args.pellets, 
+                                   pathfinding=args.pathfinding, 
+                                   show_grid=args.grid,
+                                   stats_columns=args.stats.replace(" ", "").split(',') if args.stats else None)
     visualizer.animate_session()
