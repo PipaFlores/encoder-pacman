@@ -4,8 +4,10 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import TextBox
 from matplotlib.animation import FuncAnimation
 import argparse
-import Astar
+import Astar as Astar
 import logging
+# import os
+# os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 class SessionVisualizer:
     def __init__(self, data, game_id=None, playback_speed=1.0, stats_columns=None, verbose = False, pathfinding=True, pellets=True, show_grid=False):
