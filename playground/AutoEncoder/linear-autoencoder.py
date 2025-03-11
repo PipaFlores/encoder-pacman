@@ -6,76 +6,50 @@ from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
 import numpy as np
 import time
-from umap import UMAP
 from tqdm import tqdm
+# Function to visualize the latent space
+from umap import UMAP
 import os
 os.environ['KMP_DUPLICATE_LIB_OK']='TRUE'
 
 # Set random seed for reproducibility
 torch.manual_seed(42)
 
-# Define the Convolutional Autoencoder architecture
-class ConvAutoencoder(nn.Module):
-    def __init__(self, dropout_rate = 0.1):
-        super(ConvAutoencoder, self).__init__()
+# Define the Autoencoder architecture
+class Autoencoder(nn.Module):
+    def __init__(self, input_dim=784, hidden_dim=128, latent_dim=32):
+        super(Autoencoder, self).__init__()
         
         # Encoder
         self.encoder = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1),  # [batch, 16, 28, 28]
-            nn.BatchNorm2d(16),
+            nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout2d(dropout_rate),
-            nn.MaxPool2d(kernel_size=2, stride=2),                 # [batch, 16, 14, 14]
-            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1), # [batch, 32, 14, 14]
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.Dropout2d(dropout_rate),
-            nn.MaxPool2d(kernel_size=2, stride=2),                 # [batch, 32, 7, 7]
-            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1), # [batch, 64, 7, 7]
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Dropout2d(dropout_rate)
+            nn.Linear(hidden_dim, latent_dim),
+            nn.ReLU()
         )
         
         # Decoder
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(64, 32, kernel_size=3, stride=1, padding=1), # [batch, 32, 7, 7]
-            nn.BatchNorm2d(32),
+            nn.Linear(latent_dim, hidden_dim),
             nn.ReLU(),
-            nn.Upsample(scale_factor=2, mode='nearest'),                    # [batch, 32, 14, 14]
-            nn.ConvTranspose2d(32, 16, kernel_size=3, stride=1, padding=1), # [batch, 16, 14, 14]
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            nn.Upsample(scale_factor=2, mode='nearest'),                    # [batch, 16, 28, 28]
-            nn.ConvTranspose2d(16, 1, kernel_size=3, stride=1, padding=1),  # [batch, 1, 28, 28]
-            nn.BatchNorm2d(1),
-            nn.Sigmoid()
-        )
-
-                # Add a bottleneck layer
-        self.bottleneck = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64 * 7 * 7),
-            nn.Unflatten(1, (64, 7, 7))
+            nn.Linear(hidden_dim, input_dim),
+            nn.Sigmoid()  # Output values between 0 and 1 for image reconstruction
         )
     
     def forward(self, x):
-        encoded = self.encoder(x)
-        bottleneck = self.bottleneck(encoded)
-        decoded = self.decoder(bottleneck)
-        return decoded, bottleneck
+        # Encode
+        z = self.encoder(x)
+        # Decode
+        reconstructed = self.decoder(z)
+        return reconstructed, z
     
     def encode(self, x):
         return self.encoder(x)
     
-    def decode(self, x):
-        return self.decoder(x)
-    
-    def get_latent(self, x):
-        encoded = self.encoder(x)
-        return self.bottleneck(encoded) 
+    def decode(self, z):
+        return self.decoder(z)
+
+
 
 # Function to load and preprocess data
 def load_data(batch_size=128):
@@ -140,8 +114,8 @@ def train(model, train_loader, num_epochs=10, learning_rate=1e-3):
         
         pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{num_epochs}')
         for data, _ in pbar:
-            # Move data to device
-            img = data.to(device)
+            # Reshape data and move to device
+            img = data.view(data.size(0), -1).to(device)
             
             # Forward pass
             reconstructed, _ = model(img)
@@ -192,13 +166,15 @@ def visualize_reconstructions(model, test_loader, num_images=10):
     images, _ = next(dataiter)
     
     # Select a subset of images to visualize
-    images = images[:num_images].to(device)
+    images = images[:num_images]
     
-    # Pass through the autoencoder
+    # Reshape and pass through the autoencoder
     with torch.no_grad():
-        reconstructed_images, _ = model(images)
-        reconstructed_images = reconstructed_images.cpu()
-        images = images.cpu()
+        flattened_images = images.view(images.size(0), -1).to(device)
+        reconstructed_images, _ = model(flattened_images)
+        
+        # Reshape back to original image dimensions
+        reconstructed_images = reconstructed_images.view(images.size()).cpu()
     
     # Plot original vs reconstructed images
     plt.figure(figsize=(20, 4))
@@ -219,116 +195,62 @@ def visualize_reconstructions(model, test_loader, num_images=10):
     plt.tight_layout()
     plt.show()
 
-# Function to visualize feature maps
-def visualize_feature_maps(model, test_loader):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    model.eval()
-    
-    # Get a single image
-    dataiter = iter(test_loader)
-    images, _ = next(dataiter)
-    img = images[0:1].to(device)  # Use just the first image
-    
-    # Get the feature maps from the encoder
-    with torch.no_grad():
-        feature_maps, _ = model(img)
-        
-        # Get the intermediate feature maps
-        # We'll need to make a new forward hook to get these
-        feature_maps = []
-        
-        def hook_fn(module, input, output):
-            feature_maps.append(output)
-        
-        # Register hooks for each conv layer in the encoder
-        hooks = []
-        for layer in model.encoder:
-            if isinstance(layer, nn.Conv2d):
-                hooks.append(layer.register_forward_hook(hook_fn))
-        
-        # Forward pass to get feature maps
-        model(img)
-        
-        # Remove the hooks
-        for hook in hooks:
-            hook.remove()
-    
-    # Visualize the feature maps from the first convolutional layer
-    if feature_maps:
-        first_layer_features = feature_maps[0][0].cpu().numpy()
-        
-        # Create a figure to display the feature maps
-        fig = plt.figure(figsize=(15, 10))
-        
-        # Plot the original image
-        plt.subplot(4, 5, 1)
-        plt.imshow(img[0, 0].cpu().numpy(), cmap='gray')
-        plt.title('Original Image')
-        plt.axis('off')
-        
-        # Plot the feature maps
-        num_features = min(16, first_layer_features.shape[0])
-        for i in range(num_features):
-            plt.subplot(4, 5, i + 2)
-            plt.imshow(first_layer_features[i], cmap='viridis')
-            plt.title(f'Feature {i+1}')
-            plt.axis('off')
-        
-        plt.tight_layout()
-        plt.show()
 
-# Function to explore the latent space
-def visualize_latent_space(model, test_loader, n_samples=1000):
-    from sklearn.manifold import TSNE
-    
+
+def visualize_latent_space(model, test_loader, n_samples=2000):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()
     
+    # Lists to store latent representations and corresponding labels
     latent_representations = []
     labels = []
     
+    # Process batches of test data
     with torch.no_grad():
         for data, label in test_loader:
-            img = data.to(device)
+            # Reshape and encode the data
+            img = data.view(data.size(0), -1).to(device)
+            z = model.encode(img).cpu().numpy()
             
-            # Get bottleneck representation
-            latent = model.get_latent(img)
-            
-            # Flatten if necessary (should already be flat from the bottleneck)
-            flattened = latent.reshape(latent.size(0), -1).cpu().numpy()
-            
-            latent_representations.append(flattened)
+            # Store the latent representations and labels
+            latent_representations.append(z)
             labels.append(label.numpy())
             
-            if len(latent_representations) * data.shape[0] >= n_samples:
+            # Break if we have enough samples
+            if len(np.concatenate(latent_representations)) >= n_samples:
                 break
     
-    # Rest of the function remains the same
+    # Concatenate the batches
     latent_representations = np.concatenate(latent_representations)[:n_samples]
     labels = np.concatenate(labels)[:n_samples]
-    print("Applying UMAP to visualize high-dimensional latent space...")
-    umap = UMAP(n_components=2, random_state=42)
-    latent_umap = umap.fit_transform(latent_representations)
     
+    # Perform UMAP dimensionality reduction to two dimensions
+    umap = UMAP(n_components=2)
+    reduced_latent_representations = umap.fit_transform(latent_representations)
+    
+    # Create a scatter plot of the reduced latent space
     plt.figure(figsize=(10, 8))
-    scatter = plt.scatter(latent_umap[:, 0], latent_umap[:, 1], 
-                         c=labels, cmap='viridis', alpha=0.5)
-    plt.colorbar(scatter, label='Digit')
-    plt.title('UMAP Visualization of Latent Space')
+    for i in range(10):  # Assuming 10 classes for digits 0-9
+        indices = labels == i
+        plt.scatter(reduced_latent_representations[indices, 0], reduced_latent_representations[indices, 1], 
+                    label=str(i), alpha=0.5)
+    plt.legend(title='Digit')
+    plt.title('Latent Space Visualization with UMAP')
     plt.xlabel('UMAP Dimension 1')
     plt.ylabel('UMAP Dimension 2')
     plt.grid(True)
     plt.tight_layout()
     plt.show()
-    
 
 # Main function to run the entire pipeline
 def main():
     # Hyperparameters
+    input_dim = 28 * 28  # MNIST image size
+    hidden_dim = 128
+    latent_dim = 32
     batch_size = 128
-    num_epochs = 15
+    num_epochs = 20
     learning_rate = 1e-3
     
     # Load data
@@ -336,7 +258,7 @@ def main():
     train_loader, test_loader = load_data(batch_size)
     
     # Initialize model
-    model = ConvAutoencoder()
+    model = Autoencoder(input_dim, hidden_dim, latent_dim)
     print(f"Model initialized with architecture:\nEncoder: {model.encoder}\nDecoder: {model.decoder}")
     
     # Train the model
@@ -356,18 +278,14 @@ def main():
     print("\nVisualizing reconstructions...")
     visualize_reconstructions(model, test_loader)
     
-    # Visualize feature maps
-    print("\nVisualizing feature maps...")
-    visualize_feature_maps(model, test_loader)
-    
     # Visualize latent space
-    print("\nVisualizing latent space using t-SNE...")
+    print("\nVisualizing latent space...")
     visualize_latent_space(model, test_loader)
     
     # Save the model
     print("\nSaving model...")
-    torch.save(model.state_dict(), 'conv_autoencoder_model.pth')
-    print("Model saved as 'conv_autoencoder_model.pth'")
+    torch.save(model.state_dict(), 'autoencoder_model.pth')
+    print("Model saved as 'autoencoder_model.pth'")
 
 if __name__ == "__main__":
     main()

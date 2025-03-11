@@ -7,6 +7,10 @@ import functools
 import time
 import stumpy
 import numpy as np
+import torch
+import os
+
+## TODO Implement a logger class
 
 def timer(func):
     @functools.wraps(func)
@@ -126,9 +130,12 @@ def parse_sql_table(sql_file, table_name):
     df = pd.DataFrame(values, columns=columns)
     return df
 
-def read_data():
+def read_data(data_folder):
     """
     Read all data from CSV files.
+
+    Args:
+        data_folder: path to data folder
 
     Returns:
         tuple: (user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df)
@@ -139,15 +146,20 @@ def read_data():
         gamestate_df: DataFrame with gamestate data
         psychometrics_df: DataFrame with psychometrics data
     """
-    user_df = pd.read_csv('data/user.csv')
-    ip_df = pd.read_csv('data/userip.csv')
-    redcap_df = pd.read_csv('data/redcapdata.csv')
-    game_df = pd.read_csv('data/game.csv', converters={'date_played': lambda x: pd.to_datetime(x)})
-    game_df = game_df[game_df['user_id'] != 42] # Remove user 42 (myself)
-    # game_df = game_df[game_df['user_id'] != 47]
-    gamestate_df = pd.read_csv('data/gamestate.csv', converters={'user_id': lambda x: int(x)})
-    gamestate_df = gamestate_df[~gamestate_df['game_id'].isin(game_df.loc[game_df['user_id'] == 42, 'game_id'])] # Remove games associated with userid 42 (myself)
-    psychometrics_df = pd.read_csv('data/psych/psych.csv')
+    ## Read tables from csv
+    BANNED_USERS = [42] # Myself
+
+    user_df = pd.read_csv(os.path.join(data_folder, 'user.csv'))
+    ip_df = pd.read_csv(os.path.join(data_folder, 'userip.csv'))
+    redcap_df = pd.read_csv(os.path.join(data_folder, 'redcapdata.csv'))
+    game_df = pd.read_csv(os.path.join(data_folder, 'game.csv'), converters={'date_played': lambda x: pd.to_datetime(x)})
+    game_df = game_df[~game_df['user_id'].isin(BANNED_USERS)]
+    gamestate_df = pd.read_csv(os.path.join(data_folder, 'gamestate.csv'), converters={'user_id': lambda x: int(x),
+                                                                                      'Pacman_X': lambda x: round(float(x), 2),
+                                                                                      'Pacman_Y': lambda x: round(float(x), 2)
+                                                                                      })
+    gamestate_df = gamestate_df[~gamestate_df['game_id'].isin(game_df.loc[game_df['user_id'].isin(BANNED_USERS), 'game_id'])] # Remove games associated with userid 42 (myself)
+    psychometrics_df = pd.read_csv(os.path.join(data_folder, 'psych\AiPerCogPacman_DATA_2025-03-03_0927.csv'))
 
     return user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df
 
@@ -190,7 +202,7 @@ def parse_unity_tilemap(file_content):
     
     return positions
 
-def load_maze_data(walls_file='grid/walls.unity', pellets_file= 'grid/pellets.unity'):
+def load_maze_data(walls_file='src/utils/grid/walls.unity', pellets_file= 'src/utils/grid/pellets.unity'):
     """
     Load wall and pellet positions from Unity tilemap files.
     
@@ -288,3 +300,108 @@ def pos_mirroring(df, return_quadrant=False):
                 mirrored_df.loc[i, 'quadrant'] = 4.0
 
     return mirrored_df
+
+def create_game_trajectory_tensor(processed_df, max_sequence_length=None):
+    """
+    Creates a tensor of shape (num_games, sequence_length, num_features)
+    where num_features = 4 (Pacman_X, Pacman_Y, score, powerPellets)
+    
+    Args:
+        processed_df: DataFrame containing all games' preprocessed data with game_id column
+        max_sequence_length: Optional, pad/truncate all sequences to this length
+        
+    Returns:
+        tensor: A tensor of shape (num_games, max_sequence_length, num_features)
+        mask: A mask tensor of shape (num_games, max_sequence_length) indicating valid timesteps
+        game_ids: A list of unique game IDs
+    """
+    # If max_sequence_length isn't provided, use the longest game
+    if max_sequence_length is None:
+        max_sequence_length = processed_df.groupby('game_id').size().max()
+    
+    game_ids = processed_df['game_id'].unique()
+    # Determine the number of features from the DataFrame
+    num_features = processed_df.shape[1] - 1  # Subtract 1 for the 'game_id' column
+    num_games = len(game_ids)
+    
+    # Initialize tensor with zeros
+    # Shape: (num_games, max_sequence_length, num_features)
+    tensor = torch.zeros((num_games, max_sequence_length, num_features))
+    
+    # Create mask to track actual sequence lengths
+    mask = torch.zeros((num_games, max_sequence_length), dtype=torch.bool)
+    
+    # Create dictionary to store game_id to index mapping
+    game_to_idx = {game_id: idx for idx, game_id in enumerate(game_ids)}
+    
+    for game_id in game_ids:
+        # Get game data excluding 'game_id' column
+        game_data = processed_df[processed_df['game_id'] == game_id].iloc[:, 1:].values
+        seq_len = min(len(game_data), max_sequence_length)
+        game_idx = game_to_idx[game_id]
+        
+        # Fill tensor and mask
+        tensor[game_idx, :seq_len, :] = torch.FloatTensor(game_data[:seq_len])
+        mask[game_idx, :seq_len] = 1
+    
+    return tensor, mask, game_ids
+
+
+# The resulting tensor will have:
+# - First dimension: different games
+# - Second dimension: timesteps in the game
+# - Third dimension: features (X, Y, score, powerPellets)
+
+def preprocess_game_data(df, series_type=['position'], include_game_state_vars= False, include_timesteps = True):
+    """
+    Preprocess gamestates' data before converting to tensor.
+    
+    Args:
+        df: DataFrame containing raw game data
+        series_type: List of series types to include in the preprocessing (e.g., ['position', 'movements', 'input'])
+        include_game_state_vars: Boolean indicating whether to include game state variables (score, powerPellets)
+        include_timesteps: Boolean indicating whether to include time elapsed in the features
+        
+    Returns:
+        processed_df: DataFrame containing preprocessed game data with selected features
+    """
+    
+    GAME_STATE_VARS = ['score', 'powerPellets'] if include_game_state_vars else []
+
+    features = ['game_id'] + GAME_STATE_VARS
+
+    if include_timesteps:
+        features.extend(['time_elapsed'])
+
+    if 'position' in series_type:
+        features.extend(['Pacman_X', 'Pacman_Y']) # No preprocessing here as it is done in the read_data() function
+        
+    
+    if 'movements' in series_type:
+        # Convert movement directions to dx, dy components
+        direction_mapping = {
+            'right': (1, 0),
+            'left': (-1, 0),
+            'up': (0, 1),
+            'down': (0, -1),
+            'none': (0, 0)
+        }
+        df['movement_dx'] = df['movement_direction'].map(lambda d: direction_mapping[d][0])
+        df['movement_dy'] = df['movement_direction'].map(lambda d: direction_mapping[d][1])
+        features.extend(['movement_dx', 'movement_dy'])
+    
+    if 'input' in series_type:
+        # Similarly for input directions
+        df['input_dx'] = df['input_direction'].map(lambda d: direction_mapping[d][0])
+        df['input_dy'] = df['input_direction'].map(lambda d: direction_mapping[d][1])
+        features.extend(['input_dx', 'input_dy'])
+    
+    processed_df = df[features].copy()
+    
+    # Convert to float
+    for col in processed_df.columns:
+        if col != 'game_id':  # Skip game_id conversion
+            processed_df[col] = processed_df[col].astype(float)
+    
+    return processed_df
+
