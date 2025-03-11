@@ -15,39 +15,130 @@ os.environ['KMP_DUPLICATE_LIB_OK']='TRUE'
 # Set random seed for reproducibility
 torch.manual_seed(42)
 
-# Define the Autoencoder architecture
-class Autoencoder(nn.Module):
-    def __init__(self, input_dim=784, hidden_dim=128, latent_dim=32):
-        super(Autoencoder, self).__init__()
+class TransformerAutoencoder(nn.Module):
+    def __init__(self, input_dim=784, hidden_dim=256, latent_dim=32, nhead=8, num_layers=3, dropout=0.1):
+        super(TransformerAutoencoder, self).__init__()
         
-        # Encoder
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, latent_dim),
-            nn.ReLU()
+        # MNIST specific: reshape 28x28 into 7x7 patches of size 4x4 (16 values per patch)
+        self.patch_size = 4
+        self.num_patches = 49  # 7x7 grid of patches
+        self.hidden_dim = hidden_dim
+        
+        # Learnable positional encoding
+        self.pos_embedding = nn.Parameter(torch.randn(1, self.num_patches, hidden_dim))
+        
+        # Patch embedding
+        self.patch_embedding = nn.Sequential(
+            nn.Linear(16, hidden_dim),  # 16 = 4x4 patch size
+            nn.LayerNorm(hidden_dim),
+            nn.GELU()
         )
         
-        # Decoder
-        self.decoder = nn.Sequential(
+        # Simplified encoder
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=nhead,
+            dim_feedforward=hidden_dim * 2,  # Reduced from 4x to 2x
+            dropout=dropout,
+            batch_first=True,
+            activation='gelu'
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        
+        # Simpler latent projection
+        self.latent_projection = nn.Sequential(
+            nn.Linear(hidden_dim, latent_dim),
+            nn.LayerNorm(latent_dim)
+        )
+        
+        # Simpler decoder
+        self.latent_to_hidden = nn.Sequential(
             nn.Linear(latent_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, input_dim),
-            nn.Sigmoid()  # Output values between 0 and 1 for image reconstruction
+            nn.LayerNorm(hidden_dim)
+        )
+        
+        decoder_layer = nn.TransformerDecoderLayer(
+            d_model=hidden_dim,
+            nhead=nhead,
+            dim_feedforward=hidden_dim * 2,
+            dropout=dropout,
+            batch_first=True,
+            activation='gelu'
+        )
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+        
+        # Simplified output projection
+        self.output_projection = nn.Sequential(
+            nn.Linear(hidden_dim, 16),  # Direct projection to patch size
+            nn.Sigmoid()
         )
     
+    def _to_patches(self, x):
+        # x shape: (batch_size, 784)
+        batch_size = x.size(0)
+        # Reshape to (batch_size, 28, 28)
+        x = x.view(batch_size, 28, 28)
+        # Extract 4x4 patches
+        patches = x.unfold(1, self.patch_size, self.patch_size).unfold(2, self.patch_size, self.patch_size)
+        # Reshape to (batch_size, 49, 16)
+        patches = patches.contiguous().view(batch_size, -1, self.patch_size * self.patch_size)
+        return patches
+    
+    def _from_patches(self, patches, batch_size):
+        # patches shape: (batch_size, 49, 16)
+        # Reshape to (batch_size, 7, 7, 4, 4)
+        x = patches.view(batch_size, 7, 7, 4, 4)
+        # Combine patches back to image
+        x = x.permute(0, 1, 3, 2, 4).contiguous()
+        x = x.view(batch_size, 28, 28)
+        # Flatten to (batch_size, 784)
+        return x.view(batch_size, -1)
+    
     def forward(self, x):
+        batch_size = x.size(0)
+        
+        # Convert input to patches
+        patches = self._to_patches(x)
+        
+        # Embed patches
+        x = self.patch_embedding(patches)
+        
+        # Add positional embeddings
+        x = x + self.pos_embedding
+        
         # Encode
-        z = self.encoder(x)
+        encoded = self.encoder(x)
+        
+        # Get latent representation from CLS token (first token)
+        z = encoded.mean(dim=1)  # Use mean pooling
+        z = self.latent_projection(z)
+        
         # Decode
-        reconstructed = self.decoder(z)
+        decoder_input = self.latent_to_hidden(z).unsqueeze(1).repeat(1, self.num_patches, 1)
+        decoded = self.decoder(decoder_input, encoded)
+        patches_out = self.output_projection(decoded)
+        
+        # Convert patches back to image
+        reconstructed = self._from_patches(patches_out, batch_size)
+        
         return reconstructed, z
     
     def encode(self, x):
-        return self.encoder(x)
+        batch_size = x.size(0)
+        x = x.view(batch_size, -1, 16)
+        x = self.input_projection(x)
+        x = x + self.pos_encoder
+        encoded = self.encoder(x)
+        z = encoded.mean(dim=1)
+        return self.latent_projection(z)
     
     def decode(self, z):
-        return self.decoder(z)
+        batch_size = z.size(0)
+        hidden = self.latent_to_hidden(z)
+        decoder_input = hidden.unsqueeze(1).repeat(1, 49, 1)  # 49 patches
+        decoded = self.decoder(decoder_input, decoder_input)
+        decoded = self.output_projection(decoded)
+        return decoded.reshape(batch_size, -1)
 
 
 
@@ -87,7 +178,7 @@ def load_data(batch_size=128):
     return train_loader, test_loader
 
 # Training function
-def train(model, train_loader, num_epochs=10, learning_rate=1e-3):
+def train(model, train_loader, num_epochs=10, learning_rate=1e-4):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     print(f"Training on {device}")
@@ -96,11 +187,11 @@ def train(model, train_loader, num_epochs=10, learning_rate=1e-3):
     mse_criterion = nn.MSELoss()
     l1_criterion = nn.L1Loss()
     
-    # Use Adam optimizer
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+    # Use AdamW with weight decay for better regularization
+    optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     
     # Add learning rate scheduler
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=2, verbose=True)
     
     # For tracking training progress
     loss_history = []
@@ -128,6 +219,10 @@ def train(model, train_loader, num_epochs=10, learning_rate=1e-3):
             # Backward pass and optimize
             optimizer.zero_grad()
             loss.backward()
+            
+            # Gradient clipping to prevent exploding gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
             
             running_loss += loss.item()
@@ -245,18 +340,18 @@ def visualize_latent_space(model, test_loader, n_samples=2000):
 def main():
     # Hyperparameters
     input_dim = 28 * 28  # MNIST image size
-    hidden_dim = 128
-    latent_dim = 32
+    hidden_dim = 256     # Reduced from 512
+    latent_dim = 32      # Reduced from 64
     batch_size = 128
-    num_epochs = 20
-    learning_rate = 1e-3
+    num_epochs = 2      # Increased from 2
+    learning_rate = 2e-4 # Adjusted learning rate
     
     # Load data
     print("Loading data...")
     train_loader, test_loader = load_data(batch_size)
     
     # Initialize model
-    model = Autoencoder(input_dim, hidden_dim, latent_dim)
+    model = TransformerAutoencoder(input_dim, hidden_dim, latent_dim)
     print(f"Model initialized with architecture:\nEncoder: {model.encoder}\nDecoder: {model.decoder}")
     
     # Train the model
