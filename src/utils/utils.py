@@ -130,12 +130,14 @@ def parse_sql_table(sql_file, table_name):
     df = pd.DataFrame(values, columns=columns)
     return df
 
-def read_data(data_folder):
+def read_data(data_folder, game_list=None, user_list=None):
     """
     Read all data from CSV files.
 
     Args:
         data_folder: path to data folder
+        game_list: list of game IDs to filter, default is None
+        user_list: list of user IDs to filter, default is None
 
     Returns:
         tuple: (user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df)
@@ -153,16 +155,28 @@ def read_data(data_folder):
     ip_df = pd.read_csv(os.path.join(data_folder, 'userip.csv'))
     redcap_df = pd.read_csv(os.path.join(data_folder, 'redcapdata.csv'))
     game_df = pd.read_csv(os.path.join(data_folder, 'game.csv'), converters={'date_played': lambda x: pd.to_datetime(x)})
-    game_df = game_df[~game_df['user_id'].isin(BANNED_USERS)]
+    banned_game_ids = game_df.loc[game_df['user_id'].isin(BANNED_USERS), 'game_id']
+    game_df = game_df[~game_df['game_id'].isin(banned_game_ids)]
+    
     gamestate_df = pd.read_csv(os.path.join(data_folder, 'gamestate.csv'), converters={'user_id': lambda x: int(x),
                                                                                       'Pacman_X': lambda x: round(float(x), 2),
                                                                                       'Pacman_Y': lambda x: round(float(x), 2)
                                                                                       })
-    gamestate_df = gamestate_df[~gamestate_df['game_id'].isin(game_df.loc[game_df['user_id'].isin(BANNED_USERS), 'game_id'])] # Remove games associated with userid 42 (myself)
+    gamestate_df = gamestate_df[~gamestate_df['game_id'].isin(banned_game_ids)]
     psychometrics_df = pd.read_csv(os.path.join(data_folder, 'psych\AiPerCogPacman_DATA_2025-03-03_0927.csv'))
 
-    return user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df
+    # Filter dataframes based on game_list and user_list if provided
+    if game_list is not None:
+        game_df = game_df[game_df['game_id'].isin(game_list)]
+        gamestate_df = gamestate_df[gamestate_df['game_id'].isin(game_list)]
 
+    if user_list is not None:
+        user_df = user_df[user_df['user_id'].isin(user_list)]
+        game_df = game_df[game_df['user_id'].isin(user_list)]
+        gamestate_df = gamestate_df[gamestate_df['user_id'].isin(user_list)]
+        
+
+    return user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df
 def parse_unity_tilemap(file_content):
     """
     Parse Unity tilemap file content to extract tile positions.
@@ -202,17 +216,21 @@ def parse_unity_tilemap(file_content):
     
     return positions
 
-def load_maze_data(walls_file='src/utils/grid/walls.unity', pellets_file= 'src/utils/grid/pellets.unity'):
+def load_maze_data():
     """
     Load wall and pellet positions from Unity tilemap files.
     
-    Args:
-        walls_file (str): Path to walls.unity file
-        pellets_file (str): Path to pellets.unity file
         
     Returns:
         tuple: (wall_positions, pellet_positions) where each is a list of (x,y) tuples
     """
+    # Get the directory where utils.py is located
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Construct paths relative to utils.py location
+    walls_file = os.path.join(current_dir, 'grid', 'walls.unity')
+    pellets_file = os.path.join(current_dir, 'grid', 'pellets.unity')
+
     with open(walls_file, 'r') as f:
         walls_content = f.read()
     with open(pellets_file, 'r') as f:
