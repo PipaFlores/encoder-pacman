@@ -1,21 +1,23 @@
-from utils import load_maze_data
+from src.utils.utils import load_maze_data
+from src.utils import Astar
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.widgets import TextBox
 from matplotlib.animation import FuncAnimation
-import argparse
-import Astar as Astar
+
 import logging
 # import os
 # os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
-class SessionVisualizer:
+class SessionReplayer:
     def __init__(self, data, game_id=None, playback_speed=1.0, stats_columns=None, verbose = False, pathfinding=True, pellets=True, show_grid=False):
         """
         Initialize the visualizer with data.
         
         Args:
-            data (DataFrame): Game state data with columns [time, Pacman_X, Pacman_Y, Ghost1_X, Ghost1_Y, ...].
+            data (DataFrame): Game state data with columns ['game_state_id','Pacman_X', 'Pacman_Y', 'Ghost1_X', 'Ghost1_Y',
+                              'Ghost2_X', 'Ghost2_Y', 'Ghost3_X', 'Ghost3_Y', 'Ghost4_X', 'Ghost4_Y',
+                              'game_id', 'time_elapsed', 'score', 'lives', 'level', 'movement_direction', 'input_direction'].
             game_id (int): Game ID to visualize. If None, the first game ID will be used.
             playback_speed (float): Initial speed multiplier for the playback.
             stats_columns (list): List of columns to use for the stats panel. If None, the default columns will be used.
@@ -275,28 +277,3 @@ class SessionVisualizer:
 
         plt.show()
 
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Visualize Pac-Man game states")
-    parser.add_argument('-g', '--game-id', type=int, default=None, help="Game ID to visualize")
-    parser.add_argument('--playback-speed', type=float, default=2.0, help="Playback speed multiplier")
-    parser.add_argument('--data-path', type=str, default='data/gamestate.csv', help="Path to the game state data")
-    parser.add_argument('--gamedata-path', type=str, default='data/game.csv', help="Path to the game data")
-    parser.add_argument('--no-pellets', action='store_false', dest='pellets', help="Disable pellets")
-    parser.add_argument('--no-pathfinding', action='store_false', dest='pathfinding', help="Disable A* path finding calculation")
-    parser.add_argument('--verbose', action='store_true', default=False, help="Print verbose logging")
-    parser.add_argument('--grid',action= 'store_true', default=False, help="Show grid")
-    parser.add_argument('--stats', type=str, default=None, help="Add stats columns to the stats panel")
-    args = parser.parse_args()
-    gamestate_df = pd.read_csv(args.data_path, converters={'user_id': lambda x: int(x)})
-    game_df = pd.read_csv(args.gamedata_path, converters={'user_id': lambda x: int(x)})
-    gamestate_df = pd.merge(gamestate_df, game_df, on='game_id', how='left')
-    visualizer = SessionVisualizer(gamestate_df, 
-                                   game_id=args.game_id, 
-                                   playback_speed=args.playback_speed, 
-                                   verbose=args.verbose, 
-                                   pellets=args.pellets, 
-                                   pathfinding=args.pathfinding, 
-                                   show_grid=args.grid,
-                                   stats_columns=args.stats.replace(" ", "").split(',') if args.stats else None)
-    visualizer.animate_session()
