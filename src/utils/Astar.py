@@ -1,5 +1,3 @@
-from utils import timer
-
 
 # TODO> Consider the tunnels
 def manhattan_distance(pos1, pos2):
