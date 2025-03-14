@@ -51,7 +51,7 @@ class BaseAutoencoder(pl.LightningModule):
         loss = self.masked_reconstruction_loss(x_hat, x, mask)
         
         # Log the loss
-        self.log('train_loss', loss)
+        self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -59,7 +59,7 @@ class BaseAutoencoder(pl.LightningModule):
         mask = batch['mask']
         x_hat, z = self(x)
         val_loss = self.masked_reconstruction_loss(x_hat, x, mask)
-        self.log('val_loss', val_loss)
+        self.log('val_loss', val_loss, prog_bar=True, on_step=True, on_epoch=True)
         return val_loss
 
     def configure_optimizers(self):
