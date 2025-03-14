@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import pytorch_lightning as pl
 from typing import Dict, Tuple, Any, Optional
-from base import BaseAutoencoder
+from src.models.base import BaseAutoencoder
 
 class LSTMencoder(nn.Module):
     ## Encoder module
@@ -23,15 +23,19 @@ class LSTMdecoder(nn.Module):
         super().__init__()
         self.sequence_length = sequence_length
         self.lstm = nn.LSTM(input_size=latent_dim,
-                            output_dim= output_dim,
-                            batch_first=True)
+                           hidden_size=latent_dim,  # Use same size as latent dimension
+                           batch_first=True)
+        # Add a linear layer to map from latent_dim to output_dim
+        self.output_layer = nn.Linear(latent_dim, output_dim)
         
     def forward(self, z):
         # Repeat latent vector for each timestep
         z_repeated = z.unsqueeze(1).repeat(1, self.sequence_length, 1)
-        output, _ = self.lstm(z_repeated)
+        # Pass through LSTM
+        hidden_states, _ = self.lstm(z_repeated)
+        # Map to output dimension
+        output = self.output_layer(hidden_states)
         return output
-
 
 
 class LSTMAutoencoder(BaseAutoencoder):
