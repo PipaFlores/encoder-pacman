@@ -1,3 +1,4 @@
+from typing import Tuple
 import pandas as pd
 import re
 import matplotlib.pyplot as plt
@@ -322,7 +323,7 @@ def pos_mirroring(df, return_quadrant=False):
 def create_game_trajectory_tensor(processed_df, max_sequence_length=None):
     """
     Creates a tensor of shape (num_games, sequence_length, num_features)
-    where num_features = 4 (Pacman_X, Pacman_Y, score, powerPellets)
+    where num_features = 4 (Pacman_X, Pacman_Y, score, powerPellets) for autoencoder training.
     
     Args:
         processed_df: DataFrame containing all games' preprocessed data with game_id column
@@ -372,7 +373,7 @@ def create_game_trajectory_tensor(processed_df, max_sequence_length=None):
 
 def preprocess_game_data(df, series_type=['position'], include_game_state_vars= False, include_timesteps = True):
     """
-    Preprocess gamestates' data before converting to tensor.
+    Preprocess gamestates' data before converting to tensor for Autoencoder training.
     
     Args:
         df: DataFrame containing raw game data
@@ -423,3 +424,27 @@ def preprocess_game_data(df, series_type=['position'], include_game_state_vars= 
     
     return processed_df
 
+
+def calculate_velocities(x: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Calculate velocities from position data, it rounds and removes signed zeros to avoid noise issues.
+    
+    Args:
+        x: Array of x-coordinates
+        y: Array of y-coordinates
+        
+    Returns:
+        dx: Array of x-velocities
+        dy: Array of y-velocities
+    """
+    # Calculate velocities
+    dx = np.round(np.diff(x, prepend=x[0]) * 2) / 2 # round to 0.5 to remove small noise in direction changes
+    dy = np.round(np.diff(y, prepend=y[0]) * 2) / 2
+
+    dx = pd.Series(dx).replace(0, 0).values # remove signed zeros using .loc
+    dy = pd.Series(dy).replace(0, 0).values
+
+    dx = np.nan_to_num(dx, nan=0)
+    dy = np.nan_to_num(dy, nan=0)
+
+    return dx, dy
