@@ -15,7 +15,7 @@ if __name__ == "__main__":
     parser.add_argument('--no-pathfinding', action='store_false', dest='pathfinding', help="Disable A* path finding calculation")
     parser.add_argument('--verbose', action='store_true', default=False, help="Print verbose logging")
     parser.add_argument('--grid',action= 'store_true', default=False, help="Show grid")
-    parser.add_argument('--stats', type=str, default=None, help="Add stats columns to the stats panel")
+    # parser.add_argument('--stats', type=str, default=None, help="Add stats columns to the stats panel")
     args = parser.parse_args()
     gamestate_df = pd.read_csv(args.data_path, converters={'user_id': lambda x: int(x)})
     game_df = pd.read_csv(args.gamedata_path, converters={'user_id': lambda x: int(x)})
@@ -26,6 +26,6 @@ if __name__ == "__main__":
                                    verbose=args.verbose, 
                                    pellets=args.pellets, 
                                    pathfinding=args.pathfinding, 
-                                   show_grid=args.grid,
-                                   stats_columns=args.stats.replace(" ", "").split(',') if args.stats else None)
+                                #    stats_columns=args.stats.replace(" ", "").split(',') if args.stats else None,
+                                   show_grid=args.grid)
     visualizer.animate_session()

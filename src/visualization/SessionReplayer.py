@@ -2,7 +2,7 @@ from src.utils.utils import load_maze_data
 from src.utils import Astar
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.widgets import TextBox
+from matplotlib.widgets import TextBox, Slider
 from matplotlib.animation import FuncAnimation
 
 import logging
@@ -10,7 +10,7 @@ import logging
 # os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
 class SessionReplayer:
-    def __init__(self, data, game_id=None, playback_speed=1.0, stats_columns=None, verbose = False, pathfinding=True, pellets=True, show_grid=False):
+    def __init__(self, data, game_id=None, playback_speed=1.0, verbose = False, pathfinding=True, pellets=True, show_grid=False):
         """
         Initialize the visualizer with data.
         
@@ -28,11 +28,34 @@ class SessionReplayer:
         """
         self.full_data = data
         self.game_id = game_id
-        self.animation_columns = ['game_state_id','Pacman_X', 'Pacman_Y', 'Ghost1_X', 'Ghost1_Y',
-                              'Ghost2_X', 'Ghost2_Y', 'Ghost3_X', 'Ghost3_Y', 'Ghost4_X', 'Ghost4_Y']
-        self.stats_columns = ['game_id', 'time_elapsed', 'score', 'lives', 'level', 'movement_direction', 'input_direction']
-        self.stats_columns += stats_columns if stats_columns else []
-        self.columns = self.animation_columns + self.stats_columns
+
+        # Logging
+        self.logger = logging.getLogger('SessionVisualizer')
+        logging.basicConfig(level=logging.DEBUG if verbose else logging.WARNING)
+
+        if all(col in data.columns for col in ['Pacman_X', 'Pacman_Y']):
+            self.columns = ['Pacman_X', 'Pacman_Y']
+        else:
+            raise ValueError("Pacman_X and Pacman_Y columns must be in data")
+
+        self.game_state_id_column = ['game_state_id'] if 'game_state_id' in data.columns else []
+        self.logger.debug(f'Game state id column, {self.game_state_id_column}')
+        self.columns.extend(self.game_state_id_column)
+
+        self.ghosts_columns = ['Ghost1_X', 'Ghost1_Y', 'Ghost2_X', 'Ghost2_Y', 'Ghost3_X',
+                             'Ghost3_Y', 'Ghost4_X', 'Ghost4_Y'] if 'Ghost1_X' in data.columns else []
+        self.columns.extend(self.ghosts_columns)
+        self.logger.debug(f'Ghosts columns, {self.ghosts_columns}')
+
+        self.stats_columns = [col for col in ['game_id', 'time_elapsed', 'score', 'lives', 'level', 'movement_direction', 'input_direction']
+                               if all(col in data.columns for col in ['game_id', 'time_elapsed', 'score', 'lives', 'level', 'movement_direction', 'input_direction'])]
+        self.columns = self.columns + self.stats_columns
+        self.logger.debug(f'Stats columns, {self.stats_columns}')
+        self.logger.debug(f'Columns, {self.columns}')
+
+
+
+
 
         # Animation
         self.playback_speed = playback_speed
@@ -51,9 +74,7 @@ class SessionReplayer:
         # Astar paths
         self.pathfinding = pathfinding
 
-        # Logging
-        self.logger = logging.getLogger('SessionVisualizer')
-        logging.basicConfig(level=logging.DEBUG if verbose else logging.WARNING)
+
 
 
 
@@ -68,6 +89,13 @@ class SessionReplayer:
         """
         Creates an interactive animation window with controls.
         """
+        # Start with the game_id provided by the user, else start with the first game
+        if self.game_id:
+            self.data = self.full_data[self.columns].loc[self.full_data['game_id'] == self.game_id]
+        else:
+            self.data = self.full_data[self.columns]
+
+
         # Create the main figure and grid layout
         fig = plt.figure(figsize=(9, 6))
         gs = fig.add_gridspec(2, 2,width_ratios=[3, 1], height_ratios=[10, 1], hspace=0.1)
@@ -112,26 +140,35 @@ class SessionReplayer:
 
         pacman_dot, = ax_game.plot([], [], 'o', color='yellow', label='Pac-Man')
 
-        ghost_colors = ['red', 'pink', 'cyan', 'orange']
-        ghost_dots = [ax_game.plot([], [], 'o', color=ghost_colors[i], label=f'Ghost {i+1}')[0] for i in range(4)]
+        if self.ghosts_columns:
+            ghost_colors = ['red', 'pink', 'cyan', 'orange']
+            ghost_dots = [ax_game.plot([], [], 'o', color=ghost_colors[i], label=f'Ghost {i+1}')[0] for i in range(4)]
 
-        path_lines = [ax_game.plot([], [], 'o', color=ghost_colors[i], alpha=0.5, markersize=2)[0] for i in range(len(ghost_dots))]
+            path_lines = [ax_game.plot([], [], 'o', color=ghost_colors[i], alpha=0.5, markersize=2)[0] for i in range(len(ghost_dots))]
+        else:
+            ghost_dots = []
+            path_lines = []
+
         # Add game ID text label
 
         # Stats panel
         stats_text_objects = []
-
-        for i, column in enumerate(self.stats_columns):
-            stats_text_objects.append(ax_stats.text(0.1, 0.9 - i * 0.1, '', 
-                                    color='white', fontsize=10))
-        
+        if self.stats_columns:
+            for i, column in enumerate(self.stats_columns):
+                stats_text_objects.append(ax_stats.text(0.1, 0.9 - i * 0.1, '', 
+                                        color='white', fontsize=10))
+        else:
+            stats_text_objects = []
 
         
         # Game Selector
-        game_ids = sorted(self.full_data['game_id'].unique())
-        game_selector_ax = plt.axes([0.2, 0.1, 0.2, 0.03])  # Adjust size for text box
-        game_selector = TextBox(game_selector_ax, 'Game ID: ', 
-                              initial=str(self.game_id if self.game_id else game_ids[0]))  # Start with first game ID if none is provided
+        if 'game_id' in self.full_data.columns:
+            game_ids = sorted(self.full_data['game_id'].unique())
+            game_selector_ax = plt.axes([0.2, 0.05, 0.2, 0.03])  # Move down
+            game_selector = TextBox(game_selector_ax, 'Game ID: ', 
+                                initial=str(self.game_id if self.game_id else game_ids[0]))  # Start with first game ID if none is provided
+        else:
+            game_selector = None
         
         # Add play/pause and restart buttons
         play_button_ax = plt.axes([0.5, 0.1, 0.1, 0.04])
@@ -165,10 +202,15 @@ class SessionReplayer:
                 row = self.data.iloc[frame]
                 pacman_x, pacman_y = row['Pacman_X'], row['Pacman_Y']
                 pacman_dot.set_data([pacman_x], [pacman_y])
-                ghost_positions = [(row[f'Ghost{i+1}_X'], row[f'Ghost{i+1}_Y']) for i in range(4)]
 
-                if self.pathfinding:
-                    self.logger.debug(f'Calculating paths for gamestate {row["game_state_id"]} at frame {frame}')
+                if self.ghosts_columns:
+                    ghost_positions = [(row[f'Ghost{i+1}_X'], row[f'Ghost{i+1}_Y']) for i in range(4)]
+
+                if self.pathfinding and self.ghosts_columns:
+                    if 'game_state_id' in self.data.columns:
+                        self.logger.debug(f'Calculating paths for gamestate {row["game_state_id"]} at frame {frame}')
+                    else:
+                        self.logger.debug(f'Calculating paths for row index {frame}')
                     self.logger.debug(f'Pacman position: {pacman_x}, {pacman_y}')
                     self.logger.debug(f'Ghost positions: {ghost_positions}')
                     results = Astar.calculate_ghost_paths_and_distances((pacman_x, pacman_y), ghost_positions, self.wall_grid)
@@ -194,29 +236,34 @@ class SessionReplayer:
                             pellet.set_visible(False)
                             self.eaten_pellets.add((x, y))
                 
-                for i, ghost_dot in enumerate(ghost_dots):
-                    ghost_dot.set_data([row[f'Ghost{i+1}_X']], [row[f'Ghost{i+1}_Y']])
+                if self.ghosts_columns:
+                    for i, ghost_dot in enumerate(ghost_dots):
+                        ghost_dot.set_data([row[f'Ghost{i+1}_X']], [row[f'Ghost{i+1}_Y']])
 
-                current_game_id = row['game_id']
-                stats_text_objects[0].set_text(f'Game ID: {int(current_game_id)}')
+                if self.stats_columns:
+                    current_game_id = row['game_id']
+                    stats_text_objects[0].set_text(f'Game ID: {int(current_game_id)}')
 
-                time_elapsed = row['time_elapsed']
-                stats_text_objects[1].set_text(f'Time Elapsed: {time_elapsed:.2f}')
+                    time_elapsed = row['time_elapsed']
+                    stats_text_objects[1].set_text(f'Time Elapsed: {time_elapsed:.2f}')
 
-                stats_text_objects[2].set_text(f'Score: {int(row["score"])}')
-                stats_text_objects[3].set_text(f'Lives: {int(row["lives"])}')
+                    stats_text_objects[2].set_text(f'Score: {int(row["score"])}')
+                    stats_text_objects[3].set_text(f'Lives: {int(row["lives"])}')
 
-                stats_text_objects[4].set_text(f'Level: {int(row["level"])}')
+                    stats_text_objects[4].set_text(f'Level: {int(row["level"])}')
 
-                for i, column in enumerate(self.stats_columns[5:]):
-                    stats_text_objects[i+5].set_text(f'{column}: {row[column]}')
+                    for i, column in enumerate(self.stats_columns[5:]):
+                        stats_text_objects[i+5].set_text(f'{column}: {row[column]}')
 
                 if frame == len(self.data) - 2:
+                    self.logger.debug(f'Final frame {frame}')
                     self.anim.event_source.stop()
                     self.finalized = True
                     self.is_playing = False
                 # Return all artists that need to be redrawn
+                self.logger.debug(f'Returning artists, Pacman dot : {pacman_dot}')
                 artists = [pacman_dot, *ghost_dots, *stats_text_objects, *path_lines,*[p[0] for p in self.pellet_objects]]
+
                 for path_line in path_lines:
                     if path_line is not None:
                         artists.append(path_line)
@@ -265,13 +312,19 @@ class SessionReplayer:
         
         
         # Connect callbacks
-        game_selector.on_submit(on_game_select)
+        if game_selector:
+            game_selector.on_submit(on_game_select)
         play_button.on_clicked(on_play_pause)
         restart_button.on_clicked(on_restart)
         
-        # Start with the game_id provided by the user, else start with the first game
-        self.data = self.full_data[self.columns].loc[self.full_data['game_id'] == (self.game_id if self.game_id else game_ids[0])]
-        interval = (self.data['time_elapsed'].diff().mean() / self.playback_speed) * 1000
+
+        
+
+        # Calculate the interval based on the time elapsed between frames
+        if 'time_elapsed' in self.data.columns:
+            interval = (self.data['time_elapsed'].diff().mean() / self.playback_speed) * 1000
+        else:
+            interval = (50 / self.playback_speed) # Assume 50 milliseconds between rows if time_elapsed is not in the data
         self.anim = FuncAnimation(fig, update, frames=len(self.data), init_func=init,
                                 interval=interval, blit=True, repeat=False)
 
