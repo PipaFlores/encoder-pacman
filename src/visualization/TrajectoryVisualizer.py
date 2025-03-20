@@ -4,8 +4,11 @@ import seaborn as sns
 from typing import Optional, List, Tuple
 import pandas as pd
 import torch
-from src.utils.utils import load_maze_data, read_data, calculate_velocities
-from src.analysis.analysis_grids import create_vector_grid
+import src.analysis as analysis
+import src.utils as utils
+
+
+
 
 import logging
 
@@ -22,7 +25,7 @@ class TrajectoryVisualizer:
         logging.basicConfig(level=logging.DEBUG if verbose else logging.WARNING)
         self.data_folder = data_folder
         # Load maze layout data
-        self.wall_positions, self.pellet_positions = load_maze_data()
+        self.wall_positions, self.pellet_positions = utils.load_maze_data()
         
         # Define maze boundaries based on your game data
         self.MAZE_X_MIN, self.MAZE_X_MAX = -14, 14  # Adjust these based on your game coordinates
@@ -53,7 +56,7 @@ class TrajectoryVisualizer:
         # Load game data
 
         if (self.data_folder is not None) and (game_id is not None):
-            _, _, _, _, game_data, _ = read_data(self.data_folder, game_list=[game_id])
+            _, _, _, _, game_data, _ = utils.read_data(self.data_folder, game_list=[game_id])
 
         elif isinstance(trajectory, torch.Tensor):
             game_data = trajectory.cpu().numpy()
@@ -131,7 +134,7 @@ class TrajectoryVisualizer:
         """
 
         if self.data_folder is not None and game_ids is not None:
-            _, _, _, _, game_data, _ = read_data(self.data_folder, game_list=game_ids)
+            _, _, _, _, game_data, _ = utils.read_data(self.data_folder, game_list=game_ids)
 
         elif isinstance(trajectories, torch.Tensor):
             game_data = trajectories.cpu().numpy()
@@ -234,7 +237,7 @@ class TrajectoryVisualizer:
         """
         # Load game data (similar to heatmap)
         if self.data_folder is not None and game_id is not None:
-            _, _, _, _, game_data, _ = read_data(self.data_folder, game_list=[game_id])
+            _, _, _, _, game_data, _ = utils.read_data(self.data_folder, game_list=[game_id])
         elif isinstance(trajectory, torch.Tensor):
             game_data = trajectory.cpu().numpy()
             game_data = pd.DataFrame(game_data, columns=['Pacman_X', 'Pacman_Y'])
@@ -250,11 +253,13 @@ class TrajectoryVisualizer:
         x = game_data['Pacman_X'].values
         y = game_data['Pacman_Y'].values
 
-        # Get movement direction
-        dx, dy = calculate_velocities(x, y)
+        # Calculate instantaneous velocities 
+        dx, dy = utils.calculate_velocities(x, y)
+
         
         # Create vector grid
-        _, _, idx_grid = create_vector_grid(x, y)
+        analyzer = analysis.GridAnalyzer()
+        _, idx_grid = analyzer.calculate_recurrence_grid(x, y, calculate_velocities=False)
         
         # Calculate offsets based on movement direction
         x_grid = np.linspace(self.MAZE_X_MIN + 1, self.MAZE_X_MAX - 1, self.GRID_SIZE_X - 2)
@@ -267,16 +272,15 @@ class TrajectoryVisualizer:
         for i in range(len(x)):
             x_idx = np.argmin(np.abs(x_grid - x[i]))
             y_idx = np.argmin(np.abs(y_grid - y[i]))
+            dx_i, dy_i = dx[i], dy[i]
             
             # Apply perpendicular offset based on movement direction
             if len(idx_grid[y_idx, x_idx]) > 0:
                 traj_n = sum(i >= idx for idx in idx_grid[y_idx, x_idx])
-                if abs(dx[i]) > abs(dy[i]):  # Mainly horizontal movement
+                if abs(dx_i) > abs(dy_i):  # Mainly horizontal movement
                     y_offset[i] = offset_scale * (traj_n - 1)
-                    # y_offset[i] = offset_scale * np.sign(dx[i]) * (traj_n - 1)
-                elif abs(dx[i]) < abs(dy[i]):  # Mainly vertical movement
+                elif abs(dx_i) < abs(dy_i):  # Mainly vertical movement
                     x_offset[i] = offset_scale * (traj_n - 1)
-                    # x_offset[i] = offset_scale * np.sign(dy[i]) * (traj_n - 1)
 
 
         # Apply offsets
