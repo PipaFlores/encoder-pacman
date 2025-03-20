@@ -1,12 +1,8 @@
 from typing import Tuple
 import pandas as pd
-import re
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
-from matplotlib.widgets import Slider, Button, TextBox
 import functools
 import time
-import stumpy
 import numpy as np
 import torch
 import os
@@ -24,112 +20,6 @@ def timer(func):
         return value
     return wrapper_timer
 
-def parse_game_table(sql_file):
-    columns = ['game_id', 'user_id', 'session_number', 'game_in_session', 
-               'total_games_played', 'source', 'date_played', 'game_duration', 
-               'win', 'level']
-    
-    values = []
-    with open(sql_file, 'r') as file:
-        for line in file:
-            # Look for lines containing value tuples
-            if line.strip().startswith('('):
-                # Remove parentheses, comma, and semicolon
-                row = line.strip().strip('(),;')
-                # Split the values and handle different data types
-                row_values = []
-                for val in row.split(','):
-                    val = val.strip()
-                    # Remove any trailing semicolon
-                    val = val.rstrip(');')
-                    if val.startswith("'"):  # String value
-                        row_values.append(val.strip("'"))
-                    else:  # Numeric value
-                        try:
-                            row_values.append(float(val) if '.' in val else int(val))
-                        except ValueError:
-                            continue  # Skip invalid rows
-                
-                # Only add rows that have the correct number of columns
-                if len(row_values) == len(columns):
-                    values.append(row_values)
-    
-    # Create DataFrame
-    df = pd.DataFrame(values, columns=columns)
-    return df
-
-
-def parse_sql_table(sql_file, table_name):
-    """
-    Parse a specific table from a SQL dump file.
-    """
-    # First, extract column names from INSERT statement
-    columns = []
-    values = []
-    with open(sql_file, 'r') as file:
-        for line in file:
-            if f'INSERT INTO `{table_name}`' in line:
-                # Extract column names from the INSERT statement
-                columns_start = line.index('(') + 1
-                columns_end = line.index(')', columns_start)
-                columns_str = line[columns_start:columns_end]
-                columns = [col.strip('` ') for col in columns_str.split(',')]
-                continue
-            
-            # Look for lines containing value tuples
-            if line.strip().startswith('('):
-                # Remove parentheses and trailing comma/semicolon
-                row = line.strip()
-                if row.endswith('),'):
-                    row = row[:-2]
-                elif row.endswith(');'):
-                    row = row[:-2]
-                else:
-                    row = row.strip('()')
-                
-                # Split into values
-                row_values = []
-                current_value = ''
-                in_quotes = False
-                
-                for char in row:
-                    if char == ',' and not in_quotes:
-                        val = current_value.strip()
-                        row_values.append(val)
-                        current_value = ''
-                    elif char == "'":
-                        in_quotes = not in_quotes
-                        current_value += char
-                    else:
-                        current_value += char
-                
-                # Add the last value
-                if current_value:
-                    row_values.append(current_value.strip())
-                
-                # Convert values to appropriate types
-                processed_values = []
-                for val in row_values:
-                    val = val.strip()
-                    if val.startswith("'") and val.endswith("'"):
-                        processed_values.append(val.strip("'"))
-                    elif val.startswith('0x'):
-                        processed_values.append(val)
-                    else:
-                        try:
-                            if '.' in val:
-                                processed_values.append(float(val))
-                            else:
-                                processed_values.append(int(val))
-                        except ValueError:
-                            processed_values.append(val)
-                
-                if len(processed_values) == len(columns):
-                    values.append(processed_values)
-    
-    # Create DataFrame
-    df = pd.DataFrame(values, columns=columns)
-    return df
 
 def read_data(data_folder, game_list=None, user_list=None):
     """
@@ -178,7 +68,34 @@ def read_data(data_folder, game_list=None, user_list=None):
         
 
     return user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df
-def parse_unity_tilemap(file_content):
+
+
+def load_maze_data():
+    """
+    Load wall and pellet positions from Unity tilemap files and return them as a tuple of two lists.
+    
+        
+    Returns:
+        tuple: (wall_positions, pellet_positions) where each is a list of (x,y) tuples
+    """
+    # Get the directory where utils.py is located
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Construct paths relative to utils.py location
+    walls_file = os.path.join(current_dir, 'grid', 'walls.unity')
+    pellets_file = os.path.join(current_dir, 'grid', 'pellets.unity')
+
+    with open(walls_file, 'r') as f:
+        walls_content = f.read()
+    with open(pellets_file, 'r') as f:
+        pellets_content = f.read()
+        
+    wall_positions = parse_unity_tilemap_(walls_content)
+    pellet_positions = parse_unity_tilemap_(pellets_content)
+    
+    return wall_positions, pellet_positions
+
+def parse_unity_tilemap_(file_content):
     """
     Parse Unity tilemap file content to extract tile positions.
     
@@ -217,32 +134,6 @@ def parse_unity_tilemap(file_content):
     
     return positions
 
-def load_maze_data():
-    """
-    Load wall and pellet positions from Unity tilemap files.
-    
-        
-    Returns:
-        tuple: (wall_positions, pellet_positions) where each is a list of (x,y) tuples
-    """
-    # Get the directory where utils.py is located
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Construct paths relative to utils.py location
-    walls_file = os.path.join(current_dir, 'grid', 'walls.unity')
-    pellets_file = os.path.join(current_dir, 'grid', 'pellets.unity')
-
-    with open(walls_file, 'r') as f:
-        walls_content = f.read()
-    with open(pellets_file, 'r') as f:
-        pellets_content = f.read()
-        
-    wall_positions = parse_unity_tilemap(walls_content)
-    pellet_positions = parse_unity_tilemap(pellets_content)
-    
-    return wall_positions, pellet_positions
-
-
 def plot_ts(ts, title):
     fig, axs = plt.subplots(ts.shape[1], sharex=True, gridspec_kw={'hspace': 0})
     plt.suptitle(title, fontsize='30')
@@ -253,39 +144,6 @@ def plot_ts(ts, title):
         axs[i].plot(ts.iloc[:,i])
         
     plt.show()
-
-def find_motif(ts, m, plot=True):
-    """
-    Find motifs and plot themin a time series.
-    
-    Args:
-        ts (pd.DataFrame): Time series data
-        m (int): Window size for motif detection
-        plot (bool): Whether to plot the motifs
-        
-    Returns:
-        tuple: (mps, motifs_idx) where mps is a dictionary of matrix profiles and motifs_idx is a dictionary of motif index locations
-    """
-    mps = {}  # Store the 1-dimensional matrix profiles
-    motifs_idx = {}  # Store the index locations for each pair of 1-dimensional motifs (i.e., the index location of two smallest matrix profile values within each dimension)
-    for dim_name in ts.columns:
-        mps[dim_name] = stumpy.stump(ts[dim_name], m)
-        motif_distance = np.round(mps[dim_name][:, 0].astype(float).min(), 1)
-        print(f"The motif pair matrix profile value in {dim_name} is {motif_distance}")
-        motifs_idx[dim_name] = np.argsort(mps[dim_name][:, 0])[:2]
-
-    if plot:
-        fig, axs = plt.subplots(len(mps), sharex=True, gridspec_kw={'hspace': 0})
-        for i, dim_name in enumerate(list(mps.keys())):
-            axs[i].set_ylabel(dim_name, fontsize='8')
-            axs[i].plot(ts[dim_name])
-            axs[i].set_xlabel('Step', fontsize ='20')
-            for idx in motifs_idx[dim_name]:
-                axs[i].plot(ts[dim_name].iloc[idx:idx+m], c='red', linewidth=4)
-                axs[i].axvline(x=idx, linestyle="dashed", c='black')
-            
-        plt.show()
-    return mps, motifs_idx
 
 
 def pos_mirroring(df, return_quadrant=False):
@@ -363,20 +221,20 @@ def create_game_trajectory_tensor(processed_df, max_sequence_length=None):
         tensor[game_idx, :seq_len, :] = torch.FloatTensor(game_data[:seq_len])
         mask[game_idx, :seq_len] = 1
     
+    # The resulting tensor will have:
+    # - First dimension: different games
+    # - Second dimension: timesteps in the game
+    # - Third dimension: features (X, Y, score, powerPellets)
+
     return tensor, mask, game_ids
 
 
-# The resulting tensor will have:
-# - First dimension: different games
-# - Second dimension: timesteps in the game
-# - Third dimension: features (X, Y, score, powerPellets)
-
-def preprocess_game_data(df, series_type=['position'], include_game_state_vars= False, include_timesteps = True):
+def preprocess_game_data(gamestate_df, series_type=['position'], include_game_state_vars= False, include_timesteps = True):
     """
     Preprocess gamestates' data before converting to tensor for Autoencoder training.
     
     Args:
-        df: DataFrame containing raw game data
+        gamestate_df: DataFrame containing raw game data
         series_type: List of series types to include in the preprocessing (e.g., ['position', 'movements', 'input'])
         include_game_state_vars: Boolean indicating whether to include game state variables (score, powerPellets)
         include_timesteps: Boolean indicating whether to include time elapsed in the features
@@ -405,17 +263,17 @@ def preprocess_game_data(df, series_type=['position'], include_game_state_vars= 
             'down': (0, -1),
             'none': (0, 0)
         }
-        df['movement_dx'] = df['movement_direction'].map(lambda d: direction_mapping[d][0])
-        df['movement_dy'] = df['movement_direction'].map(lambda d: direction_mapping[d][1])
+        gamestate_df['movement_dx'] = gamestate_df['movement_direction'].map(lambda d: direction_mapping[d][0])
+        gamestate_df['movement_dy'] = gamestate_df['movement_direction'].map(lambda d: direction_mapping[d][1])
         features.extend(['movement_dx', 'movement_dy'])
     
     if 'input' in series_type:
         # Similarly for input directions
-        df['input_dx'] = df['input_direction'].map(lambda d: direction_mapping[d][0])
-        df['input_dy'] = df['input_direction'].map(lambda d: direction_mapping[d][1])
+        gamestate_df['input_dx'] = gamestate_df['input_direction'].map(lambda d: direction_mapping[d][0])
+        gamestate_df['input_dy'] = gamestate_df['input_direction'].map(lambda d: direction_mapping[d][1])
         features.extend(['input_dx', 'input_dy'])
     
-    processed_df = df[features].copy()
+    processed_df = gamestate_df[features].copy()
     
     # Convert to float
     for col in processed_df.columns:
