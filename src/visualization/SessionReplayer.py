@@ -321,7 +321,7 @@ class SessionReplayer:
         
 
         # Calculate the interval based on the time elapsed between frames
-        if 'time_elapsed' in self.data.columns:
+        if 'time_elapsed' in self.data.columns and not self.data['time_elapsed'].isnull().all():
             interval = (self.data['time_elapsed'].diff().mean() / self.playback_speed) * 1000
         else:
             interval = (50 / self.playback_speed) # Assume 50 milliseconds between rows if time_elapsed is not in the data
