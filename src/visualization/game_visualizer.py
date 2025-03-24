@@ -8,7 +8,7 @@ import src.analysis as analysis
 import src.utils as utils
 import logging
 from src.visualization.base_visualizer import BaseVisualizer
-from src.utils import DataReader
+from src.utils import PacmanDataReader
 
 
 
@@ -29,7 +29,7 @@ class GameVisualizer(BaseVisualizer):
 
         self.analyzer = analysis.GridAnalyzer()
 
-        self.datareader = DataReader(data_folder=data_folder, read_games_only=True, verbose=verbose)
+        self.datareader = PacmanDataReader(data_folder=data_folder, read_games_only=True, verbose=verbose)
         
 
     def game_heatmap(self, 

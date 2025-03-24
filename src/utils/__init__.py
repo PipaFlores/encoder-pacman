@@ -1,14 +1,11 @@
 from .utils import *
 from .Astar import *
-from .data_reader import DataReader
+from .pacman_data_reader import PacmanDataReader
 
-__all__ = ["preprocess_game_data", 
-           "create_game_trajectory_tensor", 
-           "read_data", 
-           "calculate_velocities",
+__all__ = ["calculate_velocities",
            "pos_mirroring",
            "timer",
            "load_maze_data",
            "Astar",
-           "DataReader"]
+           "PacmanDataReader"]
 
