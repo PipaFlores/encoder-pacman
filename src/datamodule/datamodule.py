@@ -7,17 +7,19 @@ from typing import Optional, List
 import sys
 import os
 sys.path.append('..')
-from src.utils.utils import preprocess_game_data, create_game_trajectory_tensor
+from src.utils import PacmanDataReader
 
 class TrajectoryDataset(Dataset):
-    def __init__(self, trajectories: torch.Tensor, masks: torch.Tensor):
+    def __init__(self, trajectories: torch.Tensor, masks: torch.Tensor, game_ids: torch.Tensor):
         """
         Args:
             trajectories: tensor of shape (n_trajectories, sequence_length, features)
             masks: tensor of shape (n_trajectories, sequence_length) indicating valid timesteps
+            game_ids: tensor of shape (n_trajectories) containing the game ids
         """
         self.trajectories = trajectories
         self.masks = masks
+        self.game_ids = game_ids
     
     def __len__(self):
         return len(self.trajectories)
@@ -25,7 +27,8 @@ class TrajectoryDataset(Dataset):
     def __getitem__(self, idx):
         return {
             'trajectory': self.trajectories[idx],
-            'mask': self.masks[idx]
+            'mask': self.masks[idx],
+            'game_id': self.game_ids[idx]
         }
 
 class TrajectoryDataModule(pl.LightningDataModule):
@@ -43,12 +46,12 @@ class TrajectoryDataModule(pl.LightningDataModule):
         include_timesteps (bool): Whether to include time elapsed in the features. Default is True.
 
     Methods:
-        prepare_data(): Reads and preprocesses the raw data.
-        setup(stage: str = None): Converts the processed data to tensors and splits it into training, validation, and test sets.
+        setup(stage: str = None): Reads and converts the processed data to tensors and splits it into training, validation, and test sets.
         train_dataloader(): Returns the DataLoader for the training set.
         val_dataloader(): Returns the DataLoader for the validation set.
         test_dataloader(): Returns the DataLoader for the test set.
 
+    ```python
     Example usage:
         data_module = TrajectoryDataModule(
             data_folder='path/to/your/data.csv',
@@ -58,9 +61,13 @@ class TrajectoryDataModule(pl.LightningDataModule):
             include_game_state_vars=True,
             include_timesteps=True
         )
-        data_module.prepare_data()
         data_module.setup()
         train_loader = data_module.train_dataloader()
+        batch = next(iter(train_loader))
+        print(batch['trajectory'].shape)
+        print(batch['mask'].shape)
+        print(batch['game_id'].shape)
+    ```
     """
     def __init__(self, 
                  data_folder: str,
@@ -83,37 +90,24 @@ class TrajectoryDataModule(pl.LightningDataModule):
         self.include_game_state_vars = include_game_state_vars
         self.include_timesteps = include_timesteps
 
-    def prepare_data(self):
-        
-        BANNED_USERS = [42] # Myself
 
-        # Read raw dat
-        raw_df = pd.read_csv(os.path.join(self.data_folder, 'gamestate.csv'), converters={'user_id': lambda x: int(x),
-                                                                                      'Pacman_X': lambda x: round(float(x), 2),
-                                                                                      'Pacman_Y': lambda x: round(float(x), 2)
-                                                                                      })
-        game_df = pd.read_csv(os.path.join(self.data_folder, 'game.csv'), converters={'date_played': lambda x: pd.to_datetime(x)})
-        banned_game_ids = game_df.loc[game_df['user_id'].isin(BANNED_USERS), 'game_id']
-
-        raw_df = raw_df[~raw_df['game_id'].isin(banned_game_ids)]
-        
-        # Preprocess the data
-        self.processed_df = preprocess_game_data(
-            raw_df,
-            series_type=self.series_type,
-            include_game_state_vars=self.include_game_state_vars,
-            include_timesteps=self.include_timesteps
-        )
 
     def setup(self, stage: str = None):
-        # Convert processed data to tensor
-        trajectories, masks, game_ids = create_game_trajectory_tensor(
-            self.processed_df,
+        # Read data and Convert processed data to tensor
+
+        datareader = PacmanDataReader(self.data_folder, read_games_only=True)
+
+        trajectories_df = datareader.get_trajectory_dataframe(series_type=self.series_type, 
+                                                              include_game_state_vars=self.include_game_state_vars, 
+                                                              include_timesteps=self.include_timesteps)
+
+        trajectories, masks, game_ids = self._create_game_trajectory_tensor(
+            trajectories_df,
             max_sequence_length=self.max_sequence_length
         )
         
-        # Create dataset with both trajectories and masks
-        dataset = TrajectoryDataset(trajectories, masks)
+        # Create dataset with trajectories, masks, and game_ids
+        dataset = TrajectoryDataset(trajectories, masks, game_ids)
         
         # Calculate split sizes
         total_size = len(dataset)
@@ -162,3 +156,60 @@ class TrajectoryDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers
         )
+    
+    def _create_game_trajectory_tensor(self, 
+                                       trajectories_df: pd.DataFrame, 
+                                       max_sequence_length: Optional[int] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Creates a tensor of shape (num_games, sequence_length, num_features) from a dataframe of trajectories.
+        The dataframe must have a 'game_id' column.
+        
+        Args:
+            trajectories_df: DataFrame containing all games' preprocessed data with game_id column
+            max_sequence_length: Optional, pad/truncate all sequences to this length
+            
+        Returns:
+            tensor: A tensor of shape (num_games, max_sequence_length, num_features)
+            mask: A mask tensor of shape (num_games, max_sequence_length) indicating valid timesteps
+            game_ids: A list of unique game IDs
+        """
+        # If max_sequence_length isn't provided, use the longest game
+        if max_sequence_length is None:
+            max_sequence_length = trajectories_df.groupby('game_id').size().max()
+        
+        game_ids = trajectories_df['game_id'].unique()
+        # Determine the number of features from the DataFrame
+        num_features = trajectories_df.shape[1] - 1  # Subtract 1 for the 'game_id' column
+        num_games = len(game_ids)
+        
+        # Initialize tensor with zeros
+        # Shape: (num_games, max_sequence_length, num_features)
+        tensor = torch.zeros((num_games, max_sequence_length, num_features))
+        
+        # Create mask to track actual sequence lengths
+        mask = torch.zeros((num_games, max_sequence_length), dtype=torch.bool)
+        
+        # Create dictionary to store game_id to index mapping
+        game_to_idx = {game_id: idx for idx, game_id in enumerate(game_ids)}
+        
+        # Convert game_ids to a list and create ordered tensor of game IDs
+        game_ids_list = list(game_ids)  # Convert from numpy array to list
+        ordered_game_ids = torch.tensor([game_ids_list[i] for i in range(len(game_ids_list))])
+        
+        for game_id in game_ids:
+            # Get game data excluding 'game_id' column
+            game_data = trajectories_df[trajectories_df['game_id'] == game_id].iloc[:, 1:].values
+            seq_len = min(len(game_data), max_sequence_length)
+            game_idx = game_to_idx[game_id]
+            
+            # Fill tensor and mask
+            tensor[game_idx, :seq_len, :] = torch.FloatTensor(game_data[:seq_len])
+            mask[game_idx, :seq_len] = 1
+        
+        # The resulting tensor will have:
+        # - First dimension: different games
+        # - Second dimension: log steps in the game
+        # - Third dimension: features (time,X, Y, score, powerPellets)
+
+        return tensor, mask, ordered_game_ids
+

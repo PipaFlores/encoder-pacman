@@ -4,7 +4,7 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.visualization.game_replayer import GameReplayer
-from src.utils import DataReader
+from src.utils import PacmanDataReader
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize Pac-Man game states")
@@ -18,7 +18,7 @@ if __name__ == "__main__":
     # parser.add_argument('--stats', type=str, default=None, help="Add stats columns to the stats panel")
     args = parser.parse_args()
 
-    datareader = DataReader(data_folder=args.data_path, read_games_only=True)
+    datareader = PacmanDataReader(data_folder=args.data_path, read_games_only=True)
     gamestate_df = datareader.gamestate_df
     game_df = datareader.game_df
     gamestate_df = pd.merge(gamestate_df, game_df, on='game_id', how='left')
