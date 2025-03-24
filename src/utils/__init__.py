@@ -1,5 +1,6 @@
 from .utils import *
 from .Astar import *
+from .data_reader import DataReader
 
 __all__ = ["preprocess_game_data", 
            "create_game_trajectory_tensor", 
@@ -8,5 +9,6 @@ __all__ = ["preprocess_game_data",
            "pos_mirroring",
            "timer",
            "load_maze_data",
-           "Astar"]
+           "Astar",
+           "DataReader"]
 

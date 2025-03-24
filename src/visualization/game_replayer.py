@@ -1,4 +1,4 @@
-from src.utils.utils import load_maze_data
+from src.utils import utils
 from src.utils import Astar
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -9,7 +9,7 @@ import logging
 # import os
 # os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 
-class SessionReplayer:
+class GameReplayer:
     def __init__(self, data, game_id=None, playback_speed=1.0, verbose = False, pathfinding=True, pellets=True, show_grid=False):
         """
         Initialize the visualizer with data.
@@ -66,7 +66,7 @@ class SessionReplayer:
         # Maze
         self.show_grid = show_grid
         self.pellets = pellets
-        self.wall_positions, self.pellet_positions = load_maze_data()
+        self.wall_positions, self.pellet_positions = utils.load_maze_data()
         self.wall_grid = Astar.generate_squared_walls(self.wall_positions)
         self.pellet_objects = []  # Store pellet objects
         self.eaten_pellets = set()  # Track eaten pellets

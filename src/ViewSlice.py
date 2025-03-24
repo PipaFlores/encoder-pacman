@@ -4,7 +4,7 @@ import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.visualization.SessionReplayer import SessionReplayer
+from src.visualization.game_replayer import GameReplayer
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize Pac-Man game states")
@@ -22,5 +22,5 @@ if __name__ == "__main__":
     game_df = gamestate_df.loc[gamestate_df['game_id'] == 601]
     game_df = game_df.loc[:, ['Pacman_X', 'Pacman_Y']]
     
-    visualizer = SessionReplayer(game_df, playback_speed=args.playback_speed, verbose=args.verbose)
+    visualizer = GameReplayer(game_df, playback_speed=args.playback_speed, verbose=args.verbose)
     visualizer.animate_session()

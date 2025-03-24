@@ -1,4 +1,5 @@
-from .TrajectoryVisualizer import TrajectoryVisualizer
-from .SessionReplayer import SessionReplayer
+from .game_visualizer import GameVisualizer
+from .game_replayer import GameReplayer
+from .base_visualizer import BaseVisualizer
 
-__all__ = ['TrajectoryVisualizer', 'SessionReplayer']
+__all__ = ['GameVisualizer', 'GameReplayer', 'BaseVisualizer']
