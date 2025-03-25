@@ -20,7 +20,6 @@ def train_model():
     )
 
     # 2. Prepare and setup the data
-    data_module.prepare_data()
     data_module.setup()
 
     # 3. Initialize the model
