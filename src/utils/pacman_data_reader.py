@@ -3,17 +3,33 @@ import os
 import numpy as np
 
 class PacmanDataReader:
+    _instance = None
+    BANNED_USERS = [42]
+    
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super(PacmanDataReader, cls).__new__(cls)
+        return cls._instance
     
     def __init__(self, data_folder:str, read_games_only:bool = True, verbose:bool = False):
-        BANNED_USERS = [42] # Myself
-        self.data_folder = data_folder
-        self.verbose = verbose
+        # Initialize basic attributes if not already initialized
+        if not hasattr(self, 'initialized'):
+            self.data_folder = data_folder
+            self.verbose = verbose
+            self.initialized = True
+            self.read_games_only = read_games_only
+            self._read_data(read_games_only)  # Initial load with BANNED_USERS = [42]
+        # If already initialized but requesting more data, load it
+        elif not self.read_games_only and read_games_only:
+            if self.verbose:
+                print("Warning: Instance already loaded with full data. Ignoring read_games_only=True.")
+        elif self.read_games_only and not read_games_only:
+            if self.verbose:
+                print("Loading additional data as requested...")
+            self._read_data(read_games_only)
+            self.read_games_only = read_games_only
 
-        ## Read data
-        self._read_data(read_games_only, BANNED_USERS)
-
-    
-    def _read_data(self, read_games_only:bool, BANNED_USERS:list[int]):
+    def _read_data(self, read_games_only:bool):
         """
         Initialize the dataframes.
         Reads the data from the data folder and filters out banned users.
@@ -26,7 +42,7 @@ class PacmanDataReader:
                                                   'Pacman_Y': lambda x: round(float(x), 2)})
         
         ## Filter banned users
-        self.banned_game_ids = self.game_df.loc[self.game_df['user_id'].isin(BANNED_USERS), 'game_id']
+        self.banned_game_ids = self.game_df.loc[self.game_df['user_id'].isin(self.BANNED_USERS), 'game_id']
         self.game_df = self.game_df[~self.game_df['game_id'].isin(self.banned_game_ids)]
         
         self.gamestate_df = self.gamestate_df[~self.gamestate_df['game_id'].isin(self.banned_game_ids)]
@@ -37,7 +53,6 @@ class PacmanDataReader:
             self.redcap_df = pd.read_csv(os.path.join(self.data_folder, 'redcapdata.csv'))
             self.psychometrics_df = pd.read_csv(os.path.join(self.data_folder, 'psych\AiPerCogPacman_DATA_2025-03-03_0927.csv'))
 
-    
     def filter_gamestate_data(self,game_id:int | list[int] = None, user_id:int | list[int] = None) -> pd.DataFrame:
         """
         Filter gamestate data from the dataframes. Includes trajectories and game state variables.
@@ -111,25 +126,35 @@ class PacmanDataReader:
     def get_trajectory_dataframe(self, 
                                  series_type=['position'], 
                                  include_game_state_vars= False, 
-                                 include_timesteps = True) -> pd.DataFrame:
+                                 include_timesteps = True,
+                                 include_game_id = True) -> pd.DataFrame:
         """
         For use in `datamodule`.
         Preprocess gamestates' data before converting to tensor for Autoencoder training.
         
         Args:
             gamestate_df: DataFrame containing raw game data
-            series_type: List of series types to include in the preprocessing (e.g., ['position', 'movements', 'input'])
+            series_type: List of series types to include in the preprocessing (e.g., ['position', 'movement', 'input'])
             include_game_state_vars: Boolean indicating whether to include game state variables (score, powerPellets)
             include_timesteps: Boolean indicating whether to include time elapsed in the features
             
         Returns:
             processed_df: DataFrame containing preprocessed game data with selected features
+
+        Note:
+            - `movement` is the direction Pacman is moving in the current timestep. Is an unitary vector, and should not
+            be confused with instant/average velocities (as calculated in `GridAnalyzer.py`).
+            - `input` is the direction Pacman is moving in the next timestep.
+
         """
-        GAME_STATE_VARS = ['score', 'powerPellets'] if include_game_state_vars else []
-
-        features = ['game_id'] + GAME_STATE_VARS
-
         dataframe = self.gamestate_df.copy()
+        features = []
+
+        if include_game_id:
+            features.extend(['game_id'])
+        
+        if include_game_state_vars:
+            features.extend(['score', 'powerPellets'])
 
         if include_timesteps:
             features.extend(['time_elapsed'])
@@ -137,16 +162,21 @@ class PacmanDataReader:
         if 'position' in series_type:
             features.extend(['Pacman_X', 'Pacman_Y']) # No preprocessing here as it is done in the read_data() function
             
+        direction_mapping = {
+            'right': (1, 0),
+            'left': (-1, 0),
+            'up': (0, 1),
+            'down': (0, -1),
+            'none': (0, 0),
+            np.nan: (0, 0),
+            'w': (0, 1),
+            'a': (-1, 0),
+            's': (0, -1),
+            'd': (1, 0)
+        }
         
-        if 'movements' in series_type:
+        if 'movement' in series_type:
             # Convert movement directions to dx, dy components
-            direction_mapping = {
-                'right': (1, 0),
-                'left': (-1, 0),
-                'up': (0, 1),
-                'down': (0, -1),
-                'none': (0, 0)
-            }
             dataframe['movement_dx'] = dataframe['movement_direction'].map(lambda d: direction_mapping[d][0])
             dataframe['movement_dy'] = dataframe['movement_direction'].map(lambda d: direction_mapping[d][1])
             features.extend(['movement_dx', 'movement_dy'])

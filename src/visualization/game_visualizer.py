@@ -24,8 +24,8 @@ class GameVisualizer(BaseVisualizer):
             data_folder: Path to the data folder containing game data
         """
         super().__init__()
-        self.logger = logging.getLogger('TrajectoryVisualizer')
-        logging.basicConfig(level=logging.DEBUG if verbose else logging.WARNING)
+        self.logger = logging.getLogger('GameVisualizer')
+        logging.basicConfig(level=logging.INFO if verbose else logging.WARNING)
 
         self.analyzer = analysis.GridAnalyzer()
 
