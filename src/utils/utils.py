@@ -180,21 +180,27 @@ def pos_mirroring(df, return_quadrant=False):
 
 
 
-def calculate_velocities(x: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def calculate_velocities(trajectory: np.ndarray, round: bool = True) -> Tuple[np.ndarray, np.ndarray]:
     """
     Calculate velocities from position data, it rounds and removes signed zeros to avoid noise issues.
     
     Args:
-        x: Array of x-coordinates
-        y: Array of y-coordinates
+        trajectory: Array of shape (N, 2) containing x,y coordinates
+        round: Whether to round velocities to 0.5 to remove small noise in direction changes
         
     Returns:
         dx: Array of x-velocities
         dy: Array of y-velocities
     """
+    x, y = trajectory[:, 0], trajectory[:, 1]
+    
     # Calculate velocities
-    dx = np.round(np.diff(x, prepend=x[0]) * 2) / 2 # round to 0.5 to remove small noise in direction changes
-    dy = np.round(np.diff(y, prepend=y[0]) * 2) / 2
+    if round:
+        dx = np.round(np.diff(x, prepend=x[0]) * 2) / 2 # round to 0.5 to remove small noise in direction changes
+        dy = np.round(np.diff(y, prepend=y[0]) * 2) / 2
+    else:
+        dx = np.diff(x, prepend=x[0])
+        dy = np.diff(y, prepend=y[0])
 
     dx = pd.Series(dx).replace(0, 0).values # remove signed zeros using .loc
     dy = pd.Series(dy).replace(0, 0).values

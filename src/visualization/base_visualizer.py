@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Optional, List, Tuple
 import src.utils as utils
+from src.config.defaults import config
 
 class BaseVisualizer:
     def __init__(self, 
@@ -10,21 +11,23 @@ class BaseVisualizer:
                  maze_y_min: int = -16.5,
                  maze_y_max: int = 13.5,
                  grid_size_x: int = 28,
-                 grid_size_y: int = 31):
+                 grid_size_y: int = 31,
+                 figsize: Tuple[int, int] = config.figsize):
         self.MAZE_X_MIN = maze_x_min
         self.MAZE_X_MAX = maze_x_max
         self.MAZE_Y_MIN = maze_y_min
         self.MAZE_Y_MAX = maze_y_max
         self.GRID_SIZE_X = grid_size_x
         self.GRID_SIZE_Y = grid_size_y
-        
+        self.figsize = figsize
+
         # Create coordinate grids
         self.x_grid = np.linspace(self.MAZE_X_MIN, self.MAZE_X_MAX, self.GRID_SIZE_X)
         self.y_grid = np.linspace(self.MAZE_Y_MIN, self.MAZE_Y_MAX, self.GRID_SIZE_Y)
 
     def plot_count_grid(self, count_grid: np.ndarray, walls = True, pellets = False) -> None:
         """Plot the count grid."""
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=self.figsize)
         ax.set_xlim(self.MAZE_X_MIN - 0.5, self.MAZE_X_MAX + 0.5)
         ax.set_ylim(self.MAZE_Y_MIN - 0.5, self.MAZE_Y_MAX + 0.5)
         
@@ -46,7 +49,7 @@ class BaseVisualizer:
 
     def plot_heatmap(self, count_grid: np.ndarray, cmap: str = 'YlOrRd', walls = True, pellets = False) -> None:
         """Plot the heatmap."""
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=self.figsize)
         ax.imshow(count_grid, extent=[self.MAZE_X_MIN - 0.5, self.MAZE_X_MAX + 0.5,
                                       self.MAZE_Y_MIN - 0.5, self.MAZE_Y_MAX + 0.5],
                                       origin='lower',
@@ -59,7 +62,7 @@ class BaseVisualizer:
 
     def plot_velocity_grid(self, velocity_grid: np.ndarray, walls = True, pellets = False) -> None:
         """Plot the vector grid."""
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=self.figsize)
         ax.set_xlim(self.MAZE_X_MIN - 0.5, self.MAZE_X_MAX + 0.5)
         ax.set_ylim(self.MAZE_Y_MIN - 0.5, self.MAZE_Y_MAX + 0.5)
         

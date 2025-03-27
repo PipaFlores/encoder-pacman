@@ -37,9 +37,10 @@ class PacmanDataReader:
         self.game_df = pd.read_csv(os.path.join(self.data_folder, 'game.csv'), 
                                    converters={'date_played': lambda x: pd.to_datetime(x)})
         self.gamestate_df = pd.read_csv(os.path.join(self.data_folder, 'gamestate.csv'), 
-                                       converters={'user_id': lambda x: int(x),
-                                                  'Pacman_X': lambda x: round(float(x), 2),
-                                                  'Pacman_Y': lambda x: round(float(x), 2)})
+                                       converters={'user_id': lambda x: int(x)
+                                                #  , 'Pacman_X': lambda x: round(float(x), 2),
+                                                #   'Pacman_Y': lambda x: round(float(x), 2)
+                                                })
         
         ## Filter banned users
         self.banned_game_ids = self.game_df.loc[self.game_df['user_id'].isin(self.BANNED_USERS), 'game_id']
@@ -91,10 +92,11 @@ class PacmanDataReader:
 
         return filtered_df
 
-    def get_trajectory_tuple(self,
+    def get_trajectory_array(self,
                             game_id:int | list[int] = None, 
                             user_id:int | list[int] = None,
-                            get_all_games:bool = False) -> tuple[np.ndarray, np.ndarray]:
+                            get_timevalues:bool = False,
+                            get_all_games:bool = False) -> np.ndarray:
         """
         Get Pacman trajectory data from the dataframes, without any metadata.
         Args:
@@ -102,8 +104,7 @@ class PacmanDataReader:
             user_id: List of user ids to filter the data by.
             get_all_games: Boolean indicating whether to get all games.
         Returns:
-            x: Array of Pacman X coordinates.
-            y: Array of Pacman Y coordinates.
+            trajectory_array: Array of Pacman trajectory data (x,y) coordinates.
         """
         if game_id is None and user_id is None and not get_all_games:
             raise ValueError("Either game_id or user_id must be provided")
@@ -115,19 +116,50 @@ class PacmanDataReader:
 
         if filtered_df is None:
             return None
+        
+        if get_timevalues:
+            return np.array(filtered_df[['time_elapsed','Pacman_X', 'Pacman_Y']].values)
+        else:
+            return np.array(filtered_df[['Pacman_X', 'Pacman_Y']].values)
 
-        filtered_df = filtered_df[['Pacman_X', 'Pacman_Y']]
-        x = filtered_df['Pacman_X'].values
-        y = filtered_df['Pacman_Y'].values
-
-        return x, y
     
+    def get_partial_trajectory_array(self, 
+                                     game_id:int | list[int] | None = None,
+                                     user_id:int | list[int] | None = None,
+                                     start_timestep:int = 0,
+                                     end_timestep:int = -1,
+                                     get_timevalues:bool = False) -> np.ndarray:
+        """
+        Get a partial trajectory from the dataframes.
+        Args:
+            game_id: List of game ids to filter the data by.
+            user_id: List of user ids to filter the data by.
+            start_timestep: Start timestep of the trajectory.
+            end_timestep: End timestep of the trajectory.
+        Returns:
+            trajectory_array: Array of Pacman trajectory data (x,y) coordinates.
+        """
+        trajectory_array = self.get_trajectory_array(game_id=game_id, user_id=user_id, get_timevalues=get_timevalues)
+
+        if end_timestep == -1:
+            end_timestep = len(trajectory_array)
+
+        if start_timestep > end_timestep:
+            raise ValueError("start_timestep must be less than end_timestep")
+        
+
+
+        partial_trajectory_array = trajectory_array[start_timestep:end_timestep]
+
+        return partial_trajectory_array
 
     def get_trajectory_dataframe(self, 
                                  series_type=['position'], 
                                  include_game_state_vars= False, 
                                  include_timesteps = True,
-                                 include_game_id = True) -> pd.DataFrame:
+                                 include_game_id = True,
+                                 game_id:int | list[int] = None,
+                                 user_id:int | list[int] = None) -> pd.DataFrame:
         """
         For use in `datamodule`.
         Preprocess gamestates' data before converting to tensor for Autoencoder training.
@@ -137,6 +169,9 @@ class PacmanDataReader:
             series_type: List of series types to include in the preprocessing (e.g., ['position', 'movement', 'input'])
             include_game_state_vars: Boolean indicating whether to include game state variables (score, powerPellets)
             include_timesteps: Boolean indicating whether to include time elapsed in the features
+            include_game_id: Boolean indicating whether to include game id in the features
+            game_id: List of game ids to filter the data by.
+            user_id: List of user ids to filter the data by.   
             
         Returns:
             processed_df: DataFrame containing preprocessed game data with selected features
@@ -147,7 +182,13 @@ class PacmanDataReader:
             - `input` is the direction Pacman is moving in the next timestep.
 
         """
-        dataframe = self.gamestate_df.copy()
+        if user_id is not None:
+            dataframe = self.filter_gamestate_data(user_id=user_id)
+        elif game_id is not None:
+            dataframe = self.filter_gamestate_data(game_id=game_id)
+        else:
+            dataframe = self.gamestate_df.copy()
+
         features = []
 
         if include_game_id:
@@ -195,5 +236,4 @@ class PacmanDataReader:
                 processed_df[col] = processed_df[col].astype(float)
         
         return processed_df
-
 
