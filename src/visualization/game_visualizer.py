@@ -9,32 +9,40 @@ import src.utils as utils
 import logging
 from src.visualization.base_visualizer import BaseVisualizer
 from src.utils import PacmanDataReader
-
+from src.config.defaults import config
 
 
 class GameVisualizer(BaseVisualizer):
     """
     Visualizes trajectories and heatmaps of Pacman games, either from a single game or a list of games.
     """
-    def __init__(self, data_folder: str, verbose: bool = False):
+    def __init__(self, data_folder: str = None, 
+                 verbose: bool = False,
+                 figsize: Tuple[int, int] = config.figsize):
         """
         Initialize the trajectory visualizer.
         
         Args:
-            data_folder: Path to the data folder containing game data
+            data_folder: Path to the data folder containing game data, if visualizing by game or user id.
+            verbose: Whether to print verbose output
+            figsize: Size of the figure
         """
-        super().__init__()
+        super().__init__(figsize=figsize)
         self.logger = logging.getLogger('GameVisualizer')
         logging.basicConfig(level=logging.INFO if verbose else logging.WARNING)
 
-        self.analyzer = analysis.GridAnalyzer()
+        self.analyzer = analysis.GridAnalyzer(figsize=figsize)
 
-        self.datareader = PacmanDataReader(data_folder=data_folder, read_games_only=True, verbose=verbose)
+
+        if data_folder is None:
+            self.datareader = None
+        else:   
+            self.datareader = PacmanDataReader(data_folder=data_folder, read_games_only=True, verbose=verbose)
         
 
     def game_heatmap(self, 
                           game_id: int | list[int] | None = None,
-                          trajectory: torch.Tensor | None = None,
+                          trajectory: torch.Tensor | np.ndarray | None = None,
                           show_maze: bool = True,
                           show_pellet: bool = False,
                           normalize: bool = True) -> None:
@@ -44,22 +52,26 @@ class GameVisualizer(BaseVisualizer):
         
         Args:
             game_id: The ID of the game to visualize
-            trajectory: The trajectory to visualize, should be a tensor of shape (N, 2) where N is the number of steps in the trajectory
+            trajectory: The trajectory to visualize, should be a tensor/array of shape (N, 2) where N is the number of steps
             show_maze: Whether to show maze walls and pellets
             normalize: Whether to normalize the heatmap values
         """
-
-        game_data = self._read_game_data(game_id, trajectory)
+        if game_id is not None:
+            trajectory = self.datareader.get_trajectory_array(game_id=game_id)
+        elif trajectory is not None:
+            trajectory = self._format_trajectory_data(trajectory=trajectory)
+        else:
+            raise ValueError("Either game_id or trajectory must be provided")
         
-        self.analyzer.plot_heatmap(x=game_data['Pacman_X'].values, y=game_data['Pacman_Y'].values, 
-                                   aggregate=False, walls=show_maze, pellets=show_pellet, normalize=normalize)
+        self.analyzer.plot_heatmap(trajectory=trajectory, aggregate=False, walls=show_maze, 
+                                  pellets=show_pellet, normalize=normalize)
 
     
  
 
     def trajectory_line_plot(self,
                            game_id: int = None,
-                           trajectory: torch.Tensor | None = None,
+                           trajectory: torch.Tensor | np.ndarray | None = None,
                            time_step_delta: int = 1,
                            show_maze: bool = True,
                            show_pellet: bool = False,
@@ -68,17 +80,22 @@ class GameVisualizer(BaseVisualizer):
         """
         Create a line plot with smart trajectory offsetting based on movement direction.
         """
-        game_data = self._read_game_data(game_id, trajectory)
+        if game_id is not None:
+            trajectory = self.datareader.get_trajectory_array(game_id=game_id)
+        elif trajectory is not None:
+            trajectory = self._format_trajectory_data(trajectory=trajectory)
+        else:
+            raise ValueError("Either game_id or trajectory must be provided")
 
         # Create figure and axis
-        fig, ax = plt.subplots(figsize=(8, 8))  # Create figure and axis explicitly
+        fig, ax = plt.subplots(figsize=self.figsize)  # Create figure and axis explicitly
         
-        x, y = game_data['Pacman_X'].values, game_data['Pacman_Y'].values
+        x, y = trajectory[:, 0], trajectory[:, 1]
         # Calculate instantaneous velocities 
-        dx, dy = utils.calculate_velocities(x, y)
+        dx, dy = utils.calculate_velocities(trajectory=trajectory)
 
         # Create vector grid
-        _, idx_grid = self.analyzer.calculate_recurrence_grid(x, y, calculate_velocities=False)
+        _, idx_grid = self.analyzer.calculate_recurrence_grid(trajectory=trajectory, calculate_velocities=False)
         
         # Calculate offsets based on movement direction
         x_grid = np.linspace(self.MAZE_X_MIN, self.MAZE_X_MAX, self.GRID_SIZE_X)
@@ -100,7 +117,6 @@ class GameVisualizer(BaseVisualizer):
                     y_offset[i] = offset_scale * (traj_n - 1)
                 elif abs(dx_i) < abs(dy_i):  # Mainly vertical movement
                     x_offset[i] = offset_scale * (traj_n - 1)
-
 
         # Apply offsets
         x = x + x_offset
@@ -143,23 +159,27 @@ class GameVisualizer(BaseVisualizer):
 
     def plot_velocity_grid(self,
                            game_id: int = None,
-                           trajectory: torch.Tensor | None = None,
+                           trajectory: torch.Tensor | np.ndarray | None = None,
                            show_maze: bool = True,
                            show_pellet: bool = False,
                            normalize: bool = False) -> None:
         """
         Plot the velocity grid for a game trajectory.
         """
-        # Load game data (similar to heatmap)
-        game_data =self._read_game_data(game_id=game_id, trajectory=trajectory)
+        if game_id is not None:
+            trajectory = self.datareader.get_trajectory_array(game_id=game_id)
+        elif trajectory is not None:
+            trajectory = self._format_trajectory_data(trajectory=trajectory)
+        else:
+            raise ValueError("Either game_id or trajectory must be provided")
         
-        self.analyzer.plot_velocity_grid(x=game_data['Pacman_X'].values, y=game_data['Pacman_Y'].values, 
-                                         aggregate=False, walls=show_maze, pellets=show_pellet, normalize=normalize)
+        self.analyzer.plot_velocity_grid(trajectory=trajectory, aggregate=False, walls=show_maze, 
+                                       pellets=show_pellet, normalize=normalize)
 
     
     def plot_count_grid(self,
                         game_id: int = None,
-                        trajectory: torch.Tensor | None = None,
+                        trajectory: torch.Tensor | np.ndarray | None = None,
                         show_maze: bool = True,
                         show_pellet: bool = False,
                         normalize: bool = False) -> None:
@@ -167,34 +187,69 @@ class GameVisualizer(BaseVisualizer):
         """
         Plot the count grid for a game trajectory.
         """
-        # Load game data (similar to heatmap)
-        game_data = self._read_game_data(game_id=game_id, trajectory=trajectory)
-
-        self.analyzer.plot_count_grid(x=game_data['Pacman_X'].values, y=game_data['Pacman_Y'].values, aggregate=False,
-                                      walls=show_maze, pellets=show_pellet, normalize=normalize)
-
-        
-        
-    def _read_game_data(self, game_id: int | list[int] | None = None, trajectory: torch.Tensor | None = None):
-        """
-        Read game data from a game ID or trajectory tensor.
-        """
-
-        if game_id is None and trajectory is None:
+        if game_id is not None:
+            trajectory = self.datareader.get_trajectory_array(game_id=game_id)
+        elif trajectory is not None:
+            trajectory = self._format_trajectory_data(trajectory=trajectory)
+        else:
             raise ValueError("Either game_id or trajectory must be provided")
 
-        if game_id is not None:
-            game_data = self.datareader.filter_gamestate_data(game_id=game_id)
+        self.analyzer.plot_count_grid(trajectory=trajectory, aggregate=False, walls=show_maze, 
+                                    pellets=show_pellet, normalize=normalize)
 
+        
     
-        elif isinstance(trajectory, torch.Tensor):
-            game_data = trajectory.cpu().numpy()
-            if game_data.ndim == 2:
-                game_data = pd.DataFrame(game_data, columns=['Pacman_X', 'Pacman_Y'])
-            elif game_data.ndim == 3: # Multiple trajectories
-                game_data = pd.DataFrame(game_data.reshape(-1, game_data.shape[-1]), columns=['Pacman_X', 'Pacman_Y'])
-            else:
-                raise ValueError("Trajectory tensor must have 2 or 3 dimensions")
+    def plot_trajectory_scatter(self, 
+                                game_id: int = None,
+                                trajectory: torch.Tensor | np.ndarray | None = None,
+                                show_maze: bool = False,
+                                show_pellet: bool = False,
+                                normalize: bool = False) -> None:
+        """
+        Plot the trajectory points as a scatter plot, without the use of grids.
+        """
+        if game_id is not None:
+            trajectory = self.datareader.get_trajectory_array(game_id=game_id)
+        elif trajectory is not None:
+            trajectory = self._format_trajectory_data(trajectory=trajectory)
+        else:
+            raise ValueError("Either game_id or trajectory must be provided")
 
-        return game_data
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=self.figsize)  # Create figure and axis explicitly
+        
+        ax.scatter(trajectory[:, 0], trajectory[:, 1], color='blue', alpha=0.5)
+
+        # Plot maze layout
+        self._plot_walls_and_pellets(walls=show_maze, pellets=show_pellet)
+        
+        ax.set_xlim(self.MAZE_X_MIN, self.MAZE_X_MAX)
+        ax.set_ylim(self.MAZE_Y_MIN, self.MAZE_Y_MAX)
+
+        ax.set_title(f'Pacman Trajectory Scatter {game_id if game_id is not None else ""}')
+        ax.set_xlabel('X Position')
+        ax.set_ylabel('Y Position')
+        ax.grid(True, alpha=0.3)
+        plt.show()
+        
+
+    def _format_trajectory_data(self, trajectory: torch.Tensor | np.ndarray) -> np.ndarray:
+        """
+        Format trajectory data from a trajectory tensor or numpy array.
+        """
+        if isinstance(trajectory, torch.Tensor):
+            trajectory = trajectory.cpu().numpy()
+        elif isinstance(trajectory, np.ndarray):
+            pass
+        else:
+            raise ValueError("trajectory must be either a torch.Tensor or np.ndarray")
+        
+        if trajectory.ndim == 2:
+            return trajectory
+        elif trajectory.ndim == 3:  # Multiple trajectories
+            return trajectory.reshape(-1, trajectory.shape[-1])
+        else:
+            raise ValueError("Trajectory must have 2 or 3 dimensions")
+        
+        
 
