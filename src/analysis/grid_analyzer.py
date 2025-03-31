@@ -90,7 +90,9 @@ class GridAnalyzer:
                      aggregate: bool = False, 
                      normalize: bool = False,
                      walls: bool = True,
-                     pellets: bool = False):
+                     pellets: bool = False,
+                     ax: plt.Axes | None = None,
+                     title_id: int = None):
         """Plot the movement recurrence heatmap.
         Calculates the recurrence grid if trajectory data is provided.
         
@@ -100,17 +102,20 @@ class GridAnalyzer:
             normalize: Whether to normalize the grid
             walls: Whether to show walls
             pellets: Whether to show pellets
+            ax: matplotlib axis to plot on
         """
         if trajectory is not None:
             self.calculate_recurrence_grid(trajectory, calculate_velocities=False, aggregate=aggregate, normalize=normalize)
 
-        self.visualizer.plot_heatmap(self.recurrence_count_grid, walls=walls, pellets=pellets)
+        self.visualizer.plot_heatmap(self.recurrence_count_grid, walls=walls, pellets=pellets, ax=ax, title_id=title_id)
 
     def plot_count_grid(self, trajectory: np.ndarray | None = None,
                         aggregate: bool = False,
                         normalize: bool = False,
                         walls: bool = True,
-                        pellets: bool = False):
+                        pellets: bool = False,
+                        ax: plt.Axes | None = None,
+                        title_id: int = None):
         """Plot both recurrence count grids.
         Calculates the recurrence grid if trajectory data is provided.
         
@@ -120,17 +125,20 @@ class GridAnalyzer:
             normalize: Whether to normalize the grid
             walls: Whether to show walls
             pellets: Whether to show pellets
+            ax: matplotlib axis to plot on
         """
         if trajectory is not None:
             self.calculate_recurrence_grid(trajectory, calculate_velocities=False, aggregate=aggregate, normalize=normalize)
 
-        self.visualizer.plot_count_grid(self.recurrence_count_grid, walls=walls, pellets=pellets)
+        self.visualizer.plot_count_grid(self.recurrence_count_grid, walls=walls, pellets=pellets, ax=ax, title_id=title_id)
 
     def plot_velocity_grid(self, trajectory: np.ndarray | None = None,
                            aggregate: bool = False,
                            normalize: bool = False,
                            walls: bool = True,
-                           pellets: bool = False):
+                           pellets: bool = False,
+                           ax: plt.Axes | None = None,
+                           title_id: int = None):
         """Plot both velocity grids.
         
         Args:
@@ -139,11 +147,12 @@ class GridAnalyzer:
             normalize: Whether to normalize the grid
             walls: Whether to show walls
             pellets: Whether to show pellets
+            ax: matplotlib axis to plot on
         """
         if trajectory is not None or self.velocity_grid.sum() == 0: # Only calculate if trajectory is provided or if the grid is empty
             self.calculate_recurrence_grid(trajectory, calculate_velocities=True, aggregate=aggregate, normalize=normalize)
 
-        self.visualizer.plot_velocity_grid(self.velocity_grid, walls=walls, pellets=pellets)
+        self.visualizer.plot_velocity_grid(self.velocity_grid, walls=walls, pellets=pellets, ax=ax, title_id=title_id)
     
     def _reset_grids(self):
         """Reset all grids to their initial state"""

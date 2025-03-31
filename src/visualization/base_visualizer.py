@@ -25,9 +25,19 @@ class BaseVisualizer:
         self.x_grid = np.linspace(self.MAZE_X_MIN, self.MAZE_X_MAX, self.GRID_SIZE_X)
         self.y_grid = np.linspace(self.MAZE_Y_MIN, self.MAZE_Y_MAX, self.GRID_SIZE_Y)
 
-    def plot_count_grid(self, count_grid: np.ndarray, walls = True, pellets = False) -> None:
+    def plot_count_grid(self, 
+                        count_grid: np.ndarray, 
+                        walls = True, 
+                        pellets = False, 
+                        ax: plt.Axes | None = None,
+                        title_id: int = None) -> None:
         """Plot the count grid."""
-        fig, ax = plt.subplots(figsize=self.figsize)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.figsize)
+            show_plot = True
+        else:
+            show_plot = False
+
         ax.set_xlim(self.MAZE_X_MIN - 0.5, self.MAZE_X_MAX + 0.5)
         ax.set_ylim(self.MAZE_Y_MIN - 0.5, self.MAZE_Y_MAX + 0.5)
         
@@ -41,28 +51,52 @@ class BaseVisualizer:
         
         ax.set_xlabel('X')
         ax.set_ylabel('Y')
-        ax.set_title('Trajectory Count Grid')
+        ax.set_title(f'Trajectory Count Grid - {title_id if title_id is not None else " "}')
 
-        self._plot_walls_and_pellets(walls, pellets)
-        plt.grid(True, alpha=0.3)
-        plt.show()
+        self._plot_walls_and_pellets(walls, pellets, ax=ax)
+        ax.grid(True, alpha=0.3)
+        if show_plot:
+            plt.show()
 
-    def plot_heatmap(self, count_grid: np.ndarray, cmap: str = 'YlOrRd', walls = True, pellets = False) -> None:
+    def plot_heatmap(self, 
+                     count_grid: np.ndarray, 
+                     cmap: str = 'YlOrRd', 
+                     walls = True, 
+                     pellets = False, 
+                     ax: plt.Axes | None = None,
+                     title_id: int = None) -> None:
         """Plot the heatmap."""
-        fig, ax = plt.subplots(figsize=self.figsize)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.figsize)
+            show_plot = True
+        else:
+            show_plot = False
+
         ax.imshow(count_grid, extent=[self.MAZE_X_MIN - 0.5, self.MAZE_X_MAX + 0.5,
                                       self.MAZE_Y_MIN - 0.5, self.MAZE_Y_MAX + 0.5],
                                       origin='lower',
                                       cmap= cmap,
                                       aspect='equal')
 
-        self._plot_walls_and_pellets(walls, pellets)
-        plt.grid(True, alpha=0.3)
-        plt.show()
+        self._plot_walls_and_pellets(walls, pellets, ax=ax)
+        ax.grid(True, alpha=0.3)
+        ax.set_title(f'Trajectory Heatmap - {title_id if title_id is not None else " "}')
+        if show_plot:
+            plt.show()
 
-    def plot_velocity_grid(self, velocity_grid: np.ndarray, walls = True, pellets = False) -> None:
+    def plot_velocity_grid(self, 
+                           velocity_grid: np.ndarray, 
+                           walls = True, 
+                           pellets = False, 
+                           ax: plt.Axes | None = None,
+                           title_id: int = None) -> None:
         """Plot the vector grid."""
-        fig, ax = plt.subplots(figsize=self.figsize)
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.figsize)
+            show_plot = True
+        else:
+            show_plot = False
+
         ax.set_xlim(self.MAZE_X_MIN - 0.5, self.MAZE_X_MAX + 0.5)
         ax.set_ylim(self.MAZE_Y_MIN - 0.5, self.MAZE_Y_MAX + 0.5)
         
@@ -77,13 +111,14 @@ class BaseVisualizer:
         
         ax.set_xlabel('X')
         ax.set_ylabel('Y')
-        ax.set_title('Velocity Grid')
+        ax.set_title(f'Velocity Grid - {title_id if title_id is not None else " "}')
     
-        plt.grid(True, alpha=0.3)
-        plt.show()
+        ax.grid(True, alpha=0.3)
+        if show_plot:
+            plt.show()
 
     
-    def _plot_walls_and_pellets(self, walls = True, pellets = False, return_transformed_positions = False):
+    def _plot_walls_and_pellets(self, walls = True, pellets = False, return_transformed_positions = False, ax: plt.Axes | None = None):
         """
         Plots the walls and pellets on the maze.
 
@@ -102,12 +137,18 @@ class BaseVisualizer:
         if walls:
             # Plot walls
             wall_x, wall_y = zip(*wall_positions)
-            plt.scatter(np.array(wall_x) + 0.5, np.array(wall_y) - 0.5, c='gray', marker='s', s=100, alpha=0.5, label='Walls')
+            if ax is None:
+                plt.scatter(np.array(wall_x) + 0.5, np.array(wall_y) - 0.5, c='gray', marker='s', s=100, alpha=0.5, label='Walls')
+            else:
+                ax.scatter(np.array(wall_x) + 0.5, np.array(wall_y) - 0.5, c='gray', marker='s', s=100, alpha=0.5, label='Walls')
         
         if pellets:
             # Plot pellets
             pellet_x, pellet_y = zip(*pellet_positions)
-            plt.scatter(np.array(pellet_x) + 0.5, np.array(pellet_y) - 0.5 , c='blue', marker='o', s=20, alpha=0.5, label='Pellets')
+            if ax is None:
+                plt.scatter(np.array(pellet_x) + 0.5, np.array(pellet_y) - 0.5 , c='blue', marker='o', s=20, alpha=0.5, label='Pellets')
+            else:
+                ax.scatter(np.array(pellet_x) + 0.5, np.array(pellet_y) - 0.5 , c='blue', marker='o', s=20, alpha=0.5, label='Pellets')
 
         if return_transformed_positions:
             wall_positions = [(x + 0.5, y - 0.5) for x, y in wall_positions]
