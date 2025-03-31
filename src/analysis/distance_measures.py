@@ -63,7 +63,7 @@ class DistanceMeasures:
         """
         x1, y1 = trajectory1[:, 0], trajectory1[:, 1]
         x2, y2 = trajectory2[:, 0], trajectory2[:, 1]
-        return np.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+        return np.sqrt((x2 - x1)**2 + (y2 - y1)**2).sum()
     
 
     def calculate_manhattan_distance(self, trajectory1: np.ndarray, trajectory2: np.ndarray) -> np.ndarray:
@@ -79,7 +79,7 @@ class DistanceMeasures:
         """
         x1, y1 = trajectory1[:, 0], trajectory1[:, 1]
         x2, y2 = trajectory2[:, 0], trajectory2[:, 1]
-        return np.abs(x2 - x1) + np.abs(y2 - y1)
+        return (np.abs(x2 - x1) + np.abs(y2 - y1)).sum()
     
     def calculate_dtw_distance(self, trajectory1: np.ndarray, trajectory2: np.ndarray) -> np.ndarray:
         """
