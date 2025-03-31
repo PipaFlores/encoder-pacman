@@ -11,6 +11,7 @@ setup(
         "seaborn",
         "stumpy",
         "lightning",
+        "scikit-learn",
     ],
     python_requires=">=3.11",
 ) 
