@@ -1,5 +1,5 @@
 from .grid_analyzer import GridAnalyzer
-from .distance_measures import DistanceMeasures
+from .distance_measures import SimilarityMeasures
 from .geom_clustering import GeomClustering
 
-__all__ = ["GridAnalyzer", "DistanceMeasures", "GeomClustering"]
+__all__ = ["GridAnalyzer", "SimilarityMeasures", "GeomClustering"]
