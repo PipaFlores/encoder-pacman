@@ -3,10 +3,13 @@ from typing import Tuple, List, Optional, Literal, Dict, Callable
 
 from src.utils import calculate_velocities
 from src.config.defaults import config
+from src.utils.logger import setup_logger
 
-class DistanceMeasures:
+logger = setup_logger(__name__)
+
+class SimilarityMeasures:
     """
-    A class for calculating different distance measures between trajectories.
+    A class for calculating different similarity measures between trajectories.
     """
     MEASURES = ['euclidean', 'manhattan', 'dtw', 'EDR', 'LCSS', 'hausdorff', 'frechet']
 
@@ -25,7 +28,7 @@ class DistanceMeasures:
     
     def __init__(self, measure_type: str = 'euclidean'):
         """
-        Initialize the DistanceMeasures class.
+        Initialize the SimilarityMeasures class.
         
         Args:
             measure_type: Type of distance measure to use
