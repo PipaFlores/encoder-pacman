@@ -2,7 +2,8 @@ import numpy as np
 from typing import List
 from src.analysis.distance_measures import SimilarityMeasures
 import matplotlib.pyplot as plt
-from sklearn.cluster import DBSCAN
+from sklearn.cluster import DBSCAN, HDBSCAN
+from src.visualization.cluster_visualizer import ClusterVisualizer
 from src.utils.utils import timer
 from src.utils import setup_logger
 
@@ -10,7 +11,10 @@ from src.utils import setup_logger
 logger = setup_logger(__name__)
 
 class GeomClustering:
-    def __init__(self, similarity_measure: str = 'euclidean', verbose: bool = False):
+    def __init__(self, 
+                 similarity_measure: str = 'euclidean',
+                 cluster_method: str = 'HDBSCAN',
+                 verbose: bool = False):
         if verbose:
             logger.setLevel("DEBUG")
         logger.info(f"Initializing GeomClustering with similarity measure: {similarity_measure}")
@@ -18,97 +22,89 @@ class GeomClustering:
         self.labels = np.array([])
 
         self.similarity_measures = SimilarityMeasures(similarity_measure)
-        self.distance_matrix = np.array([])
+        self.cluster_method = cluster_method
+        self.affinity_matrix = np.array([])
 
-    def fit(self, trajectories: List[np.ndarray]):
-        self.trajectories = np.array(trajectories)
+    def fit(self, 
+            trajectories: List[np.ndarray], 
+            cluster_method: str | None = None, 
+            **kwargs) -> np.ndarray:
+        if cluster_method is None:
+            cluster_method = self.cluster_method
+        else:
+            self.cluster_method = cluster_method
+
         logger.info(f"Fitting clustering model with {len(trajectories)} trajectories")
-        self.distance_matrix = self.calculate_distance_matrix(trajectories)
-        self.labels = self.cluster_trajectories()
+        self.trajectories = np.array(trajectories) # Array is (num_trajectories, num_timesteps, 2)
+        self.affinity_matrix = self.calculate_affinity_matrix(trajectories)
+        self.labels = self.cluster_trajectories(cluster_method, **kwargs)
         self.labels = self._sort_labels()
         logger.info(f"Clustering complete. Found {len(set(self.labels))} clusters")
+
+        self.vis = ClusterVisualizer(self.affinity_matrix, self.labels, self.trajectories, self.similarity_measures.measure_type) # Init visualizer
         return self.labels
 
-    def calculate_distance_matrix(self, trajectories: List[np.ndarray]) -> np.ndarray:
+    def calculate_affinity_matrix(self, 
+                                  trajectories: List[np.ndarray]) -> np.ndarray:
         """
-        Calculate distance matrix between all trajectories in the list.
+        Calculate affinity matrix between all trajectories in the list.
         
         Args:
             trajectories: List of arrays (x, y) representing trajectories
 
         Returns:
-            np.ndarray: Distance matrix between all trajectories
+            np.ndarray: Affinity matrix between all trajectories
         """
-        logger.debug("Calculating distance matrix")
+        logger.debug("Calculating affinity matrix")
         num_trajectories = len(trajectories)
-        self.distance_matrix = np.zeros((num_trajectories, num_trajectories))
+        self.affinity_matrix = np.zeros((num_trajectories, num_trajectories))
 
         for i in range(num_trajectories):
             for j in range(i + 1, num_trajectories):
-                self.distance_matrix[i, j] = self.similarity_measures.calculate_distance(trajectories[i], trajectories[j])
-                self.distance_matrix[j, i] = self.distance_matrix[i, j]
+                self.affinity_matrix[i, j] = self.similarity_measures.calculate_distance(trajectories[i], trajectories[j])
+                self.affinity_matrix[j, i] = self.affinity_matrix[i, j]
 
-        logger.debug("Distance matrix calculation complete")
-        return self.distance_matrix
+        logger.debug("Affinity matrix calculation complete")
+        return self.affinity_matrix
     
-    def cluster_trajectories(self) -> List[np.ndarray]:
+    def cluster_trajectories(self,
+                             cluster_method: str = 'HDBSCAN', 
+                             **kwargs) -> List[np.ndarray]:
+        if cluster_method == 'DBSCAN':
+            return self._DBSCAN_fit(**kwargs)
+        elif cluster_method == 'HDBSCAN':
+            return self._HDBSCAN_fit(**kwargs)
+        else:
+            raise ValueError(f"Invalid cluster method: {cluster_method}")
+
+    def _DBSCAN_fit(self, **kwargs):
         logger.debug("Starting DBSCAN clustering")
-        dbscan = DBSCAN(eps=0.5, min_samples=5, metric='precomputed')
-        dbscan.fit(self.distance_matrix)
+        dbscan = DBSCAN(eps=0.5, min_samples=15, metric='precomputed', **kwargs)
+        dbscan.fit(self.affinity_matrix)
         logger.debug("DBSCAN clustering complete")
         
         return dbscan.labels_
+    
+    def _HDBSCAN_fit(self, **kwargs):
+        logger.debug("Starting HDBSCAN clustering")
+        hdbscan = HDBSCAN(min_cluster_size=15, metric='precomputed', **kwargs)
+        hdbscan.fit(self.affinity_matrix)
+        logger.debug("HDBSCAN clustering complete")
+        return hdbscan.labels_
 
-    def plot_distance_matrix(self):
-        if self.distance_matrix.size == 0:
-            logger.error("Distance matrix is not calculated")
-            raise ValueError("Distance matrix is not calculated. Please call calculate_distance_matrix first.")
-        
-        logger.debug("Plotting distance matrix")
-        plt.imshow(self.distance_matrix, cmap = 'viridis')
-        plt.colorbar(label=f'{self.similarity_measures.measure_type.capitalize()} Distance')
-        plt.title('Distance Matrix')
-        plt.xlabel('Trajectory Index')
-        plt.ylabel('Trajectory Index')
-        plt.show()
+    def plot_affinity_matrix(self, ax: plt.Axes | None = None):
+        self.vis.plot_affinity_matrix(ax=ax)
 
-    def plot_distance_matrix_histogram(self, **kwargs):
-        logger.debug("Plotting distance matrix histogram")
-        plt.figure(figsize=(10, 6))
-        distances = self.distance_matrix[np.triu_indices_from(self.distance_matrix, k=1)]
-        plt.hist(distances, bins=200, edgecolor='black', **kwargs)
-        plt.xlabel('Distance')
-        plt.ylabel('Frequency')
-        plt.title('Distance Matrix Histogram')
-        plt.show()
+    def plot_distance_matrix_histogram(self, ax: plt.Axes | None = None, **kwargs):
+        self.vis.plot_distance_matrix_histogram(ax=ax, **kwargs)
 
-    def plot_trajectories(self):
-        logger.debug("Plotting trajectories")
-        centroids = self._calculate_trajectory_centroids()
-        # Create a custom colormap that maps -1 to gray
-        cmap = plt.cm.viridis
-        cmap.set_under('gray')
-        scatter = plt.scatter(centroids[:, 0], centroids[:, 1], c=self.labels, cmap=cmap, vmin=0)
-        plt.legend(*scatter.legend_elements(), title="Clusters", loc="upper right")
-        plt.title('Trajectory Clusters')
-        plt.xlabel('X Coordinate')
-        plt.ylabel('Y Coordinate')
-        plt.show()
+    def plot_trajectories(self, ax: plt.Axes | None = None, frame_to_maze: bool = True):
+        traj_centroids = self._calculate_trajectory_centroids()
+        self.vis.plot_trajectories(traj_centroids, ax=ax, frame_to_maze=frame_to_maze)
 
-    def plot_cluster_centroids(self):
-        logger.debug("Plotting cluster centroids")
-        centroids, sizes = self._calculate_cluster_centroids()
-        # Create a custom colormap that maps -1 to gray
-        unique_labels = np.unique(self.labels)
-        scatter = plt.scatter(centroids[:, 0], centroids[:, 1], c=unique_labels[1:], s=sizes)
-        plt.legend(*scatter.legend_elements(), title="Clusters", loc="upper right")
-        handle, labels = scatter.legend_elements(prop = "sizes", alpha = 0.5)
-        plt.legend(handle, labels, title="Cluster Sizes", loc="lower left")
-        plt.title('Cluster Centroids')
-        plt.xlabel('X Coordinate')
-        plt.ylabel('Y Coordinate')
-        plt.show()
-
+    def plot_cluster_centroids(self, ax: plt.Axes | None = None, frame_to_maze: bool = True):
+        cluster_centroids, cluster_sizes = self._calculate_cluster_centroids()
+        self.vis.plot_cluster_centroids(cluster_centroids, cluster_sizes, ax=ax, frame_to_maze=frame_to_maze)
 
     def _sort_labels(self) -> np.ndarray:
         """
@@ -155,8 +151,11 @@ class GeomClustering:
         """
         logger.debug("Calculating trajectory centroids")
         centroids = [np.mean(trajectory, axis=0) for trajectory in self.trajectories]
+        centroids_array = np.array(centroids)
+        if centroids_array.ndim == 1:
+            centroids_array = centroids_array.reshape(-1, 2)  # Reshape to (n_trajectories, 2)
         logger.debug("Trajectory centroids calculated")
-        return np.array(centroids)
+        return centroids_array
     
     def _calculate_cluster_centroids(self) -> np.ndarray:
         """

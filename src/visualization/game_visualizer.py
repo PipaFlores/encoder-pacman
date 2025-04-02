@@ -4,7 +4,7 @@ import seaborn as sns
 from typing import Optional, List, Tuple
 import pandas as pd
 import torch
-import src.analysis as analysis
+from src.analysis import GridAnalyzer
 import src.utils as utils
 import logging
 from src.visualization.base_visualizer import BaseVisualizer
@@ -31,7 +31,7 @@ class GameVisualizer(BaseVisualizer):
         self.logger = logging.getLogger('GameVisualizer')
         logging.basicConfig(level=logging.INFO if verbose else logging.WARNING)
 
-        self.analyzer = analysis.GridAnalyzer(figsize=figsize)
+        self.analyzer = GridAnalyzer(figsize=figsize)
 
 
         if data_folder is None:

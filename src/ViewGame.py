@@ -9,7 +9,7 @@ from src.utils import PacmanDataReader
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize Pac-Man game states")
     parser.add_argument('-g', '--game-id', type=int, default=None, help="Game ID to visualize")
-    parser.add_argument('--playback-speed', type=float, default=2.0, help="Playback speed multiplier")
+    parser.add_argument('--playback-speed', type=float, default=1.0, help="Playback speed multiplier")
     parser.add_argument('--data-path', type=str, default='data/', help="Path to the game state data")
     parser.add_argument('--no-pellets', action='store_false', dest='pellets', help="Disable pellets")
     parser.add_argument('--no-pathfinding', action='store_false', dest='pathfinding', help="Disable A* path finding calculation")
