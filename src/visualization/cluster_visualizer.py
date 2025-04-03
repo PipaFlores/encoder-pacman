@@ -80,6 +80,41 @@ class ClusterVisualizer(BaseVisualizer):
         if show_plot:
             plt.show()
 
+    def plot_non_repetitive_distances_values_barchart(self,
+                                                      ax: plt.Axes | None = None,
+                                                      **kwargs):
+        logger.debug("Plotting non repetitive distances values barchart")
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.figsize)
+            show_plot = True
+        else:
+            show_plot = False
+
+        distances_values = np.sort(self.affinity_matrix[np.triu_indices_from(self.affinity_matrix, k=1)])[::-1]
+        ax.plot(distances_values, **kwargs)
+        ax.set_xlabel('Distance Index (sorted)')
+        ax.set_ylabel('Distance Value')
+        ax.set_title('Non Repetitive Distances Values Barchart')
+        if show_plot:
+            plt.show()
+
+    def plot_average_column_value(self, 
+                                  ax: plt.Axes | None = None):
+        logger.debug("Plotting average column value")
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.figsize)
+            show_plot = True
+        else:
+            show_plot = False
+        
+        average_column_value = np.sort(np.mean(self.affinity_matrix, axis=0))[::-1]
+        ax.plot(average_column_value)
+        ax.set_xlabel('Trajectory Index (sorted)')
+        ax.set_ylabel('Average Column Value')
+        ax.set_title('Average Column Value')
+        if show_plot:
+            plt.show()
+
     def plot_trajectories(self,
                           traj_centroids: np.ndarray,
                           ax: plt.Axes | None = None,

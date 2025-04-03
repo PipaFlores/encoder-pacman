@@ -92,11 +92,46 @@ class GeomClustering:
         logger.debug("HDBSCAN clustering complete")
         return hdbscan.labels_
 
+    ### Affinity Matrix Visualization
+
+    def plot_affinity_matrix_overview(self, axs: np.ndarray[plt.Axes] | None = None):
+        """
+        Plot a summary of the affinity matrix.
+        
+        Args:
+            axs: Axes object to plot on. If None, a new figure and axes are created.
+            array of 4 axes objects.
+        """
+        if axs is None:
+            fig, axs = plt.subplots(1,4, figsize=(24,6))
+            show_plot = True
+        else:
+            show_plot = False
+        
+        self.plot_affinity_matrix(ax=axs[0])
+        self.plot_distance_matrix_histogram(ax=axs[1])
+        self.plot_non_repetitive_distances_values_barchart(ax=axs[2])
+        self.plot_average_column_value(ax=axs[3])
+        fig.suptitle('Affinity Matrix Overview')
+        fig.tight_layout()
+
+        if show_plot:
+            plt.show()
+
     def plot_affinity_matrix(self, ax: plt.Axes | None = None):
         self.vis.plot_affinity_matrix(ax=ax)
 
     def plot_distance_matrix_histogram(self, ax: plt.Axes | None = None, **kwargs):
         self.vis.plot_distance_matrix_histogram(ax=ax, **kwargs)
+
+    def plot_non_repetitive_distances_values_barchart(self, ax: plt.Axes | None = None, **kwargs):
+        self.vis.plot_non_repetitive_distances_values_barchart(ax=ax, **kwargs)
+
+    def plot_average_column_value(self, ax: plt.Axes | None = None):
+        self.vis.plot_average_column_value(ax=ax)
+
+
+    ### Clustering Results Visualization
 
     def plot_trajectories(self, ax: plt.Axes | None = None, frame_to_maze: bool = True):
         traj_centroids = self._calculate_trajectory_centroids()
