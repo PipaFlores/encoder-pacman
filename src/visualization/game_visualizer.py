@@ -26,6 +26,7 @@ class GameVisualizer(BaseVisualizer):
             data_folder: Path to the data folder containing game data, if visualizing by game or user id.
             verbose: Whether to print verbose output
             figsize: Size of the figure (width, height). Default is (6, 6).
+            if multiplot is used, the figsize will be multiplied by the number of plots.
         """
         super().__init__(figsize=figsize)
         self.logger = logging.getLogger('GameVisualizer')
@@ -141,7 +142,8 @@ class GameVisualizer(BaseVisualizer):
         
         # Create a colormap based on time
         norm = plt.Normalize(0, len(segments))
-        colors = plt.colormaps['Spectral'](np.linspace(0, 1, len(segments)))
+        colormap_str = 'Spectral'
+        colors = plt.colormaps[colormap_str](np.linspace(0, 1, len(segments)))
         
         # Plot line segments with arrows
         for i, segment in enumerate(segments):
@@ -154,7 +156,7 @@ class GameVisualizer(BaseVisualizer):
                         head_width=0.3, head_length=0.5, fc=colors[i], ec=colors[i])
         
         # Add colorbar to show time progression
-        sm = plt.cm.ScalarMappable(cmap='Spectral', norm=norm)
+        sm = plt.cm.ScalarMappable(cmap=colormap_str, norm=norm)
         sm.set_array([])  # Set array for the scalar mappable
         plt.colorbar(sm, ax=ax, label='Timestep')  # Specify the axis for the colorbar
         

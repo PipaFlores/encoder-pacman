@@ -6,6 +6,8 @@ from sklearn.cluster import DBSCAN, HDBSCAN
 from src.visualization.cluster_visualizer import ClusterVisualizer
 from src.utils.utils import timer
 from src.utils import setup_logger
+from bokeh.plotting import show, row
+import time
 
 # Initialize module-level logger
 logger = setup_logger(__name__)
@@ -16,7 +18,7 @@ class GeomClustering:
                  cluster_method: str = 'HDBSCAN',
                  verbose: bool = False):
         if verbose:
-            logger.setLevel("DEBUG")
+            logger.setLevel("INFO")
         logger.info(f"Initializing GeomClustering with similarity measure: {similarity_measure}")
         self.trajectories = np.array([])
         self.labels = np.array([])
@@ -24,6 +26,10 @@ class GeomClustering:
         self.similarity_measures = SimilarityMeasures(similarity_measure)
         self.cluster_method = cluster_method
         self.affinity_matrix = np.array([])
+
+        self.trajectories_centroids = np.array([])
+        self.cluster_centroids = np.array([])
+        self.cluster_sizes = np.array([])
 
     def fit(self, 
             trajectories: List[np.ndarray], 
@@ -55,7 +61,8 @@ class GeomClustering:
         Returns:
             np.ndarray: Affinity matrix between all trajectories
         """
-        logger.debug("Calculating affinity matrix")
+        logger.info("Calculating affinity matrix")
+        time_start = time.time()
         num_trajectories = len(trajectories)
         self.affinity_matrix = np.zeros((num_trajectories, num_trajectories))
 
@@ -64,7 +71,7 @@ class GeomClustering:
                 self.affinity_matrix[i, j] = self.similarity_measures.calculate_distance(trajectories[i], trajectories[j])
                 self.affinity_matrix[j, i] = self.affinity_matrix[i, j]
 
-        logger.debug("Affinity matrix calculation complete")
+        logger.info(f"Affinity matrix calculation complete in {round(time.time() - time_start, 2)} seconds")
         return self.affinity_matrix
     
     def cluster_trajectories(self,
@@ -78,18 +85,20 @@ class GeomClustering:
             raise ValueError(f"Invalid cluster method: {cluster_method}")
 
     def _DBSCAN_fit(self, **kwargs):
-        logger.debug("Starting DBSCAN clustering")
         dbscan = DBSCAN(eps=0.5, min_samples=15, metric='precomputed', **kwargs)
+        logger.info(f"Starting DBSCAN clustering with eps={dbscan.eps} and min_samples={dbscan.min_samples}")
+        time_start = time.time()
         dbscan.fit(self.affinity_matrix)
-        logger.debug("DBSCAN clustering complete")
+        logger.info(f"DBSCAN clustering complete in {round(time.time() - time_start, 2)} seconds")
         
         return dbscan.labels_
     
     def _HDBSCAN_fit(self, **kwargs):
-        logger.debug("Starting HDBSCAN clustering")
         hdbscan = HDBSCAN(min_cluster_size=15, metric='precomputed', **kwargs)
+        time_start = time.time()
+        logger.info(f"Starting HDBSCAN clustering with min_cluster_size={hdbscan.min_cluster_size} and min_samples={hdbscan.min_samples}")
         hdbscan.fit(self.affinity_matrix)
-        logger.debug("HDBSCAN clustering complete")
+        logger.info(f"HDBSCAN clustering complete in {round(time.time() - time_start, 2)} seconds")
         return hdbscan.labels_
 
     ### Affinity Matrix Visualization
@@ -109,14 +118,31 @@ class GeomClustering:
             show_plot = False
         
         self.plot_affinity_matrix(ax=axs[0])
+        axs[0].set_title('a) ' + axs[0].get_title())
         self.plot_distance_matrix_histogram(ax=axs[1])
+        axs[1].set_title('b) ' + axs[1].get_title())
         self.plot_non_repetitive_distances_values_barchart(ax=axs[2])
+        axs[2].set_title('c) ' + axs[2].get_title())
         self.plot_average_column_value(ax=axs[3])
-        fig.suptitle('Affinity Matrix Overview')
+        axs[3].set_title('d) ' + axs[3].get_title())
+
+        # Add title to the figure
+        fig.suptitle(f'Affinity Matrix Overview - {self.similarity_measures.measure_type.capitalize()} measure')
         fig.tight_layout()
 
         if show_plot:
             plt.show()
+
+    def plot_interactive_overview(self):
+        p1 = self.vis.plot_affinity_matrix_bokeh()
+
+        if self.trajectories_centroids.size > 0:
+            p2 = self.vis.plot_trajectories_bokeh(traj_centroids=self.trajectories_centroids)
+        else:
+            self._calculate_trajectory_centroids()
+            p2 = self.vis.plot_trajectories_bokeh(traj_centroids=self.trajectories_centroids)
+
+        show(row(p1, p2))
 
     def plot_affinity_matrix(self, ax: plt.Axes | None = None):
         self.vis.plot_affinity_matrix(ax=ax)
@@ -134,12 +160,18 @@ class GeomClustering:
     ### Clustering Results Visualization
 
     def plot_trajectories(self, ax: plt.Axes | None = None, frame_to_maze: bool = True):
-        traj_centroids = self._calculate_trajectory_centroids()
-        self.vis.plot_trajectories(traj_centroids, ax=ax, frame_to_maze=frame_to_maze)
+        if self.trajectories_centroids.size == 0:
+            self._calculate_trajectory_centroids()
+        self.vis.plot_trajectories(self.trajectories_centroids, ax=ax, frame_to_maze=frame_to_maze)
 
     def plot_cluster_centroids(self, ax: plt.Axes | None = None, frame_to_maze: bool = True):
-        cluster_centroids, cluster_sizes = self._calculate_cluster_centroids()
-        self.vis.plot_cluster_centroids(cluster_centroids, cluster_sizes, ax=ax, frame_to_maze=frame_to_maze)
+        if self.cluster_centroids.size == 0:
+            self._calculate_cluster_centroids()
+        self.vis.plot_cluster_centroids(self.cluster_centroids, self.cluster_sizes, ax=ax, frame_to_maze=frame_to_maze)
+
+
+
+
 
     def _sort_labels(self) -> np.ndarray:
         """
@@ -190,6 +222,7 @@ class GeomClustering:
         if centroids_array.ndim == 1:
             centroids_array = centroids_array.reshape(-1, 2)  # Reshape to (n_trajectories, 2)
         logger.debug("Trajectory centroids calculated")
+        self.trajectories_centroids = centroids_array
         return centroids_array
     
     def _calculate_cluster_centroids(self) -> np.ndarray:
@@ -216,6 +249,8 @@ class GeomClustering:
                 cluster_centroids.append(cluster_centroid)
 
         logger.debug("Cluster centroids calculated")
+        self.cluster_centroids = np.array(cluster_centroids)
+        self.cluster_sizes = np.array(cluster_sizes)
         return np.array(cluster_centroids), np.array(cluster_sizes)
     
 
