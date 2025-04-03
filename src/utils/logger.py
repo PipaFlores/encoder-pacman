@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-def setup_logger(name: str = None, level: str = "INFO", log_to_file: bool = False) -> logging.Logger:
+def setup_logger(name: str = None, level: str = "WARNING", log_to_file: bool = False) -> logging.Logger:
     """
     Set up a logger with console handler and optional file handler.
     
