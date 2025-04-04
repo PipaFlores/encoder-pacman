@@ -1,6 +1,6 @@
 import numpy as np
 from typing import List
-from src.analysis.distance_measures import SimilarityMeasures
+from src.analysis.utils.similarity_measures import SimilarityMeasures
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from sklearn.cluster import DBSCAN
