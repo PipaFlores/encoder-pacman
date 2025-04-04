@@ -12,6 +12,8 @@ setup(
         "stumpy",
         "lightning",
         "scikit-learn",
+        "hdbscan",
+        "bokeh",
     ],
     python_requires=">=3.11",
-) 
+)
