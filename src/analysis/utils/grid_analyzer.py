@@ -59,6 +59,7 @@ class GridAnalyzer:
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Calculates a grid storing movement recurrences, i.e. the number of times a position has been visited and in which steps.
+        If velocities is True, it also calculates a grid storing average velocities.
         If aggregate is True, the calculations are aggregated over previous calculated grids.
 
         Args:
