@@ -1,5 +1,6 @@
 import numpy as np
 from typing import List
+import tqdm
 from src.analysis.utils.similarity_measures import SimilarityMeasures
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
@@ -75,6 +76,7 @@ class GeomClustering:
         self,
         trajectories: np.ndarray |List[np.ndarray],
         cluster_method: str | None = None,
+        recalculate_affinity_matrix: bool = False,
         **kwargs,
     ) -> np.ndarray:
         """
@@ -91,7 +93,8 @@ class GeomClustering:
             trajectories (List[np.ndarray]): List of trajectory arrays, each with shape (num_timesteps, 2)
             cluster_method (str | None, optional): Override the clustering method for this fit.
                 If None, uses the method specified at initialization. Defaults to None.
-            **kwargs: Additional parameters to pass to the clustering algorithm.
+            recalculate_affinity_matrix (bool, optional): Whether to recalculate the affinity matrix.
+            **kwargs: Additional parameters to pass to the clustering algorithm.(i.e., min_cluster_size, min_samples for HDBSCAN)
         
         Returns:
             np.ndarray: Array of cluster labels for each trajectory
@@ -105,7 +108,12 @@ class GeomClustering:
         self.trajectories = np.array(
             trajectories
         )  # Array is (num_trajectories, num_timesteps, 2)
-        self.affinity_matrix = self.calculate_affinity_matrix(trajectories)
+
+        if recalculate_affinity_matrix or self.affinity_matrix.size == 0:
+            self.affinity_matrix = self.calculate_affinity_matrix(trajectories)
+        else:
+            logger.info("Using existing affinity matrix")
+
         self.clusterer = self.cluster_trajectories(cluster_method, **kwargs)
         self.cluster_centroids, self.cluster_sizes = (
             np.array([]),
@@ -142,14 +150,18 @@ class GeomClustering:
         num_trajectories = len(trajectories)
         self.affinity_matrix = np.zeros((num_trajectories, num_trajectories))
 
-        for i in range(num_trajectories):
-            for j in range(i + 1, num_trajectories):
-                self.affinity_matrix[i, j] = (
+        total_pairs = num_trajectories * (num_trajectories - 1) // 2
+
+        with tqdm.tqdm(total=total_pairs, desc="Calculating affinity matrix") as pbar:
+            for i in range(num_trajectories):
+                for j in range(i + 1, num_trajectories):
+                    self.affinity_matrix[i, j] = (
                     self.similarity_measures.calculate_distance(
                         trajectories[i], trajectories[j]
+                        )
                     )
-                )
-                self.affinity_matrix[j, i] = self.affinity_matrix[i, j]
+                    self.affinity_matrix[j, i] = self.affinity_matrix[i, j]
+                    pbar.update(1)
 
         logger.info(
             f"Affinity matrix calculation complete in {round(time.time() - time_start, 2)} seconds"
