@@ -6,7 +6,7 @@ from src.analysis.utils.grid_analyzer import GridAnalyzer
 import src.utils as utils
 import logging
 from src.visualization.base_visualizer import BaseVisualizer
-from src.utils import PacmanDataReader
+from src.datahandlers import PacmanDataReader, Trajectory
 from src.config.defaults import config
 
 
@@ -71,14 +71,14 @@ class GameVisualizer(BaseVisualizer):
             normalize: Whether to normalize the heatmap values
         """
         if game_id is not None:
-            trajectory_array = self.datareader.get_trajectory_array(game_id=game_id)
+            trajectory_array = self.datareader.get_trajectory(game_id=game_id)
             title_id = f"game {game_id}"
         elif trajectory is not None:
             trajectory_array = self._format_trajectory_data(trajectory=trajectory)
             title_id = f"trajectory {title_id}"
         else:
             raise ValueError("Either game_id or trajectory must be provided")
-        
+
         self.analyzer.calculate_recurrence_grid(
             trajectory=trajectory_array,
             calculate_velocities=False,
@@ -107,7 +107,7 @@ class GameVisualizer(BaseVisualizer):
     def plot_trajectory_line(
         self,
         game_id: int | None = None,
-        trajectory: torch.Tensor | np.ndarray | None = None,
+        trajectory: Trajectory | torch.Tensor | np.ndarray | None = None,
         time_step_delta: int = 1,
         show_maze: bool = True,
         show_pellet: bool = False,
@@ -120,7 +120,7 @@ class GameVisualizer(BaseVisualizer):
         Create a line plot with smart trajectory offsetting based on movement direction.
         """
         if game_id is not None:
-            trajectory = self.datareader.get_trajectory_array(game_id=game_id)
+            trajectory = self.datareader.get_trajectory(game_id=game_id)
             if title_id is None:
                 title_id = f"game {game_id}"
         elif trajectory is not None:
@@ -234,7 +234,7 @@ class GameVisualizer(BaseVisualizer):
         Plot the velocity grid for a game trajectory.
         """
         if game_id is not None:
-            trajectory_array = self.datareader.get_trajectory_array(game_id=game_id)
+            trajectory_array = self.datareader.get_trajectory(game_id=game_id)
             title_id = f"game {game_id}"
         elif trajectory is not None:
             trajectory_array = self._format_trajectory_data(trajectory=trajectory)
@@ -271,7 +271,7 @@ class GameVisualizer(BaseVisualizer):
         Plot the count grid for a game trajectory.
         """
         if game_id is not None:
-            trajectory_array = self.datareader.get_trajectory_array(game_id=game_id)
+            trajectory_array = self.datareader.get_trajectory(game_id=game_id)
             title_id = f"game {game_id}"
         elif trajectory is not None:
             trajectory_array = self._format_trajectory_data(trajectory=trajectory)
@@ -307,7 +307,7 @@ class GameVisualizer(BaseVisualizer):
         Plot the trajectory points as a scatter plot, without the use of grids.
         """
         if game_id is not None:
-            trajectory = self.datareader.get_trajectory_array(game_id=game_id)
+            trajectory = self.datareader.get_trajectory(game_id=game_id)
             title_id = f"game {game_id}"
         elif trajectory is not None:
             trajectory = self._format_trajectory_data(trajectory=trajectory)
@@ -439,15 +439,18 @@ class GameVisualizer(BaseVisualizer):
         plt.show()
 
     def _format_trajectory_data(
-        self, trajectory: torch.Tensor | np.ndarray
+        self, trajectory: Trajectory | torch.Tensor | np.ndarray
     ) -> np.ndarray:
         """
-        Format trajectory data from a trajectory tensor or numpy array.
+        Format trajectory data from a trajectory tensor or numpy array of shape (N, 2) where N is the number of timesteps
+        If there are multiple feeded, it ill be reshaped to (N, 2).
         """
         if isinstance(trajectory, torch.Tensor):
             trajectory = trajectory.cpu().numpy()
         elif isinstance(trajectory, np.ndarray):
             pass
+        elif isinstance(trajectory, Trajectory):
+            trajectory = trajectory.coordinates
         else:
             raise ValueError("trajectory must be either a torch.Tensor or np.ndarray")
 

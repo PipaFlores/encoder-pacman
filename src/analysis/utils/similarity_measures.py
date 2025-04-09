@@ -94,7 +94,10 @@ class SimilarityMeasures:
         return (np.abs(x2 - x1) + np.abs(y2 - y1)).sum()
 
     def calculate_dtw_distance(
-        self, trajectory1: np.ndarray, trajectory2: np.ndarray, _return_matrix: bool = False
+        self,
+        trajectory1: np.ndarray,
+        trajectory2: np.ndarray,
+        _return_matrix: bool = False,
     ) -> float:
         """
         Calculate Dynamic Time Warping (DTW) distance between two trajectories.
@@ -109,28 +112,30 @@ class SimilarityMeasures:
         """
         n = len(trajectory1)
         m = len(trajectory2)
-    
+
         # Create cost matrix
         dtw_matrix = np.full((n + 1, m + 1), np.inf)
         dtw_matrix[0, 0] = 0
-        
+
         # Fill the cost matrix with cumulative distances
         for i in range(1, n + 1):
             for j in range(1, m + 1):
                 # Calculate Euclidean distance between points
-                cost = np.sqrt((trajectory1[i-1, 0] - trajectory2[j-1, 0])**2 + (trajectory1[i-1, 1] - trajectory2[j-1, 1])**2)
+                cost = np.sqrt(
+                    (trajectory1[i - 1, 0] - trajectory2[j - 1, 0]) ** 2
+                    + (trajectory1[i - 1, 1] - trajectory2[j - 1, 1]) ** 2
+                )
                 # Update DTW matrix
                 dtw_matrix[i, j] = cost + min(
-                    dtw_matrix[i-1, j],    # insertion
-                    dtw_matrix[i, j-1],    # deletion
-                    dtw_matrix[i-1, j-1]   # match
+                    dtw_matrix[i - 1, j],  # insertion
+                    dtw_matrix[i, j - 1],  # deletion
+                    dtw_matrix[i - 1, j - 1],  # match
                 )
-        
+
         if _return_matrix:
             return dtw_matrix
         else:
-            return dtw_matrix[-1, -1] # last element of the matrix, total distance
-        
+            return dtw_matrix[-1, -1]  # last element of the matrix, total distance
 
     def _plot_dtw_path(self, trajectory1, trajectory2, ax: plt.Axes | None = None):
         """
@@ -144,22 +149,26 @@ class SimilarityMeasures:
         Returns:
             None
         """
-        DTW_matrix = self.calculate_dtw_distance(trajectory1, trajectory2, _return_matrix=True)
+        DTW_matrix = self.calculate_dtw_distance(
+            trajectory1, trajectory2, _return_matrix=True
+        )
 
         n = DTW_matrix.shape[0] - 1
         m = DTW_matrix.shape[1] - 1
 
-        Path = [(n,m)]
+        Path = [(n, m)]
 
         while n > 0 or m > 0:
-            val = min(DTW_matrix[n-1,m-1], DTW_matrix[n-1,m], DTW_matrix[n, m-1])
-            if val == DTW_matrix[n-1,m-1]:
-                min_val = (n-1, m-1)
-            elif val == DTW_matrix[n-1,m]:
-                min_val = (n-1, m)
-            elif val == DTW_matrix[n,m-1]:
-                min_val = (n,m-1)
-            (n,m) = min_val
+            val = min(
+                DTW_matrix[n - 1, m - 1], DTW_matrix[n - 1, m], DTW_matrix[n, m - 1]
+            )
+            if val == DTW_matrix[n - 1, m - 1]:
+                min_val = (n - 1, m - 1)
+            elif val == DTW_matrix[n - 1, m]:
+                min_val = (n - 1, m)
+            elif val == DTW_matrix[n, m - 1]:
+                min_val = (n, m - 1)
+            (n, m) = min_val
             if n > 0 and m > 0:
                 Path.append(min_val)
 
@@ -178,14 +187,22 @@ class SimilarityMeasures:
 
         for i in range(DTW_matrix.shape[0]):
             for j in range(DTW_matrix.shape[1]):
-                text = ax.text(j, i, f"{DTW_matrix[i,j]:.1f}", ha="center", va="center", color="white")
-        
-        ax.imshow(DTW_matrix, cmap='viridis')
-        ax.plot(Path[:, 1], Path[:, 0], 'r-', label='DTW Path') # Rows are vertical movement, columns are horizontal movement
+                text = ax.text(
+                    j,
+                    i,
+                    f"{DTW_matrix[i, j]:.1f}",
+                    ha="center",
+                    va="center",
+                    color="white",
+                )
+
+        ax.imshow(DTW_matrix, cmap="viridis")
+        ax.plot(
+            Path[:, 1], Path[:, 0], "r-", label="DTW Path"
+        )  # Rows are vertical movement, columns are horizontal movement
 
         if show_plot:
             plt.show()
-        
 
     def calculate_edr_distance(
         self, trajectory1: np.ndarray, trajectory2: np.ndarray

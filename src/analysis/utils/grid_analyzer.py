@@ -43,12 +43,8 @@ class GridAnalyzer:
         self.recurrence_idx_grid = np.empty(
             (self.GRID_SIZE_Y, self.GRID_SIZE_X), dtype=object
         )
-        self.recurrence_count_grid = np.zeros(
-            (self.GRID_SIZE_Y, self.GRID_SIZE_X)
-        )
-        self.velocity_grid = np.zeros(
-            (self.GRID_SIZE_Y, self.GRID_SIZE_X, 2)
-        )
+        self.recurrence_count_grid = np.zeros((self.GRID_SIZE_Y, self.GRID_SIZE_X))
+        self.velocity_grid = np.zeros((self.GRID_SIZE_Y, self.GRID_SIZE_X, 2))
 
     def calculate_recurrence_grid(
         self,

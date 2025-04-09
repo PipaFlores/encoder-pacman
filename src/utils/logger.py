@@ -7,7 +7,7 @@ def setup_logger(
     name: str = None, level: str = "WARNING", log_to_file: bool = False
 ) -> logging.Logger:
     """
-    Set up a logger with console handler and optional file handler.
+    Set up a logger with console handlers for both INFO and DEBUG levels.
 
     Args:
         name (str): Name of the logger (usually __name__ from the calling module)
@@ -31,7 +31,8 @@ def setup_logger(
         file_formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-        console_formatter = logging.Formatter("%(levelname)s - %(name)s - %(message)s")
+        info_formatter = logging.Formatter("%(levelname)s - %(name)s - %(message)s")
+        debug_formatter = logging.Formatter("DEBUG - %(name)s - %(message)s")
 
         # File handler (optional)
         if log_to_file:
@@ -43,11 +44,19 @@ def setup_logger(
             file_handler.setLevel(logging.DEBUG)
             logger.addHandler(file_handler)
 
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(console_formatter)
-        console_handler.setLevel(logging.INFO)
-        logger.addHandler(console_handler)
+        # INFO console handler
+        info_console_handler = logging.StreamHandler()
+        info_console_handler.setFormatter(info_formatter)
+        info_console_handler.setLevel(logging.INFO)
+        info_console_handler.addFilter(lambda record: record.levelno == logging.INFO)
+        logger.addHandler(info_console_handler)
+
+        # DEBUG console handler
+        debug_console_handler = logging.StreamHandler()
+        debug_console_handler.setFormatter(debug_formatter)
+        debug_console_handler.setLevel(logging.DEBUG)
+        debug_console_handler.addFilter(lambda record: record.levelno == logging.DEBUG)
+        logger.addHandler(debug_console_handler)
 
     return logger
 

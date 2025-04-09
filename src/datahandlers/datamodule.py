@@ -6,7 +6,7 @@ from typing import Optional, List
 import sys
 
 sys.path.append("..")
-from src.utils import PacmanDataReader
+from .pacman_data_reader import PacmanDataReader
 
 
 class TrajectoryDataset(Dataset):

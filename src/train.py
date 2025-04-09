@@ -7,7 +7,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.datamodule.datamodule import TrajectoryDataModule
+from src.datahandlers.datamodule import TrajectoryDataModule
 from src.models.LSTM import LSTMAutoencoder
 
 
