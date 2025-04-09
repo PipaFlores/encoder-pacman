@@ -7,6 +7,7 @@ from matplotlib.gridspec import GridSpec
 from sklearn.cluster import DBSCAN
 import hdbscan
 from src.visualization.cluster_visualizer import ClusterVisualizer
+from src.datahandlers import Trajectory
 
 from src.utils import setup_logger
 from bokeh.plotting import show, row
@@ -19,14 +20,14 @@ logger = setup_logger(__name__)
 class GeomClustering:
     """
     A class for clustering and analyzing geometric trajectories.
-    
+
     This class provides functionality to cluster trajectories based on their geometric similarity
     using either DBSCAN or HDBSCAN algorithms. It calculates affinity matrices between trajectories
     and provides various visualization methods for analyzing the clustering results.
-    
+
     The class is particularly useful for analyzing movement patterns in game AI, such as Pac-Man
     trajectories, by grouping similar movement patterns together.
-    
+
     Attributes:
         trajectories (np.ndarray): Array of trajectory data, shape (num_trajectories, num_timesteps, 2)
         trajectories_centroids (np.ndarray): Centroids of each trajectory
@@ -39,6 +40,7 @@ class GeomClustering:
         cluster_sizes (np.ndarray): Number of trajectories in each cluster
         vis (ClusterVisualizer): Visualizer for clustering results
     """
+
     def __init__(
         self,
         similarity_measure: str = "euclidean",
@@ -47,7 +49,7 @@ class GeomClustering:
     ):
         """
         Initialize the GeomClustering object.
-        
+
         Args:
             similarity_measure (str, optional): Method for calculating distances between trajectories.
                 Defaults to "euclidean".
@@ -74,28 +76,28 @@ class GeomClustering:
 
     def fit(
         self,
-        trajectories: np.ndarray |List[np.ndarray],
+        trajectories: Trajectory | List[Trajectory] | np.ndarray | List[np.ndarray],
         cluster_method: str | None = None,
         recalculate_affinity_matrix: bool = False,
         **kwargs,
     ) -> np.ndarray:
         """
         Fit the clustering model to the provided trajectories.
-        
+
         This method performs the following steps:
         1. Converts trajectories to numpy array (if not already)
         2. Calculates the affinity matrix between all trajectory pairs
         3. Applies the specified clustering algorithm
         4. Sorts and remaps cluster labels by size
         5. Initializes the visualizer
-        
+
         Args:
             trajectories (List[np.ndarray]): List of trajectory arrays, each with shape (num_timesteps, 2)
             cluster_method (str | None, optional): Override the clustering method for this fit.
                 If None, uses the method specified at initialization. Defaults to None.
             recalculate_affinity_matrix (bool, optional): Whether to recalculate the affinity matrix.
             **kwargs: Additional parameters to pass to the clustering algorithm.(i.e., min_cluster_size, min_samples for HDBSCAN)
-        
+
         Returns:
             np.ndarray: Array of cluster labels for each trajectory
         """
@@ -131,17 +133,19 @@ class GeomClustering:
         )  # Init visualizer
         return self.labels
 
-    def calculate_affinity_matrix(self, trajectories: np.ndarray | List[np.ndarray]) -> np.ndarray:
+    def calculate_affinity_matrix(
+        self, trajectories: np.ndarray | List[np.ndarray]
+    ) -> np.ndarray:
         """
         Calculate affinity matrix between all trajectories in the list.
-        
+
         The affinity matrix is a symmetric matrix where each element (i,j) represents
         the distance between trajectory i and trajectory j according to the specified
         similarity measure.
-        
+
         Args:
             trajectories (np.ndarray | List[np.ndarray]): List of trajectory arrays to compare
-            
+
         Returns:
             np.ndarray: Affinity matrix of shape (num_trajectories, num_trajectories)
         """
@@ -156,8 +160,8 @@ class GeomClustering:
             for i in range(num_trajectories):
                 for j in range(i + 1, num_trajectories):
                     self.affinity_matrix[i, j] = (
-                    self.similarity_measures.calculate_distance(
-                        trajectories[i], trajectories[j]
+                        self.similarity_measures.calculate_distance(
+                            trajectories[i], trajectories[j]
                         )
                     )
                     self.affinity_matrix[j, i] = self.affinity_matrix[i, j]
@@ -168,18 +172,16 @@ class GeomClustering:
         )
         return self.affinity_matrix
 
-    def cluster_trajectories(
-        self, cluster_method: str = "HDBSCAN", **kwargs
-    ):
+    def cluster_trajectories(self, cluster_method: str = "HDBSCAN", **kwargs):
         """
         Apply clustering algorithm to the affinity matrix.
-        
+
         Args:
             cluster_method (str, optional): Algorithm to use. Options are "DBSCAN" or "HDBSCAN".
                 Defaults to "HDBSCAN".
             **kwargs: Parameters to pass to the clustering algorithm.
-            
-            
+
+
         Raises:
             ValueError: If an invalid clustering method is specified
         """
@@ -193,10 +195,10 @@ class GeomClustering:
     def _DBSCAN_fit(self, **kwargs):
         """
         Fit DBSCAN clustering to the affinity matrix.
-        
+
         Args:
             **kwargs: Parameters to pass to DBSCAN
-            
+
         Returns:
             The fitted DBSCAN model
         """
@@ -215,10 +217,10 @@ class GeomClustering:
     def _HDBSCAN_fit(self, **kwargs):
         """
         Fit HDBSCAN clustering to the affinity matrix.
-        
+
         Args:
             **kwargs: Parameters to pass to HDBSCAN
-            
+
         Returns:
             The fitted HDBSCAN model
         """
@@ -238,13 +240,13 @@ class GeomClustering:
     def plot_affinity_matrix_overview(self, axs: np.ndarray[plt.Axes] | None = None):
         """
         Plot a comprehensive overview of the affinity matrix.
-        
+
         Creates a figure with 4 subplots showing different aspects of the affinity matrix:
         a) The affinity matrix heatmap
         b) Histogram of distances in the matrix
         c) Bar chart of non-repetitive distance values
         d) Average column values
-        
+
         Args:
             axs (np.ndarray[plt.Axes] | None, optional): Array of 4 axes objects to plot on.
                 If None, a new figure and axes are created. Defaults to None.
@@ -276,11 +278,11 @@ class GeomClustering:
     def plot_interactive_overview(self):
         """
         Create an interactive visualization of the affinity matrix and trajectories.
-        
+
         Uses Bokeh to create an interactive plot with:
         - Affinity matrix heatmap
         - Trajectory visualization
-        
+
         The plots are displayed side by side in a row.
         """
         p1 = self.vis.plot_affinity_matrix_bokeh()
@@ -300,7 +302,7 @@ class GeomClustering:
     def plot_affinity_matrix(self, ax: plt.Axes | None = None):
         """
         Plot the affinity matrix as a heatmap.
-        
+
         Args:
             ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
             Defaults to None.
@@ -310,7 +312,7 @@ class GeomClustering:
     def plot_distance_matrix_histogram(self, ax: plt.Axes | None = None, **kwargs):
         """
         Plot a histogram of distances from the affinity matrix.
-        
+
         Args:
             ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
             Defaults to None.
@@ -323,7 +325,7 @@ class GeomClustering:
     ):
         """
         Plot a bar chart of unique distance values from the affinity matrix.
-        
+
         Args:
             ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
             Defaults to None.
@@ -334,7 +336,7 @@ class GeomClustering:
     def plot_average_column_value(self, ax: plt.Axes | None = None):
         """
         Plot the average value for each column in the affinity matrix.
-        
+
         Args:
             ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
             Defaults to None.
@@ -346,7 +348,7 @@ class GeomClustering:
     def plot_trajectories(self, ax: plt.Axes | None = None, frame_to_maze: bool = True):
         """
         Plot all trajectories with their cluster assignments.
-        
+
         Args:
             ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
             Defaults to None.
@@ -364,7 +366,7 @@ class GeomClustering:
     ):
         """
         Plot the centroids of each cluster.
-        
+
         Args:
             ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
             Defaults to None.
@@ -385,11 +387,11 @@ class GeomClustering:
     ):
         """
         Plot an overview of a specific cluster showing velocity grid, heatmap and sample trajectories.
-        
+
         This method creates a figure with 6 subplots arranged in a 2x4 grid:
         - Left column (2 rows): Velocity grid and heatmap of the entire cluster
         - Right column (4 rows): 4 randomly selected sample trajectories from the cluster
-        
+
         Args:
             cluster_id (int): ID of the cluster to visualize
             figsize (tuple[int, int], optional): Figure size as (width, height). Defaults to (18, 6).
@@ -400,6 +402,7 @@ class GeomClustering:
         ]
 
         from src.visualization.game_visualizer import GameVisualizer  # Lazy import
+
         viz = GameVisualizer()
         fig = plt.figure(figsize=figsize)
         G = GridSpec(2, 4, width_ratios=[2, 2, 1, 1], height_ratios=[1, 1])
@@ -422,6 +425,7 @@ class GeomClustering:
             axs=[ax3, ax4, ax5, ax6],
             show_maze=False,
         )
+
     def _sort_labels(self) -> np.ndarray:
         """
         Sort cluster labels based on the number of trajectories in each cluster and
