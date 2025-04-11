@@ -59,6 +59,7 @@ class ClusterVisualizer(BaseVisualizer):
         row_indices, col_indices = np.meshgrid(
             np.arange(shape[0]), np.arange(shape[1]), indexing="ij"
         )
+        # TODO include trajectory metadata in tooltips
 
         source = ColumnDataSource(
             data=dict(
@@ -163,6 +164,9 @@ class ClusterVisualizer(BaseVisualizer):
         if show_plot:
             plt.show()
 
+
+    ### Cluster Visualization
+
     def plot_trajectories(
         self,
         traj_centroids: np.ndarray,
@@ -193,6 +197,7 @@ class ClusterVisualizer(BaseVisualizer):
             plt.show()
 
     def plot_trajectories_bokeh(self, traj_centroids: np.ndarray):
+        # TODO include trajectory metadata in tooltips
         source = ColumnDataSource(
             data=dict(
                 x=traj_centroids[:, 0],

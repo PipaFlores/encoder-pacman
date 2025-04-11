@@ -127,6 +127,9 @@ class PacmanDataReader:
             n_games = len(
                 self.game_df[self.game_df["game_id"].isin(game_id)]["game_id"].unique()
             )
+            if n_games == 0:
+                logger.info("No games found")
+                return None
 
         elif user_id is not None:
             logger.debug(f"Filtering gamestate data for user {user_id}...")
@@ -140,6 +143,9 @@ class PacmanDataReader:
                 filtered_df = self.gamestate_df[
                     self.gamestate_df["game_id"].isin(user_games_list)
                 ]
+            else:
+                logger.info("No games found")
+                return None
 
         if include_metadata:
             games_meta_df = (
@@ -185,10 +191,7 @@ class PacmanDataReader:
             f"Time taken to filter gamestate data: {time.time() - time_start} seconds"
         )
 
-        if len(filtered_df) == 0:
-            return None
-        else:
-            return filtered_df, metadata
+        return filtered_df, metadata
 
     def get_trajectory(
         self,
