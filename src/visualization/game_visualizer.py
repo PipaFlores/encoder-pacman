@@ -53,12 +53,13 @@ class GameVisualizer(BaseVisualizer):
     def plot_heatmap(
         self,
         game_id: int | list[int] | None = None,
-        trajectory: torch.Tensor | np.ndarray | None = None,
+        trajectory: Trajectory | torch.Tensor | np.ndarray | None = None,
         show_maze: bool = True,
         show_pellet: bool = False,
         normalize: bool = True,
         ax: plt.Axes | None = None,
-        title_id: int = None,
+        title_id: int | None = None,
+        metadata_label: str |list[str] | None = None
     ) -> None:
         """
         Create a heatmap visualization of a game trajectory.
@@ -71,38 +72,59 @@ class GameVisualizer(BaseVisualizer):
             normalize: Whether to normalize the heatmap values
         """
         if game_id is not None:
-            trajectory_array = self.datareader.get_trajectory(game_id=game_id)
+            trajectory = self.datareader.get_trajectory(game_id=game_id)
             title_id = f"game {game_id}"
         elif trajectory is not None:
-            trajectory_array = self._format_trajectory_data(trajectory=trajectory)
+            trajectory = self._format_trajectory_data(trajectory=trajectory)
             title_id = f"trajectory {title_id}"
         else:
             raise ValueError("Either game_id or trajectory must be provided")
 
+
         self.analyzer.calculate_recurrence_grid(
-            trajectory=trajectory_array,
+            trajectory=trajectory,
             calculate_velocities=False,
             aggregate=False,
             normalize=normalize,
         )
 
-        self._plot_heatmap(
-            count_grid=self.analyzer.recurrence_count_grid,
-            walls=show_maze,
-            pellets=show_pellet,
-            ax=ax,
-            title_id=title_id,
+        """Plot the heatmap."""
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.figsize)
+            show_plot = True
+        else:
+            show_plot = False
+
+        ax.imshow(
+            self.analyzer.recurrence_count_grid,
+            extent=[
+                self.MAZE_X_MIN - 0.5,
+                self.MAZE_X_MAX + 0.5,
+                self.MAZE_Y_MIN - 0.5,
+                self.MAZE_Y_MAX + 0.5,
+            ],
+            origin="lower",
+            cmap="YlOrRd",
+            aspect="equal",
         )
 
-        # self.analyzer.plot_heatmap(
-        #     trajectory=trajectory,
-        #     aggregate=False,
-        #     walls=show_maze,
-        #     pellets=show_pellet,
-        #     normalize=normalize,
-        #     ax=ax,
-        #     title_id=title_id,
-        # )
+        self._plot_walls_and_pellets(show_maze, show_pellet, ax=ax)
+        ax.grid(True, alpha=0.3)
+
+        # Set metadata on title
+        if isinstance(trajectory, Trajectory) and metadata_label:
+            title_id = ""
+            metadata_label = [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            for column in metadata_label:
+                title_id += f"{column} {trajectory.metadata[column]} "
+
+        ax.set_title(
+            f"Trajectory Heatmap - {title_id if title_id is not None else ' '}"
+        )
+        if show_plot:
+            plt.show()
+
+
 
     def plot_trajectory_line(
         self,
@@ -115,6 +137,7 @@ class GameVisualizer(BaseVisualizer):
         offset_scale: float = 0.5,
         ax: plt.Axes | None = None,
         title_id: int = None,
+        metadata_label: str | list[str] | None = None
     ) -> None:
         """
         Create a line plot with smart trajectory offsetting based on movement direction.
@@ -213,6 +236,14 @@ class GameVisualizer(BaseVisualizer):
 
         ax.set_xlim(self.MAZE_X_MIN, self.MAZE_X_MAX)
         ax.set_ylim(self.MAZE_Y_MIN, self.MAZE_Y_MAX)
+
+        # Set metadata on title
+        if isinstance(trajectory, Trajectory) and metadata_label:
+            title_id = ""
+            metadata_label = [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            for column in metadata_label:
+                title_id += f"{column} {trajectory.metadata[column]} "
+
         ax.set_title(f"Pacman Trajectory - {title_id}")
         ax.set_xlabel("X Position")
         ax.set_ylabel("Y Position")
@@ -229,6 +260,7 @@ class GameVisualizer(BaseVisualizer):
         normalize: bool = False,
         ax: plt.Axes | None = None,
         title_id: int = None,
+        metadata_label: str | list[str] | None = None
     ) -> None:
         """
         Plot the velocity grid for a game trajectory.
@@ -249,13 +281,51 @@ class GameVisualizer(BaseVisualizer):
             normalize=normalize,
         )
 
-        self._plot_velocity_grid(
-            velocity_grid=self.analyzer.velocity_grid,
-            walls=show_maze,
-            pellets=show_pellet,
-            ax=ax,
-            title_id=title_id,
+
+
+        """Plot the vector grid."""
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.figsize)
+            show_plot = True
+        else:
+            show_plot = False
+
+        ax.set_xlim(self.MAZE_X_MIN - 0.5, self.MAZE_X_MAX + 0.5)
+        ax.set_ylim(self.MAZE_Y_MIN - 0.5, self.MAZE_Y_MAX + 0.5)
+
+        walls_positions, _ = self._plot_walls_and_pellets(
+            show_maze, show_pellet, ax=ax, return_transformed_positions=True
         )
+
+        for i in range(len(self.y_grid)):
+            for j in range(len(self.x_grid)):
+                if (self.x_grid[j], self.y_grid[i]) not in walls_positions:
+                    ax.arrow(
+                        self.x_grid[j],
+                        self.y_grid[i],
+                        self.analyzer.velocity_grid[i, j, 0],
+                        self.analyzer.velocity_grid[i, j, 1],
+                        head_width=0.2,
+                        head_length=0.2,
+                        fc="red",
+                        ec="red",
+                    )
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+
+        # Set metadata on title
+        if isinstance(trajectory, Trajectory) and metadata_label:
+            title_id = ""
+            metadata_label = [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            for column in metadata_label:
+                title_id += f"{column} {trajectory.metadata[column]} "
+
+        ax.set_title(f"Velocity Grid - {title_id if title_id is not None else ' '}")
+
+        ax.grid(True, alpha=0.3)
+        if show_plot:
+            plt.show()
 
     def plot_count_grid(
         self,
@@ -266,6 +336,7 @@ class GameVisualizer(BaseVisualizer):
         normalize: bool = False,
         ax: plt.Axes | None = None,
         title_id: int = None,
+        metadata_label: str | list[str] | None = None
     ) -> None:
         """
         Plot the count grid for a game trajectory.
@@ -286,13 +357,51 @@ class GameVisualizer(BaseVisualizer):
             normalize=normalize,
         )
 
-        self._plot_count_grid(
-            count_grid=self.analyzer.recurrence_count_grid,
-            walls=show_maze,
-            pellets=show_pellet,
-            ax=ax,
-            title_id=title_id,
+        """Plot the count grid."""
+        if ax is None:
+            fig, ax = plt.subplots(figsize=self.figsize)
+            show_plot = True
+        else:
+            show_plot = False
+
+        ax.set_xlim(self.MAZE_X_MIN - 0.5, self.MAZE_X_MAX + 0.5)
+        ax.set_ylim(self.MAZE_Y_MIN - 0.5, self.MAZE_Y_MAX + 0.5)
+
+        for i in range(len(self.y_grid)):
+            for j in range(len(self.x_grid)):
+                if self.analyzer.recurrence_count_grid[i, j] != 0:
+                    ax.text(
+                        self.x_grid[j],
+                        self.y_grid[i],
+                        int(self.analyzer.recurrence_count_grid[i, j]),
+                        ha="center",
+                        va="center",
+                        color="black",
+                        bbox=dict(
+                            facecolor="white",
+                            edgecolor="black",
+                            boxstyle="round,pad=0.3",
+                        ),
+                    )
+
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+
+        # Set metadata on title
+        if isinstance(trajectory, Trajectory) and metadata_label:
+            title_id = ""
+            metadata_label = [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            for column in metadata_label:
+                title_id += f"{column} {trajectory.metadata[column]} "
+
+        ax.set_title(
+            f"Trajectory Count Grid - {title_id if title_id is not None else ' '}"
         )
+
+        self._plot_walls_and_pellets(show_maze, show_pellet, ax=ax)
+        ax.grid(True, alpha=0.3)
+        if show_plot:
+            plt.show()
 
     def plot_trajectory_scatter(
         self,
@@ -401,7 +510,7 @@ class GameVisualizer(BaseVisualizer):
                     **kwargs,
                 )
             elif plot_type == "heatmap":
-                self._plot_heatmap(
+                self.plot_heatmap(
                     ax=ax,
                     game_id=game_id,
                     trajectory=trajectory,
@@ -417,7 +526,7 @@ class GameVisualizer(BaseVisualizer):
                     **kwargs,
                 )
             elif plot_type == "velocity":
-                self._plot_velocity_grid(
+                self.plot_velocity_grid(
                     ax=ax,
                     game_id=game_id,
                     trajectory=trajectory,
@@ -443,14 +552,14 @@ class GameVisualizer(BaseVisualizer):
     ) -> np.ndarray:
         """
         Format trajectory data from a trajectory tensor or numpy array of shape (N, 2) where N is the number of timesteps
-        If there are multiple feeded, it ill be reshaped to (N, 2).
+        If there are multiple feeded, it ill be reshaped to (N, 2). If there is a Trajectory object, it will be returned as is.
         """
         if isinstance(trajectory, torch.Tensor):
             trajectory = trajectory.cpu().numpy()
         elif isinstance(trajectory, np.ndarray):
             pass
         elif isinstance(trajectory, Trajectory):
-            trajectory = trajectory.coordinates
+            return trajectory
         else:
             raise ValueError("trajectory must be either a torch.Tensor or np.ndarray")
 
