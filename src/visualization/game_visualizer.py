@@ -450,15 +450,17 @@ class GameVisualizer(BaseVisualizer):
 
     def plot_multiple_trajectories(
         self,
-        game_ids: List[int] = None,
-        trajectories: List[torch.Tensor | np.ndarray] = None,
+        game_ids: List[int] | None = None,
+        trajectories: List[torch.Tensor | np.ndarray | Trajectory] | None = None,
         plot_type: str = "line",
         n_cols: int = 4,
         show_maze: bool = True,
         show_pellet: bool = False,
         axs: list[plt.Axes] | None = None,
+        metadata_label: str | list[str] | None = "game_id",
         **kwargs,
     ) -> None:
+
         """
         Create subplots of multiple trajectories.
 
@@ -469,6 +471,7 @@ class GameVisualizer(BaseVisualizer):
             n_cols: Number of columns in the subplot grid
             show_maze: Whether to show maze walls
             show_pellet: Whether to show pellets
+            axs: Passed axes, usually 4
             **kwargs: Additional arguments to pass to the individual plotting functions
         """
         if game_ids is not None:
@@ -507,6 +510,7 @@ class GameVisualizer(BaseVisualizer):
                     game_id=game_id,
                     trajectory=trajectory,
                     title_id=title_id,
+                    metadata_label=metadata_label,
                     **kwargs,
                 )
             elif plot_type == "heatmap":
@@ -549,11 +553,14 @@ class GameVisualizer(BaseVisualizer):
 
     def _format_trajectory_data(
         self, trajectory: Trajectory | torch.Tensor | np.ndarray
-    ) -> np.ndarray:
+    ) -> np.ndarray | Trajectory:
         """
         Format trajectory data from a trajectory tensor or numpy array of shape (N, 2) where N is the number of timesteps
         If there are multiple feeded, it ill be reshaped to (N, 2). If there is a Trajectory object, it will be returned as is.
+        Don't feed lists of `Trajectory` dataclass, as they wont be reshaped.
         """
+
+        
         if isinstance(trajectory, torch.Tensor):
             trajectory = trajectory.cpu().numpy()
         elif isinstance(trajectory, np.ndarray):
@@ -561,7 +568,8 @@ class GameVisualizer(BaseVisualizer):
         elif isinstance(trajectory, Trajectory):
             return trajectory
         else:
-            raise ValueError("trajectory must be either a torch.Tensor or np.ndarray")
+            raise ValueError(
+                f"trajectory must be either a Trajectory, torch.Tensor or np.ndarry. Type:{type(trajectory)}")
 
         if trajectory.ndim == 2:
             return trajectory

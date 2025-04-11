@@ -6,9 +6,6 @@ import time
 import numpy as np
 import os
 
-## TODO Implement a logger class
-
-
 def timer(func):
     @functools.wraps(func)
     def wrapper_timer(*args, **kwargs):

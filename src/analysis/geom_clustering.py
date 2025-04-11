@@ -1,4 +1,5 @@
 import numpy as np
+import random
 from typing import List
 import tqdm
 from src.analysis.utils.similarity_measures import SimilarityMeasures
@@ -16,7 +17,8 @@ import time
 # Initialize module-level logger
 logger = setup_logger(__name__)
 
-
+## TODO Review algorithms to work with trajectory class and pass metadata
+## FIXME It seem that np.array(trajectories, dtype="object") has been horrible solution
 class GeomClustering:
     """
     A class for clustering and analyzing geometric trajectories.
@@ -62,7 +64,7 @@ class GeomClustering:
         logger.info(
             f"Initializing GeomClustering with similarity measure: {similarity_measure}"
         )
-        self.trajectories = np.array([])
+        self.trajectories = None
         self.trajectories_centroids = np.array([])
 
         self.similarity_measures = SimilarityMeasures(similarity_measure)
@@ -76,7 +78,7 @@ class GeomClustering:
 
     def fit(
         self,
-        trajectories: Trajectory | List[Trajectory] | np.ndarray | List[np.ndarray],
+        trajectories: List[Trajectory] | np.ndarray | List[np.ndarray],
         cluster_method: str | None = None,
         recalculate_affinity_matrix: bool = False,
         **kwargs,
@@ -107,9 +109,8 @@ class GeomClustering:
             self.cluster_method = cluster_method
 
         logger.info(f"Fitting clustering model with {len(trajectories)} trajectories")
-        self.trajectories = np.array(
-            trajectories
-        )  # Array is (num_trajectories, num_timesteps, 2)
+
+        self.trajectories = trajectories
 
         if recalculate_affinity_matrix or self.affinity_matrix.size == 0:
             self.affinity_matrix = self.calculate_affinity_matrix(trajectories)
@@ -134,7 +135,7 @@ class GeomClustering:
         return self.labels
 
     def calculate_affinity_matrix(
-        self, trajectories: np.ndarray | List[np.ndarray]
+        self, trajectories: List[Trajectory] | np.ndarray | List[np.ndarray]
     ) -> np.ndarray:
         """
         Calculate affinity matrix between all trajectories in the list.
@@ -396,10 +397,8 @@ class GeomClustering:
             cluster_id (int): ID of the cluster to visualize
             figsize (tuple[int, int], optional): Figure size as (width, height). Defaults to (18, 6).
         """
-        cluster = self.trajectories[self.labels == cluster_id]
-        subset = np.array(cluster)[
-            np.random.choice(len(cluster), size=4, replace=False)
-        ]
+        cluster_trajectories = [traj for traj, l in zip(self.trajectories, self.labels) if l == cluster_id]
+        subset = random.sample(cluster_trajectories, min(4, len(cluster_trajectories)))
 
         from src.visualization.game_visualizer import GameVisualizer  # Lazy import
 
@@ -413,17 +412,20 @@ class GeomClustering:
         ax5 = fig.add_subplot(G[1, 2])
         ax6 = fig.add_subplot(G[1, 3])
 
+        # TODO This np.concat needs to be reviewed. As trajectories are just being concatenated, the recurrence logic makes a leap between the end of one traj and the start of the other
+        # (This might show up as a jump in the velocity grid). Here it might be useful to revive the Aggregate flag
         viz.plot_velocity_grid(
-            trajectory=cluster, normalize=True, ax=ax1, title_id=f"Cluster {cluster_id}"
+            trajectory=np.concat(cluster_trajectories), normalize=True, ax=ax1, title_id=f"Cluster {cluster_id}"
         )
         viz.plot_heatmap(
-            trajectory=cluster, normalize=True, ax=ax2, title_id=f"Cluster {cluster_id}"
+            trajectory=np.concat(cluster_trajectories), normalize=True, ax=ax2, title_id=f"Cluster {cluster_id}"
         )
         viz.plot_multiple_trajectories(
             trajectories=subset,
             plot_type="line",
             axs=[ax3, ax4, ax5, ax6],
             show_maze=False,
+            metadata_label="game_id"
         )
 
     def _sort_labels(self) -> np.ndarray:
@@ -497,7 +499,7 @@ class GeomClustering:
         for label in np.unique(self.labels):
             if label != -1:  # Skip noise points
                 # Get all trajectories in this cluster
-                cluster_trajectories = self.trajectories[self.labels == label]
+                cluster_trajectories = [traj for traj, l in zip(self.trajectories, self.labels) if l == label]
                 cluster_sizes.append(len(cluster_trajectories))
                 # Calculate mean for each trajectory first
                 trajectory_means = np.array(

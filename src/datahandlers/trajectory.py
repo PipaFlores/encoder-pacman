@@ -13,7 +13,16 @@ class Trajectory:
     Attributes:
         coordinates: Array of shape (num_timesteps, 2) containing x,y coordinates
         timevalues: Optional array of shape (num_timesteps,) containing time values
-        metadata: Optional dictionary containing additional game information
+        metadata: Optional dictionary containing additional game information, currently includes
+            - game_id: The ID of the game
+            - user_id: The ID of the user
+            - session_number: The number of the session
+            - game_in_session: The number of the game in the session
+            - total_games_played: The total number of games played
+            - game_duration: The duration of the game
+            - win: Whether the game was won
+            - level: The level of the game
+
     """
 
     coordinates: np.ndarray
@@ -101,6 +110,9 @@ class Trajectory:
             else None,
             metadata=self.metadata,
         )
+    
+    ## TODO Implement resampling method. 
+    #  trajectory1 = trajectory1[range(0, 50, 5),] # Resampling for fast calculation
 
     @classmethod
     def save_trajectories(cls, trajectories: List["Trajectory"], filepath: str):
