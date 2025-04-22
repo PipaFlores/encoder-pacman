@@ -5,11 +5,11 @@ library(ggplot2)
 
 setwd("C:/LocalData/pabflore/encoder-pacman")
 
-df <- read_csv("data/psych/AiPerCogPacman_DATA_2025-02-03_1609.csv") %>% dplyr::filter(record_id > 60)
+df <- read_csv("data/psych/AiPerCogPacman_DATA_2025-04-01_1343.csv") %>% dplyr::filter(record_id > 60)
 
 
 
-
+# Data Cleaning (and removing myself)
 consent_bisbas <- df %>% dplyr::filter(!is.na(consent_timestamp) & record_id > 60) %>%  dplyr::select(c(1,5:35)) %>% drop_columns(c("name", "email"))
 
 bisbas <- consent_bisbas %>% dplyr::select(c(1,10:29))
@@ -34,6 +34,9 @@ merged <- bisbas %>% left_join(flow, by = "record_id")
 flow_series <- flow[c(1,2,11)] %>% mutate(record_id = as.factor(record_id))
 
 
+# Filter out record_ids that have less than 5 repeating instances
+flow_series <- flow_series %>% group_by(record_id) %>% filter(n() >= 10) %>% ungroup()
+  
 flow_series %>% ggplot(aes(x = redcap_repeat_instance, y = FLOW, colour = record_id)) + 
   geom_smooth(method = lm) + 
   geom_point() + 
@@ -43,5 +46,6 @@ flow_series %>% ggplot(aes(x = redcap_repeat_instance, y = FLOW, colour = record
 
 
 # Data Exploration
-# create_report(bisbas, output_file = "bisbas_report.html")
-# create_report(flow, output_file = "flow_report.html")
+create_report(bisbas, output_file = "bisbas_report.html")
+create_report(flow, output_file = "flow_report.html")
+create_report(merged, output_file = "merged_report.html")

@@ -9,6 +9,41 @@ logger = setup_logger(__name__)
 
 
 class PacmanDataReader:
+    """
+    A class for reading and processing Pacman game data.
+
+    This class provides functionality to:
+    - Read and filter Pacman game data from CSV files
+    - Extract trajectories and game states
+    - Filter data by game ID, user ID, and timesteps
+    - Handle metadata and banned users
+
+    The class implements the Singleton pattern to ensure only one instance exists,
+    which helps manage memory usage when dealing with large datasets.
+
+    Attributes:
+        data_folder (str): Path to the folder containing game data files
+        verbose (bool): Whether to enable verbose logging
+        read_games_only (bool): Whether to read only game data or include additional information
+        BANNED_USERS (list): List of user IDs to exclude from the data
+        game_df (pd.DataFrame): DataFrame containing game metadata
+        gamestate_df (pd.DataFrame): DataFrame containing game state data
+        user_df (pd.DataFrame): DataFrame containing user metadata
+        session_df (pd.DataFrame): DataFrame containing session metadata
+    
+    Example:
+    ```python
+    data = PacmanDataReader(data_folder="../data/")
+
+    ## To get all trajectories as a list[Trajectory]
+    all_trajs = []
+    for game in data.game_df["game_id"].tolist():
+        traj = data.get_trajectory(game_id=game, include_metadata=True)
+        all_trajs.append(traj)
+        
+    ```
+    
+    """
     _instance = None
     BANNED_USERS = [42]
 
@@ -198,7 +233,6 @@ class PacmanDataReader:
         game_id: int | list[int] = None,
         user_id: int | list[int] = None,
         get_timevalues: bool = False,
-        get_all_games: bool = False,
         include_metadata: bool = True,
     ) -> Trajectory:
         """
@@ -209,19 +243,36 @@ class PacmanDataReader:
             get_all_games: Boolean indicating whether to get all games.
             include_metadata: Boolean indicating whether to include metadata in the trajectory.
         Returns:
-            trajectory: `Trajectory` object containing Pacman trajectory data (x,y) coordinates.
+            trajectory: `Trajectory` object containing Pacman trajectory data (x,y) coordinates and metadata.
+
+        Example:
+        ```python
+        # Get trajectory for a specific game
+        trajectory = data_reader.get_trajectory(game_id=123)
+        
+        # Get trajectory for a specific user
+        trajectory = data_reader.get_trajectory(user_id=456)
+        
+        # Get trajectory with time values
+        trajectory = data_reader.get_trajectory(game_id=123, get_timevalues=True)
+        
+        # Get trajectory without metadata
+        trajectory = data_reader.get_trajectory(game_id=123, include_metadata=False)
+        
+        # Access trajectory data
+        coordinates = trajectory.coordinates  # numpy array of (x,y) coordinates
+        timevalues = trajectory.timevalues  # numpy array of time values (if get_timevalues=True)
+        metadata = trajectory.metadata  # dictionary of metadata (if include_metadata=True)
+        ```
         """
         time_start = time.time()
         logger.debug(f"Getting trajectory for game {game_id} and user {user_id}...")
-        if game_id is None and user_id is None and not get_all_games:
+        if game_id is None and user_id is None:
             raise ValueError("Either game_id or user_id must be provided")
 
-        if get_all_games:
-            filtered_df = self.gamestate_df
-        else:
-            filtered_df, metadata = self._filter_gamestate_data(
-                game_id=game_id, user_id=user_id, include_metadata=include_metadata
-            )
+        filtered_df, metadata = self._filter_gamestate_data(
+            game_id=game_id, user_id=user_id, include_metadata=include_metadata
+        )
 
         if filtered_df is None:
             return None
