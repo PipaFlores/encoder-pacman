@@ -17,7 +17,7 @@ import time
 # Initialize module-level logger
 logger = setup_logger(__name__)
 
-## TODO Review algorithms to work with trajectory class and pass metadata
+## TODO Review algorithms to work with trajectory class and pass metadata (avoid restructures to arrays)
 ## FIXME It seem that np.array(trajectories, dtype="object") has been horrible solution
 class GeomClustering:
     """
@@ -126,7 +126,7 @@ class GeomClustering:
         self.labels = self._sort_labels()
         logger.info(f"Clustering complete. Found {len(set(self.labels))} clusters")
 
-        self.vis = ClusterVisualizer(
+        self.cluster_vis = ClusterVisualizer(
             self.affinity_matrix,
             self.labels,
             self.trajectories,
@@ -278,23 +278,23 @@ class GeomClustering:
 
     def plot_interactive_overview(self):
         """
-        Create an interactive visualization of the affinity matrix and trajectories.
+        Create an interactive visualization of the affinity matrix and trajectories embeddings.
 
         Uses Bokeh to create an interactive plot with:
         - Affinity matrix heatmap
-        - Trajectory visualization
+        - Trajectory 2D-embeddings visualization
 
         The plots are displayed side by side in a row.
         """
-        p1 = self.vis.plot_affinity_matrix_bokeh()
+        p1 = self.cluster_vis.plot_affinity_matrix_bokeh()
 
         if self.trajectories_centroids.size > 0:
-            p2 = self.vis.plot_trajectories_bokeh(
+            p2 = self.cluster_vis.plot_trajectories_embedding_bokeh(
                 traj_centroids=self.trajectories_centroids
             )
         else:
             self._calculate_trajectory_centroids()
-            p2 = self.vis.plot_trajectories_bokeh(
+            p2 = self.cluster_vis.plot_trajectories_embedding_bokeh(
                 traj_centroids=self.trajectories_centroids
             )
 
@@ -308,7 +308,7 @@ class GeomClustering:
             ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
             Defaults to None.
         """
-        self.vis.plot_affinity_matrix(ax=ax)
+        self.cluster_vis.plot_affinity_matrix(ax=ax)
 
     def plot_distance_matrix_histogram(self, ax: plt.Axes | None = None, **kwargs):
         """
@@ -319,7 +319,7 @@ class GeomClustering:
             Defaults to None.
             **kwargs: Additional arguments to pass to the histogram plotting function.
         """
-        self.vis.plot_distance_matrix_histogram(ax=ax, **kwargs)
+        self.cluster_vis.plot_distance_matrix_histogram(ax=ax, **kwargs)
 
     def plot_non_repetitive_distances_values_barchart(
         self, ax: plt.Axes | None = None, **kwargs
@@ -332,7 +332,7 @@ class GeomClustering:
             Defaults to None.
             **kwargs: Additional arguments to pass to the bar chart plotting function.
         """
-        self.vis.plot_non_repetitive_distances_values_barchart(ax=ax, **kwargs)
+        self.cluster_vis.plot_non_repetitive_distances_values_barchart(ax=ax, **kwargs)
 
     def plot_average_column_value(self, ax: plt.Axes | None = None):
         """
@@ -342,13 +342,13 @@ class GeomClustering:
             ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
             Defaults to None.
         """
-        self.vis.plot_average_column_value(ax=ax)
+        self.cluster_vis.plot_average_column_value(ax=ax)
 
     ### Clustering Results Visualization
 
-    def plot_trajectories(self, ax: plt.Axes | None = None, frame_to_maze: bool = True):
+    def plot_trajectories_embedding(self, ax: plt.Axes | None = None, frame_to_maze: bool = True):
         """
-        Plot all trajectories with their cluster assignments.
+        Plot all trajectories 2D embedding with their cluster assignments. (Currently based on geometrical centroid)
 
         Args:
             ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
@@ -358,7 +358,7 @@ class GeomClustering:
         """
         if self.trajectories_centroids.size == 0:
             self._calculate_trajectory_centroids()
-        self.vis.plot_trajectories(
+        self.cluster_vis.plot_trajectories_embedding(
             self.trajectories_centroids, ax=ax, frame_to_maze=frame_to_maze
         )
 
@@ -376,7 +376,7 @@ class GeomClustering:
         """
         if self.cluster_centroids.size == 0:
             self._calculate_cluster_centroids()
-        self.vis.plot_clustering_centroids(
+        self.cluster_vis.plot_clusters_centroids(
             self.cluster_centroids,
             self.cluster_sizes,
             ax=ax,
@@ -402,7 +402,7 @@ class GeomClustering:
 
         from src.visualization.game_visualizer import GameVisualizer  # Lazy import
 
-        viz = GameVisualizer()
+        game_viz = GameVisualizer()
         fig = plt.figure(figsize=figsize)
         G = GridSpec(2, 4, width_ratios=[2, 2, 1, 1], height_ratios=[1, 1])
         ax1 = fig.add_subplot(G[:, 0])
@@ -412,15 +412,16 @@ class GeomClustering:
         ax5 = fig.add_subplot(G[1, 2])
         ax6 = fig.add_subplot(G[1, 3])
 
-        # TODO This np.concat needs to be reviewed. As trajectories are just being concatenated, the recurrence logic makes a leap between the end of one traj and the start of the other
-        # (This might show up as a jump in the velocity grid). Here it might be useful to revive the Aggregate flag
-        viz.plot_velocity_grid(
+        # TODO This np.concat needs to be reviewed in the GameVizualizer class, not here. 
+        # As trajectories are just being concatenated, the recurrence logic makes a leap between the end of one traj and the start of the other
+        # (This might show up as a jump in the velocity grid). Here it might be useful to revive the Aggregate flag. 
+        game_viz.plot_velocity_grid(
             trajectory=np.concat(cluster_trajectories), normalize=True, ax=ax1, title_id=f"Cluster {cluster_id}"
         )
-        viz.plot_heatmap(
+        game_viz.plot_heatmap(
             trajectory=np.concat(cluster_trajectories), normalize=True, ax=ax2, title_id=f"Cluster {cluster_id}"
         )
-        viz.plot_multiple_trajectories(
+        game_viz.plot_multiple_trajectories(
             trajectories=subset,
             plot_type="line",
             axs=[ax3, ax4, ax5, ax6],
@@ -468,7 +469,7 @@ class GeomClustering:
 
     def _calculate_trajectory_centroids(self) -> List[np.ndarray]:
         """
-        Calculate the centroids of all trajectories for dimensionality reduction and plotting.
+        Calculate the geometrical centroids of all trajectories for dimensionality reduction and plotting.
 
         Returns:
             List[np.ndarray]: List of centroids for each trajectory
