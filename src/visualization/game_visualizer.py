@@ -254,34 +254,92 @@ class GameVisualizer(BaseVisualizer):
     def plot_velocity_grid(
         self,
         game_id: int | None = None,
-        trajectory: torch.Tensor | np.ndarray | None = None,
+        trajectory: torch.Tensor | np.ndarray | Trajectory | list[Trajectory] | None = None,
         show_maze: bool = True,
         show_pellet: bool = False,
-        normalize: bool = False,
+        normalize: bool = False, #
         ax: plt.Axes | None = None,
         title_id: int = None,
-        metadata_label: str | list[str] | None = None
+        metadata_label: str | list[str] | None = None,
+        min_alpha: float = 0.2,  # Minimum alpha value for the least frequent movements
+        max_alpha: float = 1.0,  # Maximum alpha value for the most frequent movements
     ) -> None:
         """
-        Plot the velocity grid for a game trajectory.
+        Plot the velocity grid for a game trajectory. The vectors are normalized to unit length
+        and colored according to the recurrence count at each position. The transparency (alpha)
+        of each vector is also scaled based on its recurrence count.
+
+        Args:
+            game_id (int | None): ID of the game to plot. If None, trajectory must be provided.
+            trajectory (torch.Tensor | np.ndarray | Trajectory | list[Trajectory] | None): 
+                Trajectory data to plot. Can be a single trajectory or a list of trajectories.
+            show_maze (bool): Whether to display the maze walls. Defaults to True.
+            show_pellet (bool): Whether to display the pellet positions. Defaults to False.
+            normalize (bool): Whether to normalize the velocity vectors and recurrence counts. Defaults to False. \
+            If true it returns the unitary vector. For list of games (aggregated plot) this is forced to True
+            ax (plt.Axes | None): Matplotlib axes to plot on. If None, a new figure is created.
+            title_id (int): ID to display in the plot title.
+            metadata_label (str | list[str] | None): Metadata labels to display in the title.
+            min_alpha (float): Minimum transparency value for vectors. Defaults to 0.2.
+            max_alpha (float): Maximum transparency value for vectors. Defaults to 1.0.
         """
+
+    
+        aggregate_plot = False # Flag for aggregate visualization (encode recurrence in color)
+        """Input Check"""
         if game_id is not None:
             trajectory_array = self.datareader.get_trajectory(game_id=game_id)
             title_id = f"game {game_id}"
-        elif trajectory is not None:
+        elif trajectory is not None and not isinstance(trajectory, list):
             trajectory_array = self._format_trajectory_data(trajectory=trajectory)
             title_id = f"trajectory {title_id}"
+        elif isinstance(trajectory, list):
+            aggregate_plot = True
+            normalize = True
+            if isinstance(trajectory[0], Trajectory):
+                ValueError("When a list of trajectories is provided, all elements need to be of the Trajectory dataclass")
         else:
             raise ValueError("Either game_id or trajectory must be provided")
 
-        self.analyzer.calculate_recurrence_grid(
-            trajectory=trajectory_array,
-            calculate_velocities=True,
-            aggregate=False,
-            normalize=normalize,
-        )
 
-
+        """Calculate the recurrence and velocity grid"""
+        if isinstance(trajectory, list):
+            self.analyzer._reset_grids() # In case previous aggregate calculations were performed
+            # First aggregate all trajectories without normalization
+            for traj in trajectory:
+                self.analyzer._initialize_idx_grid() # reset idx grid (otherwise overlaps with close timing wont be accounted for due to recurrence algorithm)
+                self.analyzer.calculate_recurrence_grid(
+                    trajectory=traj,
+                    calculate_velocities=True,
+                    aggregate=True,
+                    normalize=False  # Don't normalize individual trajectories during aggregation
+                )
+            # Normalize the final aggregated grid
+            if normalize and self.analyzer.recurrence_count_grid is not None:
+                # Only normalize if there are non-zero values
+                max_recurrence = self.analyzer.recurrence_count_grid.max()
+                if max_recurrence > 0:
+                    self.analyzer.recurrence_count_grid = self.analyzer.recurrence_count_grid / max_recurrence
+                
+                # For velocity grid, we want to maintain relative magnitudes
+                # So we normalize each vector individually to unit length
+                if self.analyzer.velocity_grid is not None:
+                    # Calculate magnitude for each vector
+                    magnitudes = np.sqrt(np.sum(self.analyzer.velocity_grid**2, axis=2))
+                    # Avoid division by zero
+                    non_zero_mask = magnitudes > 0
+                    # Normalize only non-zero vectors
+                    self.analyzer.velocity_grid[non_zero_mask] = (
+                        self.analyzer.velocity_grid[non_zero_mask] / 
+                        magnitudes[non_zero_mask, np.newaxis]
+                    )
+        else:
+            self.analyzer.calculate_recurrence_grid(
+                trajectory=trajectory_array,
+                calculate_velocities=True,
+                aggregate=False,
+                normalize=normalize,
+            )
 
         """Plot the vector grid."""
         if ax is None:
@@ -297,19 +355,44 @@ class GameVisualizer(BaseVisualizer):
             show_maze, show_pellet, ax=ax, return_transformed_positions=True
         )
 
+        # Create a colormap for the vectors based on recurrence counts
+        if aggregate_plot:
+            cmap = plt.cm.YlOrRd
+            norm = plt.Normalize(vmin=0, vmax=self.analyzer.recurrence_count_grid.max())
+
         for i in range(len(self.y_grid)):
             for j in range(len(self.x_grid)):
                 if (self.x_grid[j], self.y_grid[i]) not in walls_positions:
-                    ax.arrow(
-                        self.x_grid[j],
-                        self.y_grid[i],
-                        self.analyzer.velocity_grid[i, j, 0],
-                        self.analyzer.velocity_grid[i, j, 1],
-                        head_width=0.2,
-                        head_length=0.2,
-                        fc="red",
-                        ec="red",
-                    )
+                    # Get the recurrence count for this position
+                    recurrence = self.analyzer.recurrence_count_grid[i, j]
+                    if aggregate_plot:
+                        # Get the color based on recurrence
+                        color = cmap(norm(recurrence))
+                        # Calculate alpha based on recurrence
+                        alpha = min_alpha + (max_alpha - min_alpha) * norm(recurrence)
+                    else:
+                        color = "red"
+                        alpha = 1
+                    
+                    # Only plot vectors with non-zero velocity
+                    if np.any(self.analyzer.velocity_grid[i, j] != 0):
+                        ax.arrow(
+                            self.x_grid[j],
+                            self.y_grid[i],
+                            self.analyzer.velocity_grid[i, j, 0] * 0.5,
+                            self.analyzer.velocity_grid[i, j, 1] * 0.5,
+                            head_width=0.2,
+                            head_length=0.2,
+                            fc=color,
+                            ec=color,
+                            alpha=alpha,  # Add transparency
+                        )
+
+        if aggregate_plot:
+            # Add colorbar to show recurrence scale
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            plt.colorbar(sm, ax=ax, label="Normalized Recurrence")
 
         ax.set_xlabel("X")
         ax.set_ylabel("Y")
@@ -326,6 +409,7 @@ class GameVisualizer(BaseVisualizer):
         ax.grid(True, alpha=0.3)
         if show_plot:
             plt.show()
+
 
     def plot_count_grid(
         self,

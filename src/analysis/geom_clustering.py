@@ -18,7 +18,7 @@ import time
 logger = setup_logger(__name__)
 
 ## TODO Review algorithms to work with trajectory class and pass metadata (avoid restructures to arrays)
-## FIXME It seem that np.array(trajectories, dtype="object") has been horrible solution
+
 class GeomClustering:
     """
     A class for clustering and analyzing geometric trajectories.
@@ -416,7 +416,7 @@ class GeomClustering:
         # As trajectories are just being concatenated, the recurrence logic makes a leap between the end of one traj and the start of the other
         # (This might show up as a jump in the velocity grid). Here it might be useful to revive the Aggregate flag. 
         game_viz.plot_velocity_grid(
-            trajectory=np.concat(cluster_trajectories), normalize=True, ax=ax1, title_id=f"Cluster {cluster_id}"
+            trajectory=cluster_trajectories, normalize=True, ax=ax1, title_id=f"Cluster {cluster_id}"
         )
         game_viz.plot_heatmap(
             trajectory=np.concat(cluster_trajectories), normalize=True, ax=ax2, title_id=f"Cluster {cluster_id}"

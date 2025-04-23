@@ -95,7 +95,7 @@ class Trajectory:
         """Get y coordinates"""
         return self.coordinates[:, 1]
 
-    def get_segment(self, start_step: int, end_step: int = -1) -> "Trajectory":
+    def get_segment(self, start_step: int = 0, end_step: int = -1) -> "Trajectory":
         """Get a segment of the trajectory"""
         if end_step == -1:
             end_step = len(self.coordinates)

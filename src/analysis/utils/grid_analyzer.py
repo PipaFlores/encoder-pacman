@@ -69,7 +69,6 @@ class GridAnalyzer:
                 recurrence_count_grid: Grid containing number of trajectories per cell
                 recurrence_idx_grid: Grid containing position indeces that passed through the cell
                 velocity_grid: Grid containing velocities (if calculate_velocities is True)
-
         """
         # Initialize grids if not aggregating or if not already initialized
         if not aggregate:
@@ -98,14 +97,27 @@ class GridAnalyzer:
                         )
 
         if normalize:
-            self.recurrence_count_grid = (
-                self.recurrence_count_grid / self.recurrence_count_grid.max()
-            )
+            # Only normalize if there are non-zero values
+            max_recurrence = self.recurrence_count_grid.max()
+            if max_recurrence > 0:
+                self.recurrence_count_grid = self.recurrence_count_grid / max_recurrence
+            
+            if calculate_velocities:
+                # For velocity grid, we want to maintain relative magnitudes
+                # So we normalize each vector individually to unit length
+                if self.velocity_grid is not None:
+                    # Calculate magnitude for each vector
+                    magnitudes = np.sqrt(np.sum(self.velocity_grid**2, axis=2))
+                    # Avoid division by zero
+                    non_zero_mask = magnitudes > 0
+                    # Normalize only non-zero vectors
+                    self.velocity_grid[non_zero_mask] = (
+                        self.velocity_grid[non_zero_mask] / 
+                        magnitudes[non_zero_mask, np.newaxis]
+                    )
 
         results = (self.recurrence_count_grid, self.recurrence_idx_grid)
         if calculate_velocities:
-            if normalize:
-                self.velocity_grid = self.velocity_grid / self.velocity_grid.max()
             results += (self.velocity_grid,)
 
         return results
