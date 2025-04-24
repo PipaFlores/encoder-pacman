@@ -53,7 +53,7 @@ class GameVisualizer(BaseVisualizer):
     def plot_heatmap(
         self,
         game_id: int | list[int] | None = None,
-        trajectory: Trajectory | torch.Tensor | np.ndarray | None = None,
+        trajectory: Trajectory |list[Trajectory] |torch.Tensor | np.ndarray | None = None,
         show_maze: bool = True,
         show_pellet: bool = False,
         normalize: bool = True,
@@ -66,27 +66,51 @@ class GameVisualizer(BaseVisualizer):
         If multiple games are provided, the heatmap will be a combination of all games.
 
         Args:
-            game_id: The ID of the game to visualize
-            trajectory: The trajectory to visualize, should be a tensor/array of shape (N, 2) where N is the number of steps
-            show_maze: Whether to show maze walls and pellets
-            normalize: Whether to normalize the heatmap values
+            game_id (int | list[int] | None): The ID of the game to visualize. If None, trajectory must be provided.
+            trajectory (Trajectory | list[Trajectory] | torch.Tensor | np.ndarray | None): The trajectory data to visualize. 
+                Can be a single trajectory or a list of trajectories. For single trajectories, should be a tensor/array of shape (N, 2) 
+                where N is the number of steps.
+            show_maze (bool): Whether to show maze walls. Defaults to True.
+            show_pellet (bool): Whether to show pellet positions. Defaults to False.
+            normalize (bool): Whether to normalize the heatmap values. If True, values are scaled to [0,1]. Defaults to True.
+            ax (plt.Axes | None): Matplotlib axes to plot on. If None, a new figure is created.
+            title_id (int | None): ID to display in the plot title.
+            metadata_label (str | list[str] | None): Metadata labels to display in the title.
         """
         if game_id is not None:
             trajectory = self.datareader.get_trajectory(game_id=game_id)
             title_id = f"game {game_id}"
-        elif trajectory is not None:
+        elif trajectory is not None and not isinstance(trajectory, list):
             trajectory = self._format_trajectory_data(trajectory=trajectory)
             title_id = f"trajectory {title_id}"
+        elif isinstance(trajectory, list):
+            title_id = "aggregated" if not title_id else title_id
+            if not isinstance(trajectory[0], Trajectory):
+                raise ValueError("When a list of trajectories is provided, all elements need to be of the Trajectory dataclass")
         else:
             raise ValueError("Either game_id or trajectory must be provided")
 
-
-        self.analyzer.calculate_recurrence_grid(
-            trajectory=trajectory,
-            calculate_velocities=False,
-            aggregate=False,
-            normalize=normalize,
-        )
+        if isinstance(trajectory, list):
+            for traj in trajectory:
+                self.analyzer._initialize_idx_grid()
+                self.analyzer.calculate_recurrence_grid(
+                    trajectory=traj,
+                    calculate_velocities=False,
+                    aggregate=True,
+                    normalize=False
+                )
+            
+            if normalize:
+                max_recurrence = self.analyzer.recurrence_count_grid.max()
+                if max_recurrence > 0:
+                    self.analyzer.recurrence_count_grid = self.analyzer.recurrence_count_grid / max_recurrence
+        else:
+            self.analyzer.calculate_recurrence_grid(
+                trajectory=trajectory,
+                calculate_velocities=False,
+                aggregate=False,
+                normalize=normalize,
+            )
 
         """Plot the heatmap."""
         if ax is None:
@@ -296,8 +320,9 @@ class GameVisualizer(BaseVisualizer):
         elif isinstance(trajectory, list):
             aggregate_plot = True
             normalize = True
-            if isinstance(trajectory[0], Trajectory):
-                ValueError("When a list of trajectories is provided, all elements need to be of the Trajectory dataclass")
+            title_id = "aggregated" if not title_id else title_id
+            if not isinstance(trajectory[0], Trajectory):
+                raise ValueError("When a list of trajectories is provided, all elements need to be of the Trajectory dataclass")
         else:
             raise ValueError("Either game_id or trajectory must be provided")
 

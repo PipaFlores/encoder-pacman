@@ -3,7 +3,10 @@ from typing import Optional, Dict, Any, Union, Tuple, List
 import numpy as np
 from pathlib import Path
 import json
+from src.utils import setup_logger  
 
+# Initialize module-level logger
+logger = setup_logger(__name__)
 
 @dataclass
 class Trajectory:
@@ -97,9 +100,13 @@ class Trajectory:
 
     def get_segment(self, start_step: int = 0, end_step: int = -1) -> "Trajectory":
         """Get a segment of the trajectory"""
+        if end_step >= len(self.coordinates):
+            logger.warning(f"Trajectory for game {self.metadata['game_id'] if self.metadata else 'NA'} ends before the inputed end step ({len(self.coordinates)} < {end_step}). Returning segment until last observed position instead.")
+            end_step = len(self.coordinates)
         if end_step == -1:
             end_step = len(self.coordinates)
-
+            
+        
         if start_step > end_step:
             raise ValueError("start_step must be less than end_step")
 
@@ -111,9 +118,16 @@ class Trajectory:
             metadata=self.metadata,
         )
     
-    ## TODO Implement resampling method. 
-    #  trajectory1 = trajectory1[range(0, 50, 5),] # Resampling for fast calculation
+    def reduce_granularity(self, n: int):
+        """
+        Reduces the granularity (resolution) of a trajectory by just extracting datapoints every n steps in the time-series.
 
+        Args:
+            n: Number of steps in the original time-series used to extract the reduced trajectory
+        """
+
+        return self[range(0)]
+    
     @classmethod
     def save_trajectories(cls, trajectories: List["Trajectory"], filepath: str):
         """

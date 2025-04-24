@@ -17,8 +17,6 @@ import time
 # Initialize module-level logger
 logger = setup_logger(__name__)
 
-## TODO Review algorithms to work with trajectory class and pass metadata (avoid restructures to arrays)
-
 class GeomClustering:
     """
     A class for clustering and analyzing geometric trajectories.
@@ -293,7 +291,7 @@ class GeomClustering:
                 traj_centroids=self.trajectories_centroids
             )
         else:
-            self._calculate_trajectory_centroids()
+            self.trajectories_centroids = self._calculate_trajectory_centroids()
             p2 = self.cluster_vis.plot_trajectories_embedding_bokeh(
                 traj_centroids=self.trajectories_centroids
             )
@@ -357,7 +355,7 @@ class GeomClustering:
             Defaults to True.
         """
         if self.trajectories_centroids.size == 0:
-            self._calculate_trajectory_centroids()
+            self.trajectories_centroids = self._calculate_trajectory_centroids()
         self.cluster_vis.plot_trajectories_embedding(
             self.trajectories_centroids, ax=ax, frame_to_maze=frame_to_maze
         )
@@ -375,7 +373,7 @@ class GeomClustering:
             Defaults to True.
         """
         if self.cluster_centroids.size == 0:
-            self._calculate_cluster_centroids()
+            self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
         self.cluster_vis.plot_clusters_centroids(
             self.cluster_centroids,
             self.cluster_sizes,
@@ -412,14 +410,11 @@ class GeomClustering:
         ax5 = fig.add_subplot(G[1, 2])
         ax6 = fig.add_subplot(G[1, 3])
 
-        # TODO This np.concat needs to be reviewed in the GameVizualizer class, not here. 
-        # As trajectories are just being concatenated, the recurrence logic makes a leap between the end of one traj and the start of the other
-        # (This might show up as a jump in the velocity grid). Here it might be useful to revive the Aggregate flag. 
         game_viz.plot_velocity_grid(
             trajectory=cluster_trajectories, normalize=True, ax=ax1, title_id=f"Cluster {cluster_id}"
         )
         game_viz.plot_heatmap(
-            trajectory=np.concat(cluster_trajectories), normalize=True, ax=ax2, title_id=f"Cluster {cluster_id}"
+            trajectory=cluster_trajectories, normalize=True, ax=ax2, title_id=f"Cluster {cluster_id}"
         )
         game_viz.plot_multiple_trajectories(
             trajectories=subset,
@@ -482,7 +477,6 @@ class GeomClustering:
                 -1, 2
             )  # Reshape to (n_trajectories, 2)
         logger.debug("Trajectory centroids calculated")
-        self.trajectories_centroids = centroids_array
         return centroids_array
 
     def _calculate_cluster_centroids(self) -> np.ndarray:
@@ -511,6 +505,4 @@ class GeomClustering:
                 cluster_centroids.append(cluster_centroid)
 
         logger.debug("Cluster centroids calculated")
-        self.cluster_centroids = np.array(cluster_centroids)
-        self.cluster_sizes = np.array(cluster_sizes)
         return np.array(cluster_centroids), np.array(cluster_sizes)
