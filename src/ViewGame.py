@@ -5,7 +5,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.visualization.game_replayer import GameReplayer
-from src.utils import PacmanDataReader
+from src.datahandlers import PacmanDataReader
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize Pac-Man game states")
