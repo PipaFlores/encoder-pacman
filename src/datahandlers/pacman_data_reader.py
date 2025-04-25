@@ -46,6 +46,7 @@ class PacmanDataReader:
     """
     _instance = None
     BANNED_USERS = [42]
+    BANNED_GAMES = [419] ## Game with 600 second idle duration (bug)
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -107,10 +108,12 @@ class PacmanDataReader:
             },
         )
         logger.info(f"Time taken to read game data: {time.time() - time_start} seconds")
-        ## Filter banned users
-        self.banned_game_ids = self.game_df.loc[
-            self.game_df["user_id"].isin(self.BANNED_USERS), "game_id"
-        ]
+        ## Filter banned users and games
+        self.banned_game_ids = pd.concat([
+            self.game_df.loc[self.game_df["user_id"].isin(self.BANNED_USERS), "game_id"],
+            pd.Series(self.BANNED_GAMES)
+        ]).unique()
+
         self.game_df = self.game_df[~self.game_df["game_id"].isin(self.banned_game_ids)]
         self.gamestate_df = self.gamestate_df[
             ~self.gamestate_df["game_id"].isin(self.banned_game_ids)
@@ -129,10 +132,10 @@ class PacmanDataReader:
             )
             self.psychometrics_df = pd.read_csv(
                 os.path.join(
-                    self.data_folder, "psych\AiPerCogPacman_DATA_2025-03-03_0927.csv"
+                    self.data_folder, "psych\AiPerCogPacman_DATA_2025-04-01_1343.csv"
                 )
             )
-
+            
     def _filter_gamestate_data(
         self,
         game_id: int | list[int] | None = None,
