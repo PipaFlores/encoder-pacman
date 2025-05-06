@@ -35,6 +35,7 @@ class ClusterVisualizer(BaseVisualizer):
 
     Methods are provided for both static matplotlib plots and interactive Bokeh visualizations.
     """
+
     def __init__(
         self,
         affinity_matrix: np.ndarray,
@@ -242,7 +243,6 @@ class ClusterVisualizer(BaseVisualizer):
         if show_plot:
             plt.show()
 
-
     ### Cluster Visualization
 
     def plot_trajectories_embedding(
@@ -278,7 +278,11 @@ class ClusterVisualizer(BaseVisualizer):
         cmap = plt.cm.viridis
         cmap.set_under("gray")
         scatter = ax.scatter(
-            traj_embeddings[:, 0], traj_embeddings[:, 1], c=self.labels, cmap=cmap, vmin=0
+            traj_embeddings[:, 0],
+            traj_embeddings[:, 1],
+            c=self.labels,
+            cmap=cmap,
+            vmin=0,
         )
         ax.legend(*scatter.legend_elements(), title="Clusters", loc="upper right")
         ax.set_title("Trajectory Clusters")
