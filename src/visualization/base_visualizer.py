@@ -28,8 +28,6 @@ class BaseVisualizer:
         self.x_grid = np.linspace(self.MAZE_X_MIN, self.MAZE_X_MAX, self.GRID_SIZE_X)
         self.y_grid = np.linspace(self.MAZE_Y_MIN, self.MAZE_Y_MAX, self.GRID_SIZE_Y)
 
-
-
     def _plot_walls_and_pellets(
         self,
         walls=True,

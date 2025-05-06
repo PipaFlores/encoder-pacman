@@ -101,7 +101,7 @@ class GridAnalyzer:
             max_recurrence = self.recurrence_count_grid.max()
             if max_recurrence > 0:
                 self.recurrence_count_grid = self.recurrence_count_grid / max_recurrence
-            
+
             if calculate_velocities:
                 # For velocity grid, we want to maintain relative magnitudes
                 # So we normalize each vector individually to unit length
@@ -112,8 +112,8 @@ class GridAnalyzer:
                     non_zero_mask = magnitudes > 0
                     # Normalize only non-zero vectors
                     self.velocity_grid[non_zero_mask] = (
-                        self.velocity_grid[non_zero_mask] / 
-                        magnitudes[non_zero_mask, np.newaxis]
+                        self.velocity_grid[non_zero_mask]
+                        / magnitudes[non_zero_mask, np.newaxis]
                     )
 
         results = (self.recurrence_count_grid, self.recurrence_idx_grid)

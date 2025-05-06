@@ -17,6 +17,7 @@ import time
 # Initialize module-level logger
 logger = setup_logger(__name__)
 
+
 class GeomClustering:
     """
     A class for clustering and analyzing geometric trajectories.
@@ -344,7 +345,9 @@ class GeomClustering:
 
     ### Clustering Results Visualization
 
-    def plot_trajectories_embedding(self, ax: plt.Axes | None = None, frame_to_maze: bool = True):
+    def plot_trajectories_embedding(
+        self, ax: plt.Axes | None = None, frame_to_maze: bool = True
+    ):
         """
         Plot all trajectories 2D embedding with their cluster assignments. (Currently based on geometrical centroid)
 
@@ -373,7 +376,9 @@ class GeomClustering:
             Defaults to True.
         """
         if self.cluster_centroids.size == 0:
-            self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
+            self.cluster_centroids, self.cluster_sizes = (
+                self._calculate_cluster_centroids()
+            )
         self.cluster_vis.plot_clusters_centroids(
             self.cluster_centroids,
             self.cluster_sizes,
@@ -395,7 +400,9 @@ class GeomClustering:
             cluster_id (int): ID of the cluster to visualize
             figsize (tuple[int, int], optional): Figure size as (width, height). Defaults to (18, 6).
         """
-        cluster_trajectories = [traj for traj, l in zip(self.trajectories, self.labels) if l == cluster_id]
+        cluster_trajectories = [
+            traj for traj, l in zip(self.trajectories, self.labels) if l == cluster_id
+        ]
         subset = random.sample(cluster_trajectories, min(4, len(cluster_trajectories)))
 
         from src.visualization.game_visualizer import GameVisualizer  # Lazy import
@@ -411,17 +418,23 @@ class GeomClustering:
         ax6 = fig.add_subplot(G[1, 3])
 
         game_viz.plot_velocity_grid(
-            trajectory=cluster_trajectories, normalize=True, ax=ax1, title_id=f"Cluster {cluster_id}"
+            trajectory=cluster_trajectories,
+            normalize=True,
+            ax=ax1,
+            title_id=f"Cluster {cluster_id}",
         )
         game_viz.plot_heatmap(
-            trajectory=cluster_trajectories, normalize=True, ax=ax2, title_id=f"Cluster {cluster_id}"
+            trajectory=cluster_trajectories,
+            normalize=True,
+            ax=ax2,
+            title_id=f"Cluster {cluster_id}",
         )
         game_viz.plot_multiple_trajectories(
             trajectories=subset,
             plot_type="line",
             axs=[ax3, ax4, ax5, ax6],
             show_maze=False,
-            metadata_label="game_id"
+            metadata_label="game_id",
         )
 
     def _sort_labels(self) -> np.ndarray:
@@ -494,7 +507,11 @@ class GeomClustering:
         for label in np.unique(self.labels):
             if label != -1:  # Skip noise points
                 # Get all trajectories in this cluster
-                cluster_trajectories = [traj for traj, l in zip(self.trajectories, self.labels) if l == label]
+                cluster_trajectories = [
+                    traj
+                    for traj, l in zip(self.trajectories, self.labels)
+                    if l == label
+                ]
                 cluster_sizes.append(len(cluster_trajectories))
                 # Calculate mean for each trajectory first
                 trajectory_means = np.array(

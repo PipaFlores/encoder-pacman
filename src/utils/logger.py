@@ -63,7 +63,9 @@ def setup_logger(
         warning_console_handler = logging.StreamHandler()
         warning_console_handler.setFormatter(warning_formatter)
         warning_console_handler.setLevel(logging.WARNING)
-        warning_console_handler.addFilter(lambda record: record.levelno == logging.WARNING)
+        warning_console_handler.addFilter(
+            lambda record: record.levelno == logging.WARNING
+        )
         logger.addHandler(warning_console_handler)
 
     return logger

@@ -53,13 +53,17 @@ class GameVisualizer(BaseVisualizer):
     def plot_heatmap(
         self,
         game_id: int | list[int] | None = None,
-        trajectory: Trajectory |list[Trajectory] |torch.Tensor | np.ndarray | None = None,
+        trajectory: Trajectory
+        | list[Trajectory]
+        | torch.Tensor
+        | np.ndarray
+        | None = None,
         show_maze: bool = True,
         show_pellet: bool = False,
         normalize: bool = True,
         ax: plt.Axes | None = None,
         title_id: int | None = None,
-        metadata_label: str |list[str] | None = None
+        metadata_label: str | list[str] | None = None,
     ) -> None:
         """
         Create a heatmap visualization of a game trajectory.
@@ -67,8 +71,8 @@ class GameVisualizer(BaseVisualizer):
 
         Args:
             game_id (int | list[int] | None): The ID of the game to visualize. If None, trajectory must be provided.
-            trajectory (Trajectory | list[Trajectory] | torch.Tensor | np.ndarray | None): The trajectory data to visualize. 
-                Can be a single trajectory or a list of trajectories. For single trajectories, should be a tensor/array of shape (N, 2) 
+            trajectory (Trajectory | list[Trajectory] | torch.Tensor | np.ndarray | None): The trajectory data to visualize.
+                Can be a single trajectory or a list of trajectories. For single trajectories, should be a tensor/array of shape (N, 2)
                 where N is the number of steps.
             show_maze (bool): Whether to show maze walls. Defaults to True.
             show_pellet (bool): Whether to show pellet positions. Defaults to False.
@@ -86,7 +90,9 @@ class GameVisualizer(BaseVisualizer):
         elif isinstance(trajectory, list):
             title_id = "aggregated" if not title_id else title_id
             if not isinstance(trajectory[0], Trajectory):
-                raise ValueError("When a list of trajectories is provided, all elements need to be of the Trajectory dataclass")
+                raise ValueError(
+                    "When a list of trajectories is provided, all elements need to be of the Trajectory dataclass"
+                )
         else:
             raise ValueError("Either game_id or trajectory must be provided")
 
@@ -97,13 +103,15 @@ class GameVisualizer(BaseVisualizer):
                     trajectory=traj,
                     calculate_velocities=False,
                     aggregate=True,
-                    normalize=False
+                    normalize=False,
                 )
-            
+
             if normalize:
                 max_recurrence = self.analyzer.recurrence_count_grid.max()
                 if max_recurrence > 0:
-                    self.analyzer.recurrence_count_grid = self.analyzer.recurrence_count_grid / max_recurrence
+                    self.analyzer.recurrence_count_grid = (
+                        self.analyzer.recurrence_count_grid / max_recurrence
+                    )
         else:
             self.analyzer.calculate_recurrence_grid(
                 trajectory=trajectory,
@@ -138,7 +146,9 @@ class GameVisualizer(BaseVisualizer):
         # Set metadata on title
         if isinstance(trajectory, Trajectory) and metadata_label:
             title_id = ""
-            metadata_label = [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            metadata_label = (
+                [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            )
             for column in metadata_label:
                 title_id += f"{column} {trajectory.metadata[column]} "
 
@@ -147,8 +157,6 @@ class GameVisualizer(BaseVisualizer):
         )
         if show_plot:
             plt.show()
-
-
 
     def plot_trajectory_line(
         self,
@@ -161,7 +169,7 @@ class GameVisualizer(BaseVisualizer):
         offset_scale: float = 0.5,
         ax: plt.Axes | None = None,
         title_id: int = None,
-        metadata_label: str | list[str] | None = None
+        metadata_label: str | list[str] | None = None,
     ) -> None:
         """
         Create a line plot with smart trajectory offsetting based on movement direction.
@@ -264,7 +272,9 @@ class GameVisualizer(BaseVisualizer):
         # Set metadata on title
         if isinstance(trajectory, Trajectory) and metadata_label:
             title_id = ""
-            metadata_label = [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            metadata_label = (
+                [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            )
             for column in metadata_label:
                 title_id += f"{column} {trajectory.metadata[column]} "
 
@@ -278,10 +288,14 @@ class GameVisualizer(BaseVisualizer):
     def plot_velocity_grid(
         self,
         game_id: int | None = None,
-        trajectory: torch.Tensor | np.ndarray | Trajectory | list[Trajectory] | None = None,
+        trajectory: torch.Tensor
+        | np.ndarray
+        | Trajectory
+        | list[Trajectory]
+        | None = None,
         show_maze: bool = True,
         show_pellet: bool = False,
-        normalize: bool = False, #
+        normalize: bool = False,  #
         ax: plt.Axes | None = None,
         title_id: int = None,
         metadata_label: str | list[str] | None = None,
@@ -308,8 +322,9 @@ class GameVisualizer(BaseVisualizer):
             max_alpha (float): Maximum transparency value for vectors. Defaults to 1.0.
         """
 
-    
-        aggregate_plot = False # Flag for aggregate visualization (encode recurrence in color)
+        aggregate_plot = (
+            False  # Flag for aggregate visualization (encode recurrence in color)
+        )
         """Input Check"""
         if game_id is not None:
             trajectory_array = self.datareader.get_trajectory(game_id=game_id)
@@ -322,30 +337,33 @@ class GameVisualizer(BaseVisualizer):
             normalize = True
             title_id = "aggregated" if not title_id else title_id
             if not isinstance(trajectory[0], Trajectory):
-                raise ValueError("When a list of trajectories is provided, all elements need to be of the Trajectory dataclass")
+                raise ValueError(
+                    "When a list of trajectories is provided, all elements need to be of the Trajectory dataclass"
+                )
         else:
             raise ValueError("Either game_id or trajectory must be provided")
 
-
         """Calculate the recurrence and velocity grid"""
         if isinstance(trajectory, list):
-            self.analyzer._reset_grids() # In case previous aggregate calculations were performed
+            self.analyzer._reset_grids()  # In case previous aggregate calculations were performed
             # First aggregate all trajectories without normalization
             for traj in trajectory:
-                self.analyzer._initialize_idx_grid() # reset idx grid (otherwise overlaps with close timing wont be accounted for due to recurrence algorithm)
+                self.analyzer._initialize_idx_grid()  # reset idx grid (otherwise overlaps with close timing wont be accounted for due to recurrence algorithm)
                 self.analyzer.calculate_recurrence_grid(
                     trajectory=traj,
                     calculate_velocities=True,
                     aggregate=True,
-                    normalize=False  # Don't normalize individual trajectories during aggregation
+                    normalize=False,  # Don't normalize individual trajectories during aggregation
                 )
             # Normalize the final aggregated grid
             if normalize and self.analyzer.recurrence_count_grid is not None:
                 # Only normalize if there are non-zero values
                 max_recurrence = self.analyzer.recurrence_count_grid.max()
                 if max_recurrence > 0:
-                    self.analyzer.recurrence_count_grid = self.analyzer.recurrence_count_grid / max_recurrence
-                
+                    self.analyzer.recurrence_count_grid = (
+                        self.analyzer.recurrence_count_grid / max_recurrence
+                    )
+
                 # For velocity grid, we want to maintain relative magnitudes
                 # So we normalize each vector individually to unit length
                 if self.analyzer.velocity_grid is not None:
@@ -355,8 +373,8 @@ class GameVisualizer(BaseVisualizer):
                     non_zero_mask = magnitudes > 0
                     # Normalize only non-zero vectors
                     self.analyzer.velocity_grid[non_zero_mask] = (
-                        self.analyzer.velocity_grid[non_zero_mask] / 
-                        magnitudes[non_zero_mask, np.newaxis]
+                        self.analyzer.velocity_grid[non_zero_mask]
+                        / magnitudes[non_zero_mask, np.newaxis]
                     )
         else:
             self.analyzer.calculate_recurrence_grid(
@@ -398,7 +416,7 @@ class GameVisualizer(BaseVisualizer):
                     else:
                         color = "red"
                         alpha = 1
-                    
+
                     # Only plot vectors with non-zero velocity
                     if np.any(self.analyzer.velocity_grid[i, j] != 0):
                         ax.arrow(
@@ -425,7 +443,9 @@ class GameVisualizer(BaseVisualizer):
         # Set metadata on title
         if isinstance(trajectory, Trajectory) and metadata_label:
             title_id = ""
-            metadata_label = [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            metadata_label = (
+                [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            )
             for column in metadata_label:
                 title_id += f"{column} {trajectory.metadata[column]} "
 
@@ -434,7 +454,6 @@ class GameVisualizer(BaseVisualizer):
         ax.grid(True, alpha=0.3)
         if show_plot:
             plt.show()
-
 
     def plot_count_grid(
         self,
@@ -445,7 +464,7 @@ class GameVisualizer(BaseVisualizer):
         normalize: bool = False,
         ax: plt.Axes | None = None,
         title_id: int = None,
-        metadata_label: str | list[str] | None = None
+        metadata_label: str | list[str] | None = None,
     ) -> None:
         """
         Plot the count grid for a game trajectory.
@@ -499,7 +518,9 @@ class GameVisualizer(BaseVisualizer):
         # Set metadata on title
         if isinstance(trajectory, Trajectory) and metadata_label:
             title_id = ""
-            metadata_label = [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            metadata_label = (
+                [metadata_label] if isinstance(metadata_label, str) else metadata_label
+            )
             for column in metadata_label:
                 title_id += f"{column} {trajectory.metadata[column]} "
 
@@ -569,7 +590,6 @@ class GameVisualizer(BaseVisualizer):
         metadata_label: str | list[str] | None = "game_id",
         **kwargs,
     ) -> None:
-
         """
         Create subplots of multiple trajectories.
 
@@ -669,7 +689,6 @@ class GameVisualizer(BaseVisualizer):
         Don't feed lists of `Trajectory` dataclass, as they wont be reshaped.
         """
 
-        
         if isinstance(trajectory, torch.Tensor):
             trajectory = trajectory.cpu().numpy()
         elif isinstance(trajectory, np.ndarray):
@@ -678,7 +697,8 @@ class GameVisualizer(BaseVisualizer):
             return trajectory
         else:
             raise ValueError(
-                f"trajectory must be either a Trajectory, torch.Tensor or np.ndarry. Type:{type(trajectory)}")
+                f"trajectory must be either a Trajectory, torch.Tensor or np.ndarry. Type:{type(trajectory)}"
+            )
 
         if trajectory.ndim == 2:
             return trajectory

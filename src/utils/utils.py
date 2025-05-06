@@ -6,6 +6,7 @@ import time
 import numpy as np
 import os
 
+
 def timer(func):
     @functools.wraps(func)
     def wrapper_timer(*args, **kwargs):
