@@ -13,7 +13,7 @@ class GameReplayer:
     def __init__(
         self,
         data,
-        game_id=None,
+        level_id=None,
         playback_speed=1.0,
         verbose=False,
         pathfinding=True,
@@ -26,8 +26,8 @@ class GameReplayer:
         Args:
             data (DataFrame): Game state data with columns ['game_state_id','Pacman_X', 'Pacman_Y', 'Ghost1_X', 'Ghost1_Y',
                               'Ghost2_X', 'Ghost2_Y', 'Ghost3_X', 'Ghost3_Y', 'Ghost4_X', 'Ghost4_Y',
-                              'game_id', 'time_elapsed', 'score', 'lives', 'level', 'movement_direction', 'input_direction'].
-            game_id (int): Game ID to visualize. If None, the first game ID will be used.
+                              'level_id', 'time_elapsed', 'score', 'lives', 'level', 'movement_direction', 'input_direction'].
+            level_id (int): Level ID to visualize. If None, the first level ID will be used.
             playback_speed (float): Initial speed multiplier for the playback.
             stats_columns (list): List of columns to use for the stats panel. If None, the default columns will be used.
             verbose (bool): Whether to print verbose logging.
@@ -36,7 +36,7 @@ class GameReplayer:
             show_grid (bool): Whether to show the grid.
         """
         self.full_data = data
-        self.game_id = game_id
+        self.level_id = level_id
 
         # Logging
         self.logger = logging.getLogger("SessionVisualizer")
@@ -73,7 +73,7 @@ class GameReplayer:
         self.stats_columns = [
             col
             for col in [
-                "game_id",
+                "level_id",
                 "time_elapsed",
                 "score",
                 "lives",
@@ -84,7 +84,7 @@ class GameReplayer:
             if all(
                 col in data.columns
                 for col in [
-                    "game_id",
+                    "level_id",
                     "time_elapsed",
                     "score",
                     "lives",
@@ -125,10 +125,10 @@ class GameReplayer:
         """
         Creates an interactive animation window with controls.
         """
-        # Start with the game_id provided by the user, else start with the first game
-        if self.game_id:
+        # Start with the level_id provided by the user, else start with the first level
+        if self.level_id:
             self.data = self.full_data[self.columns].loc[
-                self.full_data["game_id"] == self.game_id
+                self.full_data["level_id"] == self.level_id
             ]
         else:
             self.data = self.full_data[self.columns]
@@ -216,13 +216,13 @@ class GameReplayer:
             stats_text_objects = []
 
         # Game Selector
-        if "game_id" in self.full_data.columns:
-            game_ids = sorted(self.full_data["game_id"].unique())
+        if "level_id" in self.full_data.columns:
+            level_ids = sorted(self.full_data["level_id"].unique())
             game_selector_ax = plt.axes([0.2, 0.05, 0.2, 0.03])  # Move down
             game_selector = TextBox(
                 game_selector_ax,
-                "Game ID: ",
-                initial=str(self.game_id if self.game_id else game_ids[0]),
+                "Level ID: ",
+                initial=str(self.level_id if self.level_id else level_ids[0]),
             )  # Start with first game ID if none is provided
         else:
             game_selector = None
@@ -312,8 +312,8 @@ class GameReplayer:
                         )
 
                 if self.stats_columns:
-                    current_game_id = row["game_id"]
-                    stats_text_objects[0].set_text(f"Game ID: {int(current_game_id)}")
+                    current_game_id = row["level_id"]
+                    stats_text_objects[0].set_text(f"Level ID: {int(current_game_id)}")
 
                     time_elapsed = row["time_elapsed"]
                     stats_text_objects[1].set_text(f"Time Elapsed: {time_elapsed:.2f}")
@@ -363,10 +363,10 @@ class GameReplayer:
 
         def on_game_select(text):
             try:
-                game_id = int(text)
-                if game_id in game_ids:
+                level_id = int(text)
+                if level_id in level_ids:
                     self.data = self.full_data[self.columns].loc[
-                        self.full_data["game_id"] == game_id
+                        self.full_data["level_id"] == level_id
                     ]
                     # Reset pellets for new game
                     self.eaten_pellets.clear()
@@ -374,9 +374,9 @@ class GameReplayer:
                         pellet.set_visible(True)
                     self.restart_animation()
                 else:
-                    print(f"Game ID {game_id} not found. Available IDs: {game_ids}")
+                    print(f"Level ID {level_id} not found. Available IDs: {level_ids}")
             except ValueError:
-                print("Please enter a valid game ID number")
+                print("Please enter a valid level ID number")
 
         def on_play_pause(event):
             if self.is_playing:
