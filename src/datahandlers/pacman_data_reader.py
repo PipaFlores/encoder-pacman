@@ -26,11 +26,12 @@ class PacmanDataReader:
         verbose (bool): Whether to enable verbose logging
         read_games_only (bool): Whether to read only game data or include additional information
         BANNED_USERS (list): List of user IDs to exclude from the data
-        game_df (pd.DataFrame): DataFrame containing game metadata
+        game_df (pd.DataFrame): DataFrame containing game metadata (encompassing one or more levels)
+        level_df (pd.DataFrame): DataFrame containing level metadata
         gamestate_df (pd.DataFrame): DataFrame containing game state data
         user_df (pd.DataFrame): DataFrame containing user metadata
         session_df (pd.DataFrame): DataFrame containing session metadata
-    
+
     Example:
     ```python
     data = PacmanDataReader(data_folder="../data/")
@@ -40,13 +41,14 @@ class PacmanDataReader:
     for game in data.game_df["game_id"].tolist():
         traj = data.get_trajectory(game_id=game, include_metadata=True)
         all_trajs.append(traj)
-        
+
     ```
-    
+
     """
+
     _instance = None
     BANNED_USERS = [42]
-    BANNED_GAMES = [419] ## Game with 600 second idle duration (bug)
+    BANNED_GAMES = [419]  ## Game with 600 second idle duration (bug)
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -109,20 +111,22 @@ class PacmanDataReader:
         )
         logger.info(f"Time taken to read game data: {time.time() - time_start} seconds")
         ## Filter banned users and games
-        self.banned_game_ids = pd.concat([
-            self.game_df.loc[self.game_df["user_id"].isin(self.BANNED_USERS), "game_id"],
-            pd.Series(self.BANNED_GAMES)
-        ]).unique()
+        self.banned_game_ids = pd.concat(
+            [
+                self.game_df.loc[
+                    self.game_df["user_id"].isin(self.BANNED_USERS), "game_id"
+                ],
+                pd.Series(self.BANNED_GAMES),
+            ]
+        ).unique()
 
         self.game_df = self.game_df[~self.game_df["game_id"].isin(self.banned_game_ids)]
         self.gamestate_df = self.gamestate_df[
             ~self.gamestate_df["game_id"].isin(self.banned_game_ids)
         ]
 
-        # Create merged dataframe with game metadata
-        self.gamestate_w_metadata_df = pd.merge(
-            self.gamestate_df, self.game_df, on="game_id", how="left"
-        )
+        ## Refactor game_df for analysis consistency.
+        self.game_df , self.level_df, self.gamestate_df = self._restructure_game_data()
 
         if not read_games_only:
             self.user_df = pd.read_csv(os.path.join(self.data_folder, "user.csv"))
@@ -132,10 +136,122 @@ class PacmanDataReader:
             )
             self.psychometrics_df = pd.read_csv(
                 os.path.join(
-                    self.data_folder, "psych\AiPerCogPacman_DATA_2025-04-01_1343.csv"
+                    self.data_folder, "psych\AiPerCogPacman_DATA_2025-05-06_1036.csv"
                 )
             )
+
+            # Process psych data
+            self.flow_df = self._process_flow()
+            self.bisbas_df = self._process_bisbas()
+
+    def _restructure_game_data(self):
+        # Create level_df by renaming game_id to level_id and setting it as index
+        level_df = self.game_df.rename(columns={"game_id": "level_id",
+                                                "game_duration":"duration",
+                                                "game_in_session":"level_in_session",
+                                                "total_games_played":"total_levels_played"
+                                                }).set_index(keys="level_id", drop=False)
+
+
+
+        # Rename game_id to level_id in gamestate_df for consistency
+        gamestate_df = self.gamestate_df.rename(columns={"game_id": "level_id"})
+        
+        # Calculate max score for each level
+        scores = gamestate_df.groupby("level_id").agg({"score": "max"})
+        level_df["max_score"] = scores["score"]
+        
+        # Create game_df starting from lost levels (win=0)
+        game_df = level_df.loc[level_df["win"] == 0].copy()
+
+        # Calculate game counts
+        game_df["total_games_played"] = game_df.groupby("user_id").cumcount() + 1
+        game_df.drop(columns=("level_in_session"), inplace=True)
+        game_df["game_in_session"] = game_df.groupby(["user_id", "session_number"]).cumcount() + 1
+
+        # Rename columns for clarity
+        game_df.rename(columns={
+            "level_id": "game_id",
+            "level": "max_level",
+            "duration": "game_duration"
+        }, inplace=True)
+
+        game_df.index.set_names("game_id",inplace=True)
+        
+        # Remove win column as it's no longer needed
+        game_df.drop(columns=["win"], inplace=True)
+
+        # # Cross-reference between dataframes
+        game_df["level_ids"] = None
+        # Add game_id column to level_df
+        level_df["game_id"] = None
+
+
+        # For each game, collect all related level IDs and update game_id in level_df
+        for _, game in game_df.iterrows():
+            level_ids = []
+            n_levels = game["max_level"]
+            game_id = game.name
+            user_id = game["user_id"]
+            level_ids.append(game_id)
+            level_df.at[game.name, "game_id"] = game_id
+            game_duration = game["game_duration"]
+
+            # Search for previous levels by the same user
+            search = 1
+            while len(level_ids) < n_levels:
+                row_search = level_df.loc[game_id - search]
+                if row_search["user_id"] == user_id:
+                    level_ids.append(int(row_search.name))
+                    game_duration += row_search["duration"]
+
+                    level_df.at[game_id - search, "game_id"] = game_id
+                     
+                search += 1
             
+            # Sort level IDs and update game metadata
+            level_ids.sort()
+            game_df.at[game.name, "date_played"] = level_df.loc[level_ids[0], "date_played"]
+            game_df.at[game.name, "game_duration"] = game_duration
+            game_df.at[game.name, "level_ids"] = level_ids
+
+        return game_df, level_df, gamestate_df
+
+
+    def _process_flow(self):
+        """
+        Process psychometrics to pair flow measures with their respective games.
+        """
+        return None
+
+    def _process_bisbas(self):
+
+        bisbas_df = self.psychometrics_df.loc[
+            ~self.psychometrics_df["redcap_repeat_instrument"].isin(["flow", "sam"])
+            & self.psychometrics_df["consent_timestamp"].notna()
+            & (self.psychometrics_df["record_id"] > 60)
+        ].copy()
+
+        bisbas_df["BIS"] = bisbas_df.loc[
+            :, ["bis_1", "bis_2", "bis_3", "bis_4", "bis_5", "bis_6", "bis_7"]
+        ].sum(axis=1)
+        bisbas_df["REW"] = bisbas_df.loc[:, ["rew_1", "rew_2", "rew_3", "rew_4", "rew_5"]].sum(
+            axis=1
+        )
+        bisbas_df["DRIVE"] = bisbas_df.loc[:, ["drive_1", "drive_2", "drive_3", "drive_4"]].sum(
+            axis=1
+        )
+        bisbas_df["FUN"] = bisbas_df.loc[:, ["fun_1", "fun_2", "fun_3", "fun_4"]].sum(axis=1)
+
+
+        bisbas_df = bisbas_df.loc[
+            :,
+            ["record_id", "age", "gender", "nationality", "edu", "BIS", "REW", "DRIVE", "FUN"],
+        ]
+
+        bisbas_df = bisbas_df.rename(columns={"record_id": "user_id"})
+        return bisbas_df
+
     def _filter_gamestate_data(
         self,
         game_id: int | list[int] | None = None,
@@ -252,16 +368,16 @@ class PacmanDataReader:
         ```python
         # Get trajectory for a specific game
         trajectory = data_reader.get_trajectory(game_id=123)
-        
+
         # Get trajectory for a specific user
         trajectory = data_reader.get_trajectory(user_id=456)
-        
+
         # Get trajectory with time values
         trajectory = data_reader.get_trajectory(game_id=123, get_timevalues=True)
-        
+
         # Get trajectory without metadata
         trajectory = data_reader.get_trajectory(game_id=123, include_metadata=False)
-        
+
         # Access trajectory data
         coordinates = trajectory.coordinates  # numpy array of (x,y) coordinates
         timevalues = trajectory.timevalues  # numpy array of time values (if get_timevalues=True)

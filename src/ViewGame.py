@@ -10,10 +10,10 @@ from src.datahandlers import PacmanDataReader
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize Pac-Man game states")
     parser.add_argument(
-        "-g", "--game-id", type=int, default=None, help="Game ID to visualize"
+        "-level", "--level-id", type=int, default=None, help="Game ID to visualize"
     )
     parser.add_argument(
-        "--playback-speed", type=float, default=1.0, help="Playback speed multiplier"
+        "--playback-speed", type=float, default=2.0, help="Playback speed multiplier"
     )
     parser.add_argument(
         "--data-path", type=str, default="data/", help="Path to the game state data"
@@ -34,14 +34,13 @@ if __name__ == "__main__":
     # parser.add_argument('--stats', type=str, default=None, help="Add stats columns to the stats panel")
     args = parser.parse_args()
 
-    datareader = PacmanDataReader(data_folder=args.data_path, read_games_only=True)
-    gamestate_df = datareader.gamestate_df
-    game_df = datareader.game_df
-    gamestate_df = pd.merge(gamestate_df, game_df, on="game_id", how="left")
+    data = PacmanDataReader(data_folder=args.data_path, read_games_only=True)
+
+    gamestate_df = pd.merge(data.gamestate_df, data.level_df, left_on="level_id", right_index=True ,how="inner") # Gamestates with game metadata
 
     visualizer = GameReplayer(
         gamestate_df,
-        game_id=args.game_id,
+        level_id=args.level_id,
         playback_speed=args.playback_speed,
         verbose=args.verbose,
         pellets=args.pellets,
