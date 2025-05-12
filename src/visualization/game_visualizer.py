@@ -12,7 +12,7 @@ from src.config.defaults import config
 
 class GameVisualizer(BaseVisualizer):
     """
-    Visualizes trajectories and heatmaps of Pacman games, either from a single game or a list of games.
+    Visualizes trajectories and heatmaps of Pacman levels, either from a single game or a list of levels.
     """
 
     def __init__(
@@ -52,7 +52,7 @@ class GameVisualizer(BaseVisualizer):
 
     def plot_heatmap(
         self,
-        game_id: int | list[int] | None = None,
+        level_id: int | list[int] | None = None,
         trajectory: Trajectory
         | list[Trajectory]
         | torch.Tensor
@@ -67,10 +67,10 @@ class GameVisualizer(BaseVisualizer):
     ) -> None:
         """
         Create a heatmap visualization of a game trajectory.
-        If multiple games are provided, the heatmap will be a combination of all games.
+        If multiple levels are provided, the heatmap will be a combination of all levels.
 
         Args:
-            game_id (int | list[int] | None): The ID of the game to visualize. If None, trajectory must be provided.
+            level_id (int | list[int] | None): The ID of the game to visualize. If None, trajectory must be provided.
             trajectory (Trajectory | list[Trajectory] | torch.Tensor | np.ndarray | None): The trajectory data to visualize.
                 Can be a single trajectory or a list of trajectories. For single trajectories, should be a tensor/array of shape (N, 2)
                 where N is the number of steps.
@@ -81,9 +81,9 @@ class GameVisualizer(BaseVisualizer):
             title_id (int | None): ID to display in the plot title.
             metadata_label (str | list[str] | None): Metadata labels to display in the title.
         """
-        if game_id is not None:
-            trajectory = self.datareader.get_trajectory(game_id=game_id)
-            title_id = f"game {game_id}"
+        if level_id is not None:
+            trajectory = self.datareader.get_trajectory(level_id=level_id)
+            title_id = f"game {level_id}"
         elif trajectory is not None and not isinstance(trajectory, list):
             trajectory = self._format_trajectory_data(trajectory=trajectory)
             title_id = f"trajectory {title_id}"
@@ -94,7 +94,7 @@ class GameVisualizer(BaseVisualizer):
                     "When a list of trajectories is provided, all elements need to be of the Trajectory dataclass"
                 )
         else:
-            raise ValueError("Either game_id or trajectory must be provided")
+            raise ValueError("Either level_id or trajectory must be provided")
 
         if isinstance(trajectory, list):
             for traj in trajectory:
@@ -160,7 +160,7 @@ class GameVisualizer(BaseVisualizer):
 
     def plot_trajectory_line(
         self,
-        game_id: int | None = None,
+        level_id: int | None = None,
         trajectory: Trajectory | torch.Tensor | np.ndarray | None = None,
         time_step_delta: int = 1,
         show_maze: bool = True,
@@ -174,14 +174,14 @@ class GameVisualizer(BaseVisualizer):
         """
         Create a line plot with smart trajectory offsetting based on movement direction.
         """
-        if game_id is not None:
-            trajectory = self.datareader.get_trajectory(game_id=game_id)
+        if level_id is not None:
+            trajectory = self.datareader.get_trajectory(level_id=level_id)
             if title_id is None:
-                title_id = f"game {game_id}"
+                title_id = f"game {level_id}"
         elif trajectory is not None:
             trajectory = self._format_trajectory_data(trajectory=trajectory)
         else:
-            raise ValueError("Either game_id or trajectory must be provided")
+            raise ValueError("Either level_id or trajectory must be provided")
 
         # Create figure and axis
         if ax is None:
@@ -287,7 +287,7 @@ class GameVisualizer(BaseVisualizer):
 
     def plot_velocity_grid(
         self,
-        game_id: int | None = None,
+        level_id: int | None = None,
         trajectory: torch.Tensor
         | np.ndarray
         | Trajectory
@@ -308,13 +308,13 @@ class GameVisualizer(BaseVisualizer):
         of each vector is also scaled based on its recurrence count.
 
         Args:
-            game_id (int | None): ID of the game to plot. If None, trajectory must be provided.
+            level_id (int | None): ID of the game to plot. If None, trajectory must be provided.
             trajectory (torch.Tensor | np.ndarray | Trajectory | list[Trajectory] | None): 
                 Trajectory data to plot. Can be a single trajectory or a list of trajectories.
             show_maze (bool): Whether to display the maze walls. Defaults to True.
             show_pellet (bool): Whether to display the pellet positions. Defaults to False.
             normalize (bool): Whether to normalize the velocity vectors and recurrence counts. Defaults to False. \
-            If true it returns the unitary vector. For list of games (aggregated plot) this is forced to True
+            If true it returns the unitary vector. For list of levels (aggregated plot) this is forced to True
             ax (plt.Axes | None): Matplotlib axes to plot on. If None, a new figure is created.
             title_id (int): ID to display in the plot title.
             metadata_label (str | list[str] | None): Metadata labels to display in the title.
@@ -326,9 +326,9 @@ class GameVisualizer(BaseVisualizer):
             False  # Flag for aggregate visualization (encode recurrence in color)
         )
         """Input Check"""
-        if game_id is not None:
-            trajectory_array = self.datareader.get_trajectory(game_id=game_id)
-            title_id = f"game {game_id}"
+        if level_id is not None:
+            trajectory_array = self.datareader.get_trajectory(level_id=level_id)
+            title_id = f"game {level_id}"
         elif trajectory is not None and not isinstance(trajectory, list):
             trajectory_array = self._format_trajectory_data(trajectory=trajectory)
             title_id = f"trajectory {title_id}"
@@ -341,7 +341,7 @@ class GameVisualizer(BaseVisualizer):
                     "When a list of trajectories is provided, all elements need to be of the Trajectory dataclass"
                 )
         else:
-            raise ValueError("Either game_id or trajectory must be provided")
+            raise ValueError("Either level_id or trajectory must be provided")
 
         """Calculate the recurrence and velocity grid"""
         if isinstance(trajectory, list):
@@ -457,7 +457,7 @@ class GameVisualizer(BaseVisualizer):
 
     def plot_count_grid(
         self,
-        game_id: int | None = None,
+        level_id: int | None = None,
         trajectory: torch.Tensor | np.ndarray | None = None,
         show_maze: bool = True,
         show_pellet: bool = False,
@@ -469,14 +469,14 @@ class GameVisualizer(BaseVisualizer):
         """
         Plot the count grid for a game trajectory.
         """
-        if game_id is not None:
-            trajectory_array = self.datareader.get_trajectory(game_id=game_id)
-            title_id = f"game {game_id}"
+        if level_id is not None:
+            trajectory_array = self.datareader.get_trajectory(level_id=level_id)
+            title_id = f"game {level_id}"
         elif trajectory is not None:
             trajectory_array = self._format_trajectory_data(trajectory=trajectory)
             title_id = f"trajectory {title_id}"
         else:
-            raise ValueError("Either game_id or trajectory must be provided")
+            raise ValueError("Either level_id or trajectory must be provided")
 
         self.analyzer.calculate_recurrence_grid(
             trajectory=trajectory_array,
@@ -535,7 +535,7 @@ class GameVisualizer(BaseVisualizer):
 
     def plot_trajectory_scatter(
         self,
-        game_id: int | None = None,
+        level_id: int | None = None,
         trajectory: torch.Tensor | np.ndarray | None = None,
         show_maze: bool = False,
         show_pellet: bool = False,
@@ -545,14 +545,14 @@ class GameVisualizer(BaseVisualizer):
         """
         Plot the trajectory points as a scatter plot, without the use of grids.
         """
-        if game_id is not None:
-            trajectory = self.datareader.get_trajectory(game_id=game_id)
-            title_id = f"game {game_id}"
+        if level_id is not None:
+            trajectory = self.datareader.get_trajectory(level_id=level_id)
+            title_id = f"game {level_id}"
         elif trajectory is not None:
             trajectory = self._format_trajectory_data(trajectory=trajectory)
             title_id = f"trajectory {title_id}"
         else:
-            raise ValueError("Either game_id or trajectory must be provided")
+            raise ValueError("Either level_id or trajectory must be provided")
 
         # Create figure and axis
         if ax is None:
@@ -580,21 +580,21 @@ class GameVisualizer(BaseVisualizer):
 
     def plot_multiple_trajectories(
         self,
-        game_ids: List[int] | None = None,
+        level_ids: List[int] | None = None,
         trajectories: List[torch.Tensor | np.ndarray | Trajectory] | None = None,
         plot_type: str = "line",
         n_cols: int = 4,
         show_maze: bool = True,
         show_pellet: bool = False,
         axs: list[plt.Axes] | None = None,
-        metadata_label: str | list[str] | None = "game_id",
+        metadata_label: str | list[str] | None = "level_id",
         **kwargs,
     ) -> None:
         """
         Create subplots of multiple trajectories.
 
         Args:
-            game_ids: List of game IDs to visualize
+            level_ids: List of game IDs to visualize
             trajectories: List of trajectories to visualize
             plot_type: Type of plot ('line', 'heatmap', 'scatter', 'velocity', 'count')
             n_cols: Number of columns in the subplot grid
@@ -603,14 +603,14 @@ class GameVisualizer(BaseVisualizer):
             axs: Passed axes, usually 4
             **kwargs: Additional arguments to pass to the individual plotting functions
         """
-        if game_ids is not None:
-            n_plots = len(game_ids)
-            data_source = game_ids
+        if level_ids is not None:
+            n_plots = len(level_ids)
+            data_source = level_ids
         elif trajectories is not None:
             n_plots = len(trajectories)
             data_source = trajectories
         else:
-            raise ValueError("Either game_ids or trajectories must be provided")
+            raise ValueError("Either level_ids or trajectories must be provided")
 
         if axs is None:
             n_cols = min(n_plots, n_cols)  # Adjust columns if fewer plots than columns
@@ -628,15 +628,15 @@ class GameVisualizer(BaseVisualizer):
 
         for i, data in enumerate(data_source):
             ax = axs[i]
-            game_id = game_ids[i] if game_ids is not None else None
+            level_id = level_ids[i] if level_ids is not None else None
             trajectory = trajectories[i] if trajectories is not None else None
-            title_id = f"Game {game_id}" if game_id is not None else f"Trajectory {i}"
+            title_id = f"Game {level_id}" if level_id is not None else f"Trajectory {i}"
 
             # Select the appropriate plotting function
             if plot_type == "line":
                 self.plot_trajectory_line(
                     ax=ax,
-                    game_id=game_id,
+                    level_id=level_id,
                     trajectory=trajectory,
                     title_id=title_id,
                     metadata_label=metadata_label,
@@ -645,7 +645,7 @@ class GameVisualizer(BaseVisualizer):
             elif plot_type == "heatmap":
                 self.plot_heatmap(
                     ax=ax,
-                    game_id=game_id,
+                    level_id=level_id,
                     trajectory=trajectory,
                     title_id=title_id,
                     **kwargs,
@@ -653,7 +653,7 @@ class GameVisualizer(BaseVisualizer):
             elif plot_type == "scatter":
                 self.plot_trajectory_scatter(
                     ax=ax,
-                    game_id=game_id,
+                    level_id=level_id,
                     trajectory=trajectory,
                     title_id=title_id,
                     **kwargs,
@@ -661,7 +661,7 @@ class GameVisualizer(BaseVisualizer):
             elif plot_type == "velocity":
                 self.plot_velocity_grid(
                     ax=ax,
-                    game_id=game_id,
+                    level_id=level_id,
                     trajectory=trajectory,
                     title_id=title_id,
                     **kwargs,
@@ -669,7 +669,7 @@ class GameVisualizer(BaseVisualizer):
             elif plot_type == "count":
                 self.plot_count_grid(
                     ax=ax,
-                    game_id=game_id,
+                    level_id=level_id,
                     trajectory=trajectory,
                     title_id=title_id,
                     **kwargs,

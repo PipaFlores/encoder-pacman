@@ -12,18 +12,18 @@ logger = setup_logger(__name__)
 @dataclass
 class Trajectory:
     """
-    A class representing a game trajectory with both spatial data and metadata.
+    A class representing a level trajectory with both spatial data and metadata.
 
     Attributes:
         coordinates: Array of shape (num_timesteps, 2) containing x,y coordinates
         timevalues: Optional array of shape (num_timesteps,) containing time values
         metadata: Optional dictionary containing additional game information, currently includes
-            - game_id: The ID of the game
+            - level_id: The ID of the level
             - user_id: The ID of the user
             - session_number: The number of the session
-            - game_in_session: The number of the game in the session
+            - level_in_session: The number of the level in the session
             - total_games_played: The total number of games played
-            - game_duration: The duration of the game
+            - duration: The duration of the game
             - win: Whether the game was won
             - level: The level of the game
 
@@ -103,7 +103,7 @@ class Trajectory:
         """Get a segment of the trajectory"""
         if end_step >= len(self.coordinates):
             logger.warning(
-                f"Trajectory for game {self.metadata['game_id'] if self.metadata else 'NA'} ends before the inputed end step ({len(self.coordinates)} < {end_step}). Returning segment until last observed position instead."
+                f"Trajectory for game {self.metadata['level_id'] if self.metadata else 'NA'} ends before the inputed end step ({len(self.coordinates)} < {end_step}). Returning segment until last observed position instead."
             )
             end_step = len(self.coordinates)
         if end_step == -1:
