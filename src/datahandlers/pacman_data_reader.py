@@ -38,8 +38,8 @@ class PacmanDataReader:
 
     ## To get all trajectories as a list[Trajectory]
     all_trajs = []
-    for game in data.game_df["game_id"].tolist():
-        traj = data.get_trajectory(game_id=game, include_metadata=True)
+    for game in data.game_df["level_id"].tolist():
+        traj = data.get_trajectory(level_id=game, include_metadata=True)
         all_trajs.append(traj)
 
     ```
@@ -136,12 +136,12 @@ class PacmanDataReader:
             )
             self.psychometrics_df = pd.read_csv(
                 os.path.join(
-                    self.data_folder, "psych\AiPerCogPacman_DATA_2025-05-06_1036.csv"
+                    self.data_folder, r"psych\AiPerCogPacman_DATA_2025-05-06_1036.csv"
                 )
             )
 
             # Process psych data
-            self.flow_df = self._process_flow()
+            self.game_flow_df = self._process_flow()
             self.bisbas_df = self._process_bisbas()
 
     def _restructure_game_data(self):
@@ -222,7 +222,85 @@ class PacmanDataReader:
         """
         Process psychometrics to pair flow measures with their respective games.
         """
-        return None
+        flow_items = ["fss_1", "fss_2", "fss_3", "fss_4", "fss_5", "fss_6", "fss_7", "fss_8"]
+
+        flow = self.psychometrics_df.loc[self.psychometrics_df["redcap_repeat_instrument"] == "flow"].loc[
+            :, ["record_id", "total_games_flow", "redcap_repeat_instance"] + flow_items
+        ]
+
+
+        flow = flow.rename(
+            columns={"record_id": "user_id", "total_games_flow": "total_levels_played"}
+        )
+
+        flow["FLOW"] = flow.iloc[:, 3:].sum(axis=1)
+
+        game_psych_df = (
+            pd.merge(
+                flow,
+                self.game_df[
+                    [
+                        "user_id",
+                        "total_levels_played",
+                        "total_games_played",
+                        "max_score",
+                    ]
+                ],
+                on=["user_id", "total_levels_played"],
+                how="right",
+            )
+            .dropna()
+            .drop(columns=flow_items + ["total_levels_played", "redcap_repeat_instance"])
+        )
+
+        game_psych_df["log(max_score)"] = np.log(game_psych_df["max_score"])
+        game_psych_df["inv(max_score)"] = (
+            game_psych_df["max_score"].max() - game_psych_df["max_score"] + 1
+        )  # Avoid zeros
+        game_psych_df["log(inv(max_score))"] = np.log(game_psych_df["inv(max_score)"])
+
+        game_psych_df["log(total_games_played)"] = np.log(
+            game_psych_df["total_games_played"]
+        )  ## i.e., cum trials
+
+        game_psych_df["flow_z_score"] = game_psych_df.groupby("user_id")["FLOW"].transform(
+            lambda x: (x - x.mean()) / x.std()
+        )
+
+        game_psych_df["cum_score"] = game_psych_df.groupby("user_id")["max_score"].cumsum()
+        game_psych_df["log(cum_score)"] = np.log(game_psych_df["cum_score"])
+
+        # Calculate deviation from linear regression for each participant
+        from sklearn.linear_model import LinearRegression
+
+        # Initialize lists to store results
+        user_ids = []
+        deviations = []
+
+        # Group by user_id and calculate deviation for each user
+        for user_id, user_data in game_psych_df.groupby("user_id"):
+            # Prepare data
+            X = user_data[["total_games_played"]]
+            y = user_data["log(inv(max_score))"]
+
+            # Fit linear regression
+            model = LinearRegression()
+            model.fit(X, y)
+
+            # Calculate predicted values
+            y_pred = model.predict(X)
+
+            # Calculate deviation (real - predicted)
+            deviation = y - y_pred
+
+            # Store results
+            user_ids.extend([user_id] * len(deviation))
+            deviations.extend(deviation)
+
+        # Add deviation column to dataframe
+        game_psych_df["score_deviation"] = deviations
+
+        return game_psych_df
 
     def _process_bisbas(self):
 
@@ -254,92 +332,92 @@ class PacmanDataReader:
 
     def _filter_gamestate_data(
         self,
-        game_id: int | list[int] | None = None,
+        level_id: int | list[int] | None = None,
         user_id: int | list[int] | None = None,
         include_metadata: bool = False,
     ) -> pd.DataFrame:
         """
         Filter gamestate data from the dataframes. Includes trajectories and game state variables.
         Args:
-            game_id: List of game ids to filter the data by.
+            level_id: List of game ids to filter the data by.
             user_id: List of user ids to filter the data by.
             include_metadata: Boolean indicating whether to include metadata in the filtered dataframe.
         Returns:
             filtered_df: DataFrame containing the filtered gamestate data.
         """
 
-        if game_id is None and user_id is None:
-            raise ValueError("Either game_id or user_id must be provided")
+        if level_id is None and user_id is None:
+            raise ValueError("Either level_id or user_id must be provided")
 
         time_start = time.time()
 
-        if game_id is not None:
-            logger.debug(f"Filtering gamestate data for game {game_id}...")
-            game_id = [game_id] if isinstance(game_id, int) else game_id
+        if level_id is not None:
+            logger.debug(f"Filtering gamestate data for game {level_id}...")
+            level_id = [level_id] if isinstance(level_id, (int,np.int64)) else level_id
 
-            filtered_df = self.gamestate_df[self.gamestate_df["game_id"].isin(game_id)]
+            filtered_df = self.gamestate_df[self.gamestate_df["level_id"].isin(level_id)]
             n_games = len(
-                self.game_df[self.game_df["game_id"].isin(game_id)]["game_id"].unique()
+                self.level_df[self.level_df["level_id"].isin(level_id)]["level_id"].unique()
             )
             if n_games == 0:
                 logger.info("No games found")
-                return None
+                raise ValueError("No game founds")
 
         elif user_id is not None:
             logger.debug(f"Filtering gamestate data for user {user_id}...")
-            user_id = [user_id] if isinstance(user_id, int) else user_id
-            user_games_list = self.game_df[self.game_df["user_id"].isin(user_id)][
-                "game_id"
+            user_id = [user_id] if isinstance(user_id, (int, np.int64)) else user_id
+            user_games_list = self.level_df[self.level_df["user_id"].isin(user_id)][
+                "level_id"
             ].unique()
             n_games = len(user_games_list)
 
             if len(user_games_list) > 0:
                 filtered_df = self.gamestate_df[
-                    self.gamestate_df["game_id"].isin(user_games_list)
+                    self.gamestate_df["level_id"].isin(user_games_list)
                 ]
             else:
                 logger.info("No games found")
-                return None
+                raise ValueError("No game founds")
 
         if include_metadata:
-            games_meta_df = (
-                self.game_df[self.game_df["game_id"].isin(game_id)]
-                if game_id is not None
-                else self.game_df[self.game_df["user_id"].isin(user_id)]
+            levels_meta_df = (
+                self.level_df[self.level_df["level_id"].isin(level_id)]
+                if level_id is not None
+                else self.level_df[self.level_df["user_id"].isin(user_id)]
             )
             metadata = {
-                "game_id": games_meta_df["game_id"].unique().tolist()
-                if len(games_meta_df["game_id"].unique()) > 1
-                else games_meta_df["game_id"].unique()[0],
-                "user_id": games_meta_df["user_id"].unique().tolist()
-                if len(games_meta_df["user_id"].unique()) > 1
-                else games_meta_df["user_id"].unique()[0],
-                "session_number": games_meta_df["session_number"].unique().tolist()
-                if len(games_meta_df["session_number"].unique()) > 1
-                else games_meta_df["session_number"].unique()[0],
-                "game_in_session": games_meta_df["game_in_session"].unique().tolist()
-                if len(games_meta_df["game_in_session"].unique()) > 1
-                else games_meta_df["game_in_session"].unique()[0],
-                "total_games_played": games_meta_df["total_games_played"]
+                "level_id": levels_meta_df["level_id"].unique().tolist()
+                if len(levels_meta_df["level_id"].unique()) > 1
+                else levels_meta_df["level_id"].unique()[0],
+                "user_id": levels_meta_df["user_id"].unique().tolist()
+                if len(levels_meta_df["user_id"].unique()) > 1
+                else levels_meta_df["user_id"].unique()[0],
+                "session_number": levels_meta_df["session_number"].unique().tolist()
+                if len(levels_meta_df["session_number"].unique()) > 1
+                else levels_meta_df["session_number"].unique()[0],
+                "level_in_session": levels_meta_df["level_in_session"].unique().tolist()
+                if len(levels_meta_df["level_in_session"].unique()) > 1
+                else levels_meta_df["level_in_session"].unique()[0],
+                "total_levels_played": levels_meta_df["total_levels_played"]
                 .unique()
                 .tolist()
-                if len(games_meta_df["total_games_played"].unique()) > 1
-                else games_meta_df["total_games_played"].unique()[0],
-                "game_duration": games_meta_df["game_duration"].unique().tolist()
-                if len(games_meta_df["game_duration"].unique()) > 1
-                else games_meta_df["game_duration"].unique()[0],
-                "win": games_meta_df["win"].unique().tolist()
-                if len(games_meta_df["win"].unique()) > 1
-                else games_meta_df["win"].unique()[0],
-                "level": games_meta_df["level"].unique().tolist()
-                if len(games_meta_df["level"].unique()) > 1
-                else games_meta_df["level"].unique()[0],
+                if len(levels_meta_df["total_levels_played"].unique()) > 1
+                else levels_meta_df["total_levels_played"].unique()[0],
+                "duration": levels_meta_df["duration"].unique().tolist()
+                if len(levels_meta_df["duration"].unique()) > 1
+                else levels_meta_df["duration"].unique()[0],
+                "win": levels_meta_df["win"].unique().tolist()
+                if len(levels_meta_df["win"].unique()) > 1
+                else levels_meta_df["win"].unique()[0],
+                "level": levels_meta_df["level"].unique().tolist()
+                if len(levels_meta_df["level"].unique()) > 1
+                else levels_meta_df["level"].unique()[0],
             }
         else:
             metadata = {}
 
         logger.info(
-            f"Found {n_games} games for {'user' if user_id is not None else 'game'} {game_id if game_id is not None else user_id}"
+            f"Found {n_games} levels for {'user' if user_id is not None else 'level'} {level_id if level_id is not None else user_id}"
         )
         logger.debug(
             f"Time taken to filter gamestate data: {time.time() - time_start} seconds"
@@ -349,7 +427,7 @@ class PacmanDataReader:
 
     def get_trajectory(
         self,
-        game_id: int | list[int] = None,
+        level_id: int | list[int] = None,
         user_id: int | list[int] = None,
         get_timevalues: bool = False,
         include_metadata: bool = True,
@@ -357,7 +435,7 @@ class PacmanDataReader:
         """
         Get Pacman trajectory data from the dataframes, without any metadata.
         Args:
-            game_id: List of game ids to filter the data by.
+            level_id: List of game ids to filter the data by.
             user_id: List of user ids to filter the data by.
             get_all_games: Boolean indicating whether to get all games.
             include_metadata: Boolean indicating whether to include metadata in the trajectory.
@@ -366,17 +444,17 @@ class PacmanDataReader:
 
         Example:
         ```python
-        # Get trajectory for a specific game
-        trajectory = data_reader.get_trajectory(game_id=123)
+        # Get trajectory for a specific level
+        trajectory = data_reader.get_trajectory(level_id=123)
 
         # Get trajectory for a specific user
         trajectory = data_reader.get_trajectory(user_id=456)
 
         # Get trajectory with time values
-        trajectory = data_reader.get_trajectory(game_id=123, get_timevalues=True)
+        trajectory = data_reader.get_trajectory(level_id=123, get_timevalues=True)
 
         # Get trajectory without metadata
-        trajectory = data_reader.get_trajectory(game_id=123, include_metadata=False)
+        trajectory = data_reader.get_trajectory(level_id=123, include_metadata=False)
 
         # Access trajectory data
         coordinates = trajectory.coordinates  # numpy array of (x,y) coordinates
@@ -385,12 +463,12 @@ class PacmanDataReader:
         ```
         """
         time_start = time.time()
-        logger.debug(f"Getting trajectory for game {game_id} and user {user_id}...")
-        if game_id is None and user_id is None:
-            raise ValueError("Either game_id or user_id must be provided")
+        logger.debug(f"Getting trajectory for game {level_id} and user {user_id}...")
+        if level_id is None and user_id is None:
+            raise ValueError("Either level_id or user_id must be provided")
 
         filtered_df, metadata = self._filter_gamestate_data(
-            game_id=game_id, user_id=user_id, include_metadata=include_metadata
+            level_id=level_id, user_id=user_id, include_metadata=include_metadata
         )
 
         if filtered_df is None:
@@ -412,7 +490,7 @@ class PacmanDataReader:
 
     def get_partial_trajectory(
         self,
-        game_id: int | list[int] | None = None,
+        level_id: int | list[int] | None = None,
         user_id: int | list[int] | None = None,
         start_timestep: int = 0,
         end_timestep: int = -1,
@@ -421,7 +499,7 @@ class PacmanDataReader:
         """
         Get a partial trajectory from the dataframes.
         Args:
-            game_id: List of game ids to filter the data by.
+            level_id: List of game ids to filter the data by.
             user_id: List of user ids to filter the data by.
             start_timestep: Start timestep of the trajectory.
             end_timestep: End timestep of the trajectory.
@@ -429,7 +507,7 @@ class PacmanDataReader:
             trajectory: `Trajectory` object containing Pacman trajectory data (x,y) coordinates.
         """
         trajectory = self.get_trajectory(
-            game_id=game_id, user_id=user_id, get_timevalues=get_timevalues
+            level_id=level_id, user_id=user_id, get_timevalues=get_timevalues
         )
 
         partial_trajectory = trajectory.get_segment(start_timestep, end_timestep)
@@ -442,7 +520,7 @@ class PacmanDataReader:
         include_game_state_vars=False,
         include_timesteps=True,
         include_game_id=True,
-        game_id: int | list[int] = None,
+        level_id: int | list[int] = None,
         user_id: int | list[int] = None,
     ) -> pd.DataFrame:
         """
@@ -455,7 +533,7 @@ class PacmanDataReader:
             include_game_state_vars: Boolean indicating whether to include game state variables (score, powerPellets)
             include_timesteps: Boolean indicating whether to include time elapsed in the features
             include_game_id: Boolean indicating whether to include game id in the features
-            game_id: List of game ids to filter the data by.
+            level_id: List of game ids to filter the data by.
             user_id: List of user ids to filter the data by.
 
         Returns:
@@ -469,15 +547,15 @@ class PacmanDataReader:
         """
         if user_id is not None:
             dataframe, _ = self._filter_gamestate_data(user_id=user_id)
-        elif game_id is not None:
-            dataframe, _ = self._filter_gamestate_data(game_id=game_id)
+        elif level_id is not None:
+            dataframe, _ = self._filter_gamestate_data(level_id=level_id)
         else:
             dataframe = self.gamestate_df
 
         features = []
 
         if include_game_id:
-            features.extend(["game_id"])
+            features.extend(["level_id"])
 
         if include_game_state_vars:
             features.extend(["score", "powerPellets"])
@@ -527,7 +605,7 @@ class PacmanDataReader:
 
         # Convert to float
         for col in processed_df.columns:
-            if col != "game_id":  # Skip game_id conversion
+            if col != "level_id":  # Skip level_id conversion
                 processed_df[col] = processed_df[col].astype(float)
 
         return processed_df

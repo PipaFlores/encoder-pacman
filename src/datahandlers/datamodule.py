@@ -30,7 +30,7 @@ class TrajectoryDataset(Dataset):
         return {
             "trajectory": self.trajectories[idx],
             "mask": self.masks[idx],
-            "game_id": self.game_ids[idx],
+            "level_id": self.game_ids[idx],
         }
 
 
@@ -69,7 +69,7 @@ class TrajectoryDataModule(pl.LightningDataModule):
         batch = next(iter(train_loader))
         print(batch['trajectory'].shape)
         print(batch['mask'].shape)
-        print(batch['game_id'].shape)
+        print(batch['level_id'].shape)
     ```
     """
 
@@ -168,10 +168,10 @@ class TrajectoryDataModule(pl.LightningDataModule):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Creates a tensor of shape (num_games, sequence_length, num_features) from a dataframe of trajectories.
-        The dataframe must have a 'game_id' column.
+        The dataframe must have a 'level_id' column.
 
         Args:
-            trajectories_df: DataFrame containing all games' preprocessed data with game_id column
+            trajectories_df: DataFrame containing all games' preprocessed data with level_id column
             max_sequence_length: Optional, pad/truncate all sequences to this length
 
         Returns:
@@ -181,13 +181,13 @@ class TrajectoryDataModule(pl.LightningDataModule):
         """
         # If max_sequence_length isn't provided, use the longest game
         if max_sequence_length is None:
-            max_sequence_length = trajectories_df.groupby("game_id").size().max()
+            max_sequence_length = trajectories_df.groupby("level_id").size().max()
 
-        game_ids = trajectories_df["game_id"].unique()
+        game_ids = trajectories_df["level_id"].unique()
         # Determine the number of features from the DataFrame
         num_features = (
             trajectories_df.shape[1] - 1
-        )  # Subtract 1 for the 'game_id' column
+        )  # Subtract 1 for the 'level_id' column
         num_games = len(game_ids)
 
         # Initialize tensor with zeros
@@ -197,8 +197,8 @@ class TrajectoryDataModule(pl.LightningDataModule):
         # Create mask to track actual sequence lengths
         mask = torch.zeros((num_games, max_sequence_length), dtype=torch.bool)
 
-        # Create dictionary to store game_id to index mapping
-        game_to_idx = {game_id: idx for idx, game_id in enumerate(game_ids)}
+        # Create dictionary to store level_id to index mapping
+        game_to_idx = {level_id: idx for idx, level_id in enumerate(game_ids)}
 
         # Convert game_ids to a list and create ordered tensor of game IDs
         game_ids_list = list(game_ids)  # Convert from numpy array to list
@@ -206,15 +206,15 @@ class TrajectoryDataModule(pl.LightningDataModule):
             [game_ids_list[i] for i in range(len(game_ids_list))]
         )
 
-        for game_id in game_ids:
-            # Get game data excluding 'game_id' column
+        for level_id in game_ids:
+            # Get game data excluding 'level_id' column
             game_data = (
-                trajectories_df[trajectories_df["game_id"] == game_id]
+                trajectories_df[trajectories_df["level_id"] == level_id]
                 .iloc[:, 1:]
                 .values
             )
             seq_len = min(len(game_data), max_sequence_length)
-            game_idx = game_to_idx[game_id]
+            game_idx = game_to_idx[level_id]
 
             # Fill tensor and mask
             tensor[game_idx, :seq_len, :] = torch.FloatTensor(game_data[:seq_len])

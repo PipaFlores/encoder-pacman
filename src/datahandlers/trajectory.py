@@ -112,6 +112,9 @@ class Trajectory:
         if start_step > end_step:
             raise ValueError("start_step must be less than end_step")
 
+        if start_step < 0 or end_step < -1:
+            raise IndexError("Indexs can't be negative")
+
         return Trajectory(
             coordinates=self.coordinates[start_step:end_step],
             timevalues=self.timevalues[start_step:end_step]
@@ -128,7 +131,7 @@ class Trajectory:
             n: Number of steps in the original time-series used to extract the reduced trajectory
         """
 
-        return self[range(0)]
+        raise NotImplementedError
 
     @classmethod
     def save_trajectories(cls, trajectories: List["Trajectory"], filepath: str):
