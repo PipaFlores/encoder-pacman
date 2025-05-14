@@ -192,6 +192,34 @@ class GeomClustering:
         else:
             raise ValueError(f"Invalid cluster method: {cluster_method}")
 
+    def get_cluster_elements(
+        self, cluster_id, type: str = "trajectory"
+    ) -> list[Trajectory]:
+        if type == "trajectory":
+            cluster_elements = [
+                traj
+                for traj, label in zip(self.trajectories, self.labels)
+                if label == cluster_id
+            ]
+        elif type == "timevalues":
+            if self.trajectories[0].timevalues is not None:
+                cluster_elements = [
+                    traj.timevalues
+                    for traj, label in zip(self.trajectories, self.labels)
+                    if label == cluster_id
+                ]
+            else:
+                raise AttributeError("Timevalues not in trajectories")
+
+        else:
+            cluster_elements = [
+                traj.metadata[type]
+                for traj, label in zip(self.trajectories, self.labels)
+                if label == cluster_id
+            ]
+
+        return cluster_elements
+
     def _DBSCAN_fit(self, **kwargs):
         """
         Fit DBSCAN clustering to the affinity matrix.
@@ -267,10 +295,11 @@ class GeomClustering:
         axs[3].set_title("d) " + axs[3].get_title())
 
         # Add title to the figure
-        fig.suptitle(
-            f"Affinity Matrix Overview - {self.similarity_measures.measure_type.capitalize()} measure"
-        )
-        fig.tight_layout()
+        if axs is None:
+            fig.suptitle(
+                f"Affinity Matrix Overview - {self.similarity_measures.measure_type.capitalize()} measure"
+            )
+            fig.tight_layout()
 
         if show_plot:
             plt.show()
@@ -387,7 +416,7 @@ class GeomClustering:
         )
 
     def plot_cluster_overview(
-        self, cluster_id: int, figsize: tuple[int, int] = (18, 6)
+        self, cluster_id: int, figsize: tuple[int, int] = (18, 6), seed: int = 42
     ):
         """
         Plot an overview of a specific cluster showing velocity grid, heatmap and sample trajectories.
@@ -399,11 +428,14 @@ class GeomClustering:
         Args:
             cluster_id (int): ID of the cluster to visualize
             figsize (tuple[int, int], optional): Figure size as (width, height). Defaults to (18, 6).
+            seed (int): seed for randomly selecting cluster trajectories
         """
         cluster_trajectories = [
             traj for traj, l in zip(self.trajectories, self.labels) if l == cluster_id
         ]
-        subset = random.sample(cluster_trajectories, min(4, len(cluster_trajectories)))
+        # Create a local random number generator with a fixed seed for reproducibility
+        rng = random.Random(42)
+        subset = rng.sample(cluster_trajectories, min(4, len(cluster_trajectories)))
 
         from src.visualization.game_visualizer import GameVisualizer  # Lazy import
 
@@ -434,7 +466,7 @@ class GeomClustering:
             plot_type="line",
             axs=[ax3, ax4, ax5, ax6],
             show_maze=False,
-            metadata_label="game_id",
+            metadata_label="level_id",
         )
 
     def _sort_labels(self) -> np.ndarray:

@@ -1,9 +1,7 @@
 import numpy as np
 from typing import Tuple
-import matplotlib.pyplot as plt
 
 import src.utils as utils
-from src.config.defaults import config
 
 
 class GridAnalyzer:

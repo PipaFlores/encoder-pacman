@@ -678,7 +678,7 @@ class GameVisualizer(BaseVisualizer):
                 raise ValueError(f"Unknown plot type: {plot_type}")
 
         plt.tight_layout()
-        plt.show()
+        # plt.show()
 
     def _format_trajectory_data(
         self, trajectory: Trajectory | torch.Tensor | np.ndarray
