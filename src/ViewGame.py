@@ -36,7 +36,13 @@ if __name__ == "__main__":
 
     data = PacmanDataReader(data_folder=args.data_path, read_games_only=True)
 
-    gamestate_df = pd.merge(data.gamestate_df, data.level_df, left_on="level_id", right_index=True ,how="inner") # Gamestates with game metadata
+    gamestate_df = pd.merge(
+        data.gamestate_df,
+        data.level_df,
+        left_on="level_id",
+        right_index=True,
+        how="inner",
+    )  # Gamestates with game metadata
 
     visualizer = GameReplayer(
         gamestate_df,

@@ -1,14 +1,13 @@
-# test:
-# 	pytest
-
-# coverage:
-# 	pytest --cov
+all: format lint test
 
 format:
 	ruff format
 
 lint:
-	ruff check --fix
+	ruff check --fix-only
+
+test:
+	pytest -v
 
 # install:
 # 	python -m pip install -e .
