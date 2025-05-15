@@ -1,4 +1,3 @@
-# TODO> Consider the tunnels
 def manhattan_distance(pos1, pos2):
     """Calculate the Manhattan distance between two positions."""
     return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
@@ -42,6 +41,7 @@ def generate_squared_walls(wall_positions):
 
 def get_neighbors(pos, wall_positions, step):
     """Get valid neighboring positions (up, right, down, left)."""
+    TUNNEL_POS =[(-13.5,-0.5),(13.5,-0.5)]
     x, y = pos
     neighbors = [
         (x, y + step),  # up
@@ -49,7 +49,17 @@ def get_neighbors(pos, wall_positions, step):
         (x, y - step),  # down
         (x - step, y),  # left
     ]
-    return [(x, y) for (x, y) in neighbors if (x, y) not in wall_positions]
+    valid_neighbors = [(x,y) for (x,y) in neighbors if (x,y) not in wall_positions]
+
+    # Add the other tunnel position as a neighbor if in tunnel
+    if pos == TUNNEL_POS[0]:
+        valid_neighbors.append(TUNNEL_POS[1])
+    elif pos == TUNNEL_POS[1]:
+        valid_neighbors.append(TUNNEL_POS[0])
+
+    return valid_neighbors
+
+    # return [(x, y) for (x, y) in neighbors if (x, y) not in wall_positions]
 
 
 def calculate_path_and_distance(start, goal, grid):
