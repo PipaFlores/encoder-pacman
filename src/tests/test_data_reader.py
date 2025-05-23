@@ -62,6 +62,7 @@ class TestPacmanDataReader:
         assert trajectory.metadata is not None
         assert list(trajectory.metadata.keys()) == [
             "level_id",
+            "game_id",
             "user_id",
             "session_number",
             "level_in_session",
