@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Tuple
 import torch
-from src.analysis.utils.grid_analyzer import GridAnalyzer
+from src.utils.grid_analyzer import GridAnalyzer
 import src.utils as utils
 import logging
 from src.visualization.base_visualizer import BaseVisualizer

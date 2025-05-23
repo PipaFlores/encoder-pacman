@@ -4,6 +4,7 @@ import numpy as np
 import time
 from src.datahandlers.trajectory import Trajectory
 from src.utils import setup_logger
+from typing import Tuple, Dict
 
 logger = setup_logger(__name__)
 
@@ -109,6 +110,7 @@ class PacmanDataReader:
                 #   'Pacman_Y': lambda x: round(float(x), 2)
             },
         )
+        self.gamestate_df.set_index(keys="game_state_id", drop=False, inplace=True)
         logger.info(f"Time taken to read game data: {time.time() - time_start} seconds")
         ## Filter banned users and games
         self.banned_game_ids = pd.concat(
@@ -365,7 +367,7 @@ class PacmanDataReader:
         level_id: int | list[int] | None = None,
         user_id: int | list[int] | None = None,
         include_metadata: bool = False,
-    ) -> pd.DataFrame:
+    ) -> Tuple[pd.DataFrame, Dict]:
         """
         Filter gamestate data from the dataframes. Includes trajectories and game state variables.
         Args:
@@ -373,7 +375,9 @@ class PacmanDataReader:
             user_id: List of user ids to filter the data by.
             include_metadata: Boolean indicating whether to include metadata in the filtered dataframe.
         Returns:
-            filtered_df: DataFrame containing the filtered gamestate data.
+            filtered_df: tuple[pd.DataFrame, dict]: A tuple containing:
+                - DataFrame containing the filtered gamestate data
+                - Dictionary with metadata about the filtered data
         """
 
         if level_id is None and user_id is None:
@@ -423,6 +427,7 @@ class PacmanDataReader:
                 "level_id": levels_meta_df["level_id"].unique().tolist()
                 if len(levels_meta_df["level_id"].unique()) > 1
                 else levels_meta_df["level_id"].unique()[0],
+                "game_id": levels_meta_df["game_id"].unique()[0],
                 "user_id": levels_meta_df["user_id"].unique().tolist()
                 if len(levels_meta_df["user_id"].unique()) > 1
                 else levels_meta_df["user_id"].unique()[0],

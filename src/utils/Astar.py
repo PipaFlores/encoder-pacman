@@ -41,7 +41,7 @@ def generate_squared_walls(wall_positions):
 
 def get_neighbors(pos, wall_positions, step):
     """Get valid neighboring positions (up, right, down, left)."""
-    TUNNEL_POS =[(-13.5,-0.5),(13.5,-0.5)]
+    TUNNEL_POS = [(-13.5, -0.5), (13.5, -0.5)]
     x, y = pos
     neighbors = [
         (x, y + step),  # up
@@ -49,7 +49,7 @@ def get_neighbors(pos, wall_positions, step):
         (x, y - step),  # down
         (x - step, y),  # left
     ]
-    valid_neighbors = [(x,y) for (x,y) in neighbors if (x,y) not in wall_positions]
+    valid_neighbors = [(x, y) for (x, y) in neighbors if (x, y) not in wall_positions]
 
     # Add the other tunnel position as a neighbor if in tunnel
     if pos == TUNNEL_POS[0]:

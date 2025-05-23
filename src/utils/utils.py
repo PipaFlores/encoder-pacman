@@ -20,61 +20,15 @@ def timer(func):
     return wrapper_timer
 
 
-def read_data(data_folder, game_list=None, user_list=None):
+def get_relative_path(*path_parts):
     """
-    Read all data from CSV files.
+    Returns an absolute path relative to the caller script location.
 
-    Args:
-        data_folder: path to data folder
-        game_list: list of game IDs to filter, default is None
-        user_list: list of user IDs to filter, default is None
-
-    Returns:
-        tuple: (user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df)
-        user_df: DataFrame with user data
-        ip_df: DataFrame with IP data
-        redcap_df: DataFrame with REDCap data
-        game_df: DataFrame with game data
-        gamestate_df: DataFrame with gamestate data
-        psychometrics_df: DataFrame with psychometrics data
+    Example:
+        get_relative_path('..', 'data', 'file.txt')
     """
-    ## Read tables from csv
-    BANNED_USERS = [42]  # Myself
-
-    user_df = pd.read_csv(os.path.join(data_folder, "user.csv"))
-    ip_df = pd.read_csv(os.path.join(data_folder, "userip.csv"))
-    redcap_df = pd.read_csv(os.path.join(data_folder, "redcapdata.csv"))
-    game_df = pd.read_csv(
-        os.path.join(data_folder, "game.csv"),
-        converters={"date_played": lambda x: pd.to_datetime(x)},
-    )
-    banned_game_ids = game_df.loc[game_df["user_id"].isin(BANNED_USERS), "game_id"]
-    game_df = game_df[~game_df["game_id"].isin(banned_game_ids)]
-
-    gamestate_df = pd.read_csv(
-        os.path.join(data_folder, "gamestate.csv"),
-        converters={
-            "user_id": lambda x: int(x),
-            "Pacman_X": lambda x: round(float(x), 2),
-            "Pacman_Y": lambda x: round(float(x), 2),
-        },
-    )
-    gamestate_df = gamestate_df[~gamestate_df["game_id"].isin(banned_game_ids)]
-    psychometrics_df = pd.read_csv(
-        os.path.join(data_folder, "psych\AiPerCogPacman_DATA_2025-03-03_0927.csv")
-    )
-
-    # Filter dataframes based on game_list and user_list if provided
-    if game_list is not None:
-        game_df = game_df[game_df["game_id"].isin(game_list)]
-        gamestate_df = gamestate_df[gamestate_df["game_id"].isin(game_list)]
-
-    if user_list is not None:
-        user_df = user_df[user_df["user_id"].isin(user_list)]
-        game_df = game_df[game_df["user_id"].isin(user_list)]
-        gamestate_df = gamestate_df[gamestate_df["user_id"].isin(user_list)]
-
-    return user_df, ip_df, redcap_df, game_df, gamestate_df, psychometrics_df
+    caller_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(caller_dir, *path_parts)
 
 
 def load_maze_data():

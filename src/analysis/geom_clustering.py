@@ -2,7 +2,7 @@ import numpy as np
 import random
 from typing import List
 import tqdm
-from src.analysis.utils.similarity_measures import SimilarityMeasures
+from src.utils.similarity_measures import SimilarityMeasures
 import matplotlib.pyplot as plt
 from matplotlib.gridspec import GridSpec
 from sklearn.cluster import DBSCAN

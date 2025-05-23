@@ -6,6 +6,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.visualization.game_replayer import GameReplayer
+from src.datahandlers import PacmanDataReader
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Visualize Pac-Man game states")
@@ -18,8 +19,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data-path",
         type=str,
-        default="data/gamestate.csv",
-        help="Path to the game state data",
+        default="data/",
+        help="Path to the data",
     )
     parser.add_argument(
         "--gamedata-path",
@@ -41,12 +42,20 @@ if __name__ == "__main__":
     )
     parser.add_argument("--grid", action="store_true", default=False, help="Show grid")
     args = parser.parse_args()
-    gamestate_df = pd.read_csv(args.data_path, converters={"user_id": lambda x: int(x)})
 
-    game_df = gamestate_df.loc[gamestate_df["game_id"] == 601]
-    game_df = game_df.loc[:, ["Pacman_X", "Pacman_Y"]]
+    data = PacmanDataReader(data_folder=args.data_path, read_games_only=True)
+
+    game_and_meta = pd.merge(
+        data.gamestate_df, data.level_df, left_on="level_id", right_index=True
+    )
+
+    slice = game_and_meta.loc[game_and_meta["level_id"] == 600]
+
+    # game_df = game_df.loc[:, ["Pacman_X", "Pacman_Y"]
 
     visualizer = GameReplayer(
-        game_df, playback_speed=args.playback_speed, verbose=args.verbose
+        slice, playback_speed=args.playback_speed, verbose=args.verbose
     )
-    visualizer.animate_session()
+    visualizer.animate_session(
+        save_path="testanim_wtitle.mp4", save_format="mp4", title="testanim"
+    )

@@ -142,7 +142,9 @@ class GameReplayer:
             self.anim.frame_seq = self.anim.new_frame_seq()
             self.anim.event_source.start()
 
-    def animate_session(self, save_path=None, save_format="mp4"):
+    def animate_session(
+        self, save_path: str = None, save_format: str = "mp4", title: str = None
+    ):
         """
         Creates an interactive animation window with controls.
         """
@@ -158,17 +160,19 @@ class GameReplayer:
         if save_path:
             # For saving, use a simpler layout without UI controls
             fig = plt.figure(figsize=(9, 6))
+            if title:
+                fig.suptitle(title, color="black", fontsize=12)
             ax_game = fig.add_subplot(111)  # Single subplot for game display
             ax_game.set_xlim(-15, 15)
             ax_game.set_ylim(-18, 15)
             ax_game.set_aspect("equal")
             ax_game.set_facecolor("black")
-            
+
             if self.show_grid:
                 ax_game.grid(True, color="white", alpha=0.3, linestyle="-", linewidth=1)
                 ax_game.set_xticks(range(-15, 16))
                 ax_game.set_yticks(range(-18, 16))
-            
+
             # Initialize empty lists for UI elements that won't be used
             stats_text_objects = []
             game_selector = None
@@ -177,7 +181,9 @@ class GameReplayer:
         else:
             # Original interactive layout with UI controls
             fig = plt.figure(figsize=(9, 6))
-            gs = fig.add_gridspec(2, 2, width_ratios=[3, 1], height_ratios=[10, 1], hspace=0.1)
+            gs = fig.add_gridspec(
+                2, 2, width_ratios=[3, 1], height_ratios=[10, 1], hspace=0.1
+            )
 
             # Game display axis
             ax_game = fig.add_subplot(gs[0, 0])
@@ -206,7 +212,9 @@ class GameReplayer:
             if self.stats_columns:
                 for i, column in enumerate(self.stats_columns):
                     stats_text_objects.append(
-                        ax_stats.text(0.1, 0.9 - i * 0.1, "", color="white", fontsize=10)
+                        ax_stats.text(
+                            0.1, 0.9 - i * 0.1, "", color="white", fontsize=10
+                        )
                     )
 
             # Game Selector
@@ -348,7 +356,9 @@ class GameReplayer:
                             [row[f"Ghost{i + 1}_X"]], [row[f"Ghost{i + 1}_Y"]]
                         )
 
-                if self.stats_columns and not save_path:  # Only update stats if not saving
+                if (
+                    self.stats_columns and not save_path
+                ):  # Only update stats if not saving
                     current_game_id = row["level_id"]
                     stats_text_objects[0].set_text(f"Level ID: {int(current_game_id)}")
 
@@ -394,6 +404,7 @@ class GameReplayer:
 
         # Only set up callbacks if not saving
         if not save_path:
+
             def on_game_select(text):
                 try:
                     level_id = int(text)
@@ -407,7 +418,9 @@ class GameReplayer:
                             pellet.set_visible(True)
                         self.restart_animation()
                     else:
-                        print(f"Level ID {level_id} not found. Available IDs: {level_ids}")
+                        print(
+                            f"Level ID {level_id} not found. Available IDs: {level_ids}"
+                        )
                 except ValueError:
                     print("Please enter a valid level ID number")
 
@@ -459,9 +472,16 @@ class GameReplayer:
         )
 
         if save_path:
-            if save_format.lower() == 'mp4':
-                self.anim.save(save_path, writer="ffmpeg", fps=1000/interval, dpi=300, bitrate=2000, codec='libx264')
-            elif save_format.lower() == 'gif':
-                self.anim.save(save_path, writer="pillow", fps=1000/interval)
+            if save_format.lower() == "mp4":
+                self.anim.save(
+                    save_path,
+                    writer="ffmpeg",
+                    fps=1000 / interval,
+                    dpi=300,
+                    bitrate=2000,
+                    codec="libx264",
+                )
+            elif save_format.lower() == "gif":
+                self.anim.save(save_path, writer="pillow", fps=1000 / interval)
         else:
             plt.show()
