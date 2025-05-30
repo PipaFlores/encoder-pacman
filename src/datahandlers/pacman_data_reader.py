@@ -3,7 +3,7 @@ import os
 import numpy as np
 import time
 from src.datahandlers.trajectory import Trajectory
-from src.utils import setup_logger
+from src.utils import setup_logger, load_maze_data
 from typing import Tuple, Dict
 
 logger = setup_logger(__name__)
@@ -130,6 +130,8 @@ class PacmanDataReader:
         ## Refactor game_df for analysis consistency.
         self.game_df, self.level_df, self.gamestate_df = self._restructure_game_data()
 
+        self.gamestate_df = self._process_pellet_positions()
+
         if not read_games_only:
             self.user_df = pd.read_csv(os.path.join(self.data_folder, "user.csv"))
             self.ip_df = pd.read_csv(os.path.join(self.data_folder, "userip.csv"))
@@ -145,6 +147,74 @@ class PacmanDataReader:
             # Process psych data
             self.game_flow_df = self._process_flow()
             self.bisbas_df = self._process_bisbas()
+
+    def _process_pellet_positions(self):
+
+        MAZE_X_MIN: int = -13.5
+        MAZE_X_MAX: int = 13.5
+        MAZE_Y_MIN: int = -16.5
+        MAZE_Y_MAX: int = 13.5
+        GRID_SIZE_X: int = 28
+        GRID_SIZE_Y: int = 31
+
+        _ , pellet_positions = load_maze_data()
+
+        gamestate_df = self.gamestate_df.copy()
+        
+        pellet_positions = [(pellet[0] + 0.5 , pellet[1] - 0.5) for pellet in pellet_positions]
+
+
+        x_grid = np.linspace(MAZE_X_MIN,
+                            MAZE_X_MAX, 
+                            GRID_SIZE_X)
+
+        y_grid = np.linspace(MAZE_Y_MAX,
+                            MAZE_Y_MIN,
+                            GRID_SIZE_Y)
+        
+        pellet_states = np.zeros(shape=(GRID_SIZE_Y, GRID_SIZE_X))
+
+        for pellet in pellet_positions:
+            x_idx = np.argmin(np.abs(x_grid - pellet[0]))
+            y_idx = np.argmin(np.abs(y_grid - pellet[1]))
+            pellet_states[y_idx, x_idx] = 1
+        
+        available_pellet_pos = np.array([(x_grid[idx[1]], y_grid[idx[0]])
+                                         for idx, pellet_state in np.ndenumerate(pellet_states)
+                                         if pellet_state == 1])
+        
+        gamestate_df['available_pellets'] = [available_pellet_pos.copy() for _ in range(len(gamestate_df))]
+        
+        for level in gamestate_df['level_id'].unique():
+            gamestates = gamestate_df.loc[self.gamestate_df['level_id'] == level]
+            
+            for i, gamestate in enumerate(gamestates.itertuples()):
+                if i == 0:
+                    pacman_pos = np.array([gamestate.Pacman_X, gamestate.Pacman_Y])
+                    distances = np.linalg.norm(gamestate.available_pellets - pacman_pos, axis = 1)
+                    if gamestate.pellets == 243:
+                        closest_pellet_idx = np.argmin(distances)
+                        available_pellet_pos = np.delete(gamestate.available_pellets, closest_pellet_idx, axis=0)
+
+                    if gamestate.pellets == 242:
+                        closest_pellets_indices = np.argsort(distances)[:2]
+                        available_pellet_pos = np.delete(gamestate.available_pellets, closest_pellets_indices, axis=0)
+                    
+                    gamestate_df.at[gamestate.Index, "available_pellets"] = available_pellet_pos
+
+                elif i > 0:
+                    pacman_pos = np.array([gamestate.Pacman_X, gamestate.Pacman_Y])
+                    distances = np.linalg.norm(gamestates.iloc[i-1]['available_pellets'] - pacman_pos , axis=1)
+                    closest_pellet_idx = np.argmin(distances)
+
+                    if distances[closest_pellet_idx] <= 0.50:
+                        available_pellet_pos = np.delete(gamestates.iloc[i-1]['available_pellets'], closest_pellet_idx, axis=0)
+                        gamestate_df.at[gamestate.Index, 'available_pellets'] = available_pellet_pos
+                    else:
+                        gamestate_df.at[gamestate.Index, 'available_pellets'] = gamestates.iloc[i-1]['available_pellets']
+
+
+        return gamestate_df
 
     def _restructure_game_data(self):
         # Create level_df by renaming game_id to level_id and setting it as index
