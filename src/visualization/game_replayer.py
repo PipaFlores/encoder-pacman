@@ -91,6 +91,13 @@ class GameReplayer:
         self.columns.extend(self.ghosts_columns)
         self.logger.debug(f"Ghosts columns, {self.ghosts_columns}")
 
+        self.pellet_positions_column = (
+            ["available_pellets", "available_powerpills"]
+            if "available_pellets" in data.columns
+            else None
+        )
+        self.columns.extend(self.pellet_positions_column)
+
         self.stats_columns = [
             col
             for col in [
@@ -130,15 +137,14 @@ class GameReplayer:
         self.pellets = pellets
         self.wall_positions, self.pellet_positions = utils.load_maze_data()
         self.wall_grid = Astar.generate_squared_walls(self.wall_positions)
-        self.pellet_objects = []  # Store pellet objects
-        self.eaten_pellets = set()  # Track eaten pellets
 
         # Astar paths
         self.pathfinding = pathfinding
 
     def restart_animation(self):
         if self.anim:
-            self.is_finalized = False
+            self.finalized = False
+            self.is_playing = True
             self.anim.frame_seq = self.anim.new_frame_seq()
             self.anim.event_source.start()
 
@@ -250,12 +256,12 @@ class GameReplayer:
             )
 
         if self.pellets:
-            self.pellet_objects = []
-            for x, y in self.pellet_positions:
-                x = x + 0.5  # Translation to the center of the grid cell.
-                y = y - 0.5
-                pellet = ax_game.plot([x], [y], "o", color="white", markersize=2)[0]
-                self.pellet_objects.append((pellet, (x, y)))
+            (remaining_pellets,) = ax_game.plot(
+                [], [], "o", color="white", markersize=2
+            )
+            (remaining_powerpills,) = ax_game.plot(
+                [], [], "o", color="white", markersize=5
+            )
 
         (pacman_dot,) = ax_game.plot([], [], "o", color="yellow", label="Pac-Man")
 
@@ -280,6 +286,8 @@ class GameReplayer:
 
         def init():
             pacman_dot.set_data([], [])
+            remaining_pellets.set_data([], [])
+            remaining_powerpills.set_data([], [])
             for ghost_dot in ghost_dots:
                 ghost_dot.set_data([], [])
 
@@ -289,22 +297,41 @@ class GameReplayer:
             for text_object in stats_text_objects:
                 text_object.set_text("")
 
-            return [pacman_dot, *ghost_dots, *path_lines, *stats_text_objects]
+            return [
+                pacman_dot,
+                remaining_pellets,
+                remaining_powerpills,
+                *ghost_dots,
+                *path_lines,
+                *stats_text_objects,
+            ]
 
         def update(frame):
             if not self.is_playing:
                 return [
                     pacman_dot,
+                    remaining_pellets,
+                    remaining_powerpills,
                     *ghost_dots,
                     *stats_text_objects,
                     *path_lines,
-                    *[p[0] for p in self.pellet_objects],
+                    # *[p[0] for p in self.pellet_objects],
                 ]
 
             try:
                 row = self.data.iloc[frame]
                 pacman_x, pacman_y = row["Pacman_X"], row["Pacman_Y"]
                 pacman_dot.set_data([pacman_x], [pacman_y])
+
+                available_pellets = row["available_pellets"]
+                remaining_pellets.set_data(
+                    available_pellets[:, 0], available_pellets[:, 1]
+                )
+
+                available_powerpills = row["available_powerpills"]
+                remaining_powerpills.set_data(
+                    available_powerpills[:, 0], available_powerpills[:, 1]
+                )
 
                 if self.ghosts_columns:
                     ghost_positions = [
@@ -338,18 +365,6 @@ class GameReplayer:
                         else:
                             path_line.set_data([], [])
 
-                if self.pellets:
-                    # Check for pellet collisions
-                    # TODO Change logic. Do pellet preprocessing and get values from dataframe object.
-                    for pellet, (x, y) in self.pellet_objects:
-                        distance = ((x - pacman_x) ** 2 + (y - pacman_y) ** 2) ** 0.5
-                        if distance < 0.625 and (x, y) not in self.eaten_pellets:
-                            self.logger.debug(
-                                f"Eating pellet at {x}, {y}. Distance: {distance:.2f}"
-                            )
-                            pellet.set_visible(False)
-                            self.eaten_pellets.add((x, y))
-
                 if self.ghosts_columns:
                     for i, ghost_dot in enumerate(ghost_dots):
                         ghost_dot.set_data(
@@ -381,10 +396,11 @@ class GameReplayer:
 
                 return [
                     pacman_dot,
+                    remaining_pellets,
+                    remaining_powerpills,
                     *ghost_dots,
                     *stats_text_objects,
                     *path_lines,
-                    *[p[0] for p in self.pellet_objects],
                 ]
 
             except IndexError:
@@ -396,10 +412,11 @@ class GameReplayer:
                 self.finalized = True
                 return [
                     pacman_dot,
+                    remaining_pellets,
+                    remaining_powerpills,
                     *ghost_dots,
                     *stats_text_objects,
                     *path_lines,
-                    *[p[0] for p in self.pellet_objects],
                 ]
 
         # Only set up callbacks if not saving
@@ -412,10 +429,7 @@ class GameReplayer:
                         self.data = self.full_data[self.columns].loc[
                             self.full_data["level_id"] == level_id
                         ]
-                        # Reset pellets for new game
-                        self.eaten_pellets.clear()
-                        for pellet, _ in self.pellet_objects:
-                            pellet.set_visible(True)
+
                         self.restart_animation()
                     else:
                         print(
@@ -427,19 +441,14 @@ class GameReplayer:
             def on_play_pause(event):
                 if self.is_playing:
                     self.anim.event_source.stop()
+                    self.is_playing = False
                 elif not self.finalized:
                     self.anim.event_source.start()
+                    self.is_playing = True
                 else:
-                    self.eaten_pellets.clear()
-                    for pellet, _ in self.pellet_objects:
-                        pellet.set_visible(True)
                     self.restart_animation()
-                self.is_playing = not self.is_playing
 
             def on_restart(event):
-                self.eaten_pellets.clear()
-                for pellet, _ in self.pellet_objects:
-                    pellet.set_visible(True)
                 self.restart_animation()
 
             # Connect callbacks

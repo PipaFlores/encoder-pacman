@@ -188,7 +188,7 @@ class TestGameVisualizer:
         axs = axs.flatten()
 
         visualizer.plot_multiple_trajectories(
-            level_ids=level_ids, plot_type="line", axs=axs, show_maze=True
+            level_ids=range(600, 604), plot_type="line", axs=axs, show_maze=True
         )
 
         assert self.save_and_compare(fig, "multiple_trajectories", setup_dirs)
