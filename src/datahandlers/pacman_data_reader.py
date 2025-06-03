@@ -1,4 +1,5 @@
 import pandas as pd
+import json
 import os
 import numpy as np
 import time
@@ -35,6 +36,7 @@ class PacmanDataReader:
 
     Example:
     ```python
+    # In .ipynb at ./notebooks/
     data = PacmanDataReader(data_folder="../data/")
 
     ## To get all trajectories as a list[Trajectory]
@@ -62,6 +64,7 @@ class PacmanDataReader:
         read_games_only: bool = True,
         verbose: bool = False,
         debug: bool = False,
+        process_pellet: bool = True,
     ):
         # Initialize basic attributes if not already initialized
         if not hasattr(self, "initialized"):
@@ -69,9 +72,11 @@ class PacmanDataReader:
             self.verbose = verbose
             self.initialized = True
             self.read_games_only = read_games_only
+            self.process_pellet = process_pellet
             logger.info(
                 f"Initializing PacmanDataReader with read_games_only: {read_games_only}"
             )
+            self._init_logger(verbose, debug)
             self._read_data(read_games_only)  # Initial load with BANNED_USERS = [42]
         # If already initialized but requesting more data, load it
         elif not self.read_games_only and read_games_only:
@@ -79,10 +84,18 @@ class PacmanDataReader:
                 "Warning: Instance already loaded with full data. Ignoring read_games_only=True."
             )
         elif self.read_games_only and not read_games_only:
+            self._init_logger(verbose, debug)
             logger.info("Loading additional data as requested...")
             self._read_data(read_games_only)
             self.read_games_only = read_games_only
 
+        elif not self.process_pellet and process_pellet:
+            self.process_pellet = True
+            self.gamestate_df["available_pellets"] = self.gamestate_df[
+                "available_pellets"
+            ].apply(lambda s: np.array(json.loads(s)))
+
+    def _init_logger(self, verbose, debug):
         if verbose:
             logger.setLevel("INFO")
         elif debug:
@@ -102,14 +115,20 @@ class PacmanDataReader:
             os.path.join(self.data_folder, "game.csv"),
             converters={"date_played": lambda x: pd.to_datetime(x)},
         )
-        self.gamestate_df = pd.read_csv(
-            os.path.join(self.data_folder, "gamestate.csv"),
-            converters={
-                "user_id": lambda x: int(x)
-                #  , 'Pacman_X': lambda x: round(float(x), 2),
-                #   'Pacman_Y': lambda x: round(float(x), 2)
-            },
-        )
+        gamestate_pkl_path = os.path.join(self.data_folder, "gamestate.pkl")
+        gamestate_csv_path = os.path.join(self.data_folder, "gamestate.csv")
+        if os.path.exists(gamestate_pkl_path):
+            self.gamestate_df = pd.read_pickle(gamestate_pkl_path)
+        else:
+            self.gamestate_df = pd.read_csv(
+                gamestate_csv_path,
+                converters={
+                    "user_id": lambda x: int(x)
+                    #  , 'Pacman_X': lambda x: round(float(x), 2),
+                    #   'Pacman_Y': lambda x: round(float(x), 2)
+                },
+            )
+
         self.gamestate_df.set_index(keys="game_state_id", drop=False, inplace=True)
         logger.info(f"Time taken to read game data: {time.time() - time_start} seconds")
         ## Filter banned users and games
@@ -124,13 +143,21 @@ class PacmanDataReader:
 
         self.game_df = self.game_df[~self.game_df["game_id"].isin(self.banned_game_ids)]
         self.gamestate_df = self.gamestate_df[
-            ~self.gamestate_df["game_id"].isin(self.banned_game_ids)
+            ~self.gamestate_df[
+                "game_id" if "game_id" in self.gamestate_df.columns else "level_id"
+            ].isin(self.banned_game_ids)
         ]
 
         ## Refactor game_df for analysis consistency.
         self.game_df, self.level_df, self.gamestate_df = self._restructure_game_data()
 
-        self.gamestate_df = self._process_pellet_positions()
+        ## If pellet positions have not been processed (using the .csv)
+        if "available_pellets" not in self.gamestate_df.columns:
+            logger.warning(
+                "Calculating pellet positions for each game state in pacman game, estimated time of 10-15 minutes"
+            )
+            self.gamestate_df = self._process_pellet_positions()
+            self.gamestate_df.to_pickle(os.path.join(self.data_folder, "gamestate.pkl"))
 
         if not read_games_only:
             self.user_df = pd.read_csv(os.path.join(self.data_folder, "user.csv"))
@@ -140,7 +167,7 @@ class PacmanDataReader:
             )
             self.psychometrics_df = pd.read_csv(
                 os.path.join(
-                    self.data_folder, r"psych\AiPerCogPacman_DATA_2025-05-06_1036.csv"
+                    self.data_folder, r"psych\AiPerCogPacman_DATA_2025-06-03_1037.csv"
                 )
             )
 
@@ -149,6 +176,20 @@ class PacmanDataReader:
             self.bisbas_df = self._process_bisbas()
 
     def _process_pellet_positions(self):
+        """
+        Processes and reconstructs the available pellet positions for each game state in the Pacman game.
+
+        Intended for a single time use and then save it to a csv
+
+        This method uses the initial pellet layout from the maze data and, for each game state,
+        determines which pellets are still available based on Pacman's position and the number of pellets left.
+        It creates a new column 'available_pellets' in the gamestate DataFrame, which contains the positions
+        of all pellets that have not yet been eaten at each game state.
+
+        Returns:
+            pd.DataFrame: A copy of the gamestate DataFrame with an added 'available_pellets' column,
+                          where each entry is an array of (x, y) positions of remaining pellets for that state.
+        """
 
         MAZE_X_MIN: int = -13.5
         MAZE_X_MAX: int = 13.5
@@ -157,66 +198,121 @@ class PacmanDataReader:
         GRID_SIZE_X: int = 28
         GRID_SIZE_Y: int = 31
 
-        _ , pellet_positions = load_maze_data()
+        _, pellet_positions = load_maze_data()
 
         gamestate_df = self.gamestate_df.copy()
-        
-        pellet_positions = [(pellet[0] + 0.5 , pellet[1] - 0.5) for pellet in pellet_positions]
 
+        pellet_positions = [
+            (pellet[0] + 0.5, pellet[1] - 0.5) for pellet in pellet_positions
+        ]
 
-        x_grid = np.linspace(MAZE_X_MIN,
-                            MAZE_X_MAX, 
-                            GRID_SIZE_X)
+        x_grid = np.linspace(MAZE_X_MIN, MAZE_X_MAX, GRID_SIZE_X)
 
-        y_grid = np.linspace(MAZE_Y_MAX,
-                            MAZE_Y_MIN,
-                            GRID_SIZE_Y)
-        
+        y_grid = np.linspace(MAZE_Y_MAX, MAZE_Y_MIN, GRID_SIZE_Y)
+
         pellet_states = np.zeros(shape=(GRID_SIZE_Y, GRID_SIZE_X))
 
         for pellet in pellet_positions:
             x_idx = np.argmin(np.abs(x_grid - pellet[0]))
             y_idx = np.argmin(np.abs(y_grid - pellet[1]))
             pellet_states[y_idx, x_idx] = 1
-        
-        available_pellet_pos = np.array([(x_grid[idx[1]], y_grid[idx[0]])
-                                         for idx, pellet_state in np.ndenumerate(pellet_states)
-                                         if pellet_state == 1])
-        
-        gamestate_df['available_pellets'] = [available_pellet_pos.copy() for _ in range(len(gamestate_df))]
-        
-        for level in gamestate_df['level_id'].unique():
-            gamestates = gamestate_df.loc[self.gamestate_df['level_id'] == level]
-            
+
+        initial_available_pellet_pos = np.array(
+            [
+                (x_grid[idx[1]], y_grid[idx[0]])
+                for idx, pellet_state in np.ndenumerate(pellet_states)
+                if pellet_state == 1
+            ]
+        )
+
+        initial_powerpill_pos = [
+            [12.5, -9.5],
+            [-12.5, -9.5],
+            [-12.5, 10.5],
+            [12.5, 10.5],
+        ]
+
+        gamestate_df["available_pellets"] = [
+            initial_available_pellet_pos.copy() for _ in range(len(gamestate_df))
+        ]
+        gamestate_df["available_powerpills"] = [
+            initial_powerpill_pos.copy() for _ in range(len(gamestate_df))
+        ]
+
+        for level in gamestate_df["level_id"].unique():
+            gamestates = gamestate_df.loc[gamestate_df["level_id"] == level]
+            logger.info(f"processing level {level}")
+
             for i, gamestate in enumerate(gamestates.itertuples()):
                 if i == 0:
                     pacman_pos = np.array([gamestate.Pacman_X, gamestate.Pacman_Y])
-                    distances = np.linalg.norm(gamestate.available_pellets - pacman_pos, axis = 1)
-                    if gamestate.pellets == 243:
+                    distances = np.linalg.norm(
+                        gamestate.available_pellets - pacman_pos, axis=1
+                    )
+                    if gamestate.pellets == 244:
+                        available_pellet_pos = initial_available_pellet_pos
+                    elif gamestate.pellets == 243:
                         closest_pellet_idx = np.argmin(distances)
-                        available_pellet_pos = np.delete(gamestate.available_pellets, closest_pellet_idx, axis=0)
+                        available_pellet_pos = np.delete(
+                            gamestate.available_pellets, closest_pellet_idx, axis=0
+                        )
 
-                    if gamestate.pellets == 242:
+                    elif gamestate.pellets == 242:
                         closest_pellets_indices = np.argsort(distances)[:2]
-                        available_pellet_pos = np.delete(gamestate.available_pellets, closest_pellets_indices, axis=0)
-                    
-                    gamestate_df.at[gamestate.Index, "available_pellets"] = available_pellet_pos
+                        available_pellet_pos = np.delete(
+                            gamestate.available_pellets, closest_pellets_indices, axis=0
+                        )
+
+                    gamestate_df.at[gamestate.Index, "available_pellets"] = (
+                        available_pellet_pos
+                    )
 
                 elif i > 0:
                     pacman_pos = np.array([gamestate.Pacman_X, gamestate.Pacman_Y])
-                    distances = np.linalg.norm(gamestates.iloc[i-1]['available_pellets'] - pacman_pos , axis=1)
+                    prev_pellets = gamestate_df.at[
+                        gamestate.Index - 1, "available_pellets"
+                    ]
+                    distances = np.linalg.norm(prev_pellets - pacman_pos, axis=1)
                     closest_pellet_idx = np.argmin(distances)
 
                     if distances[closest_pellet_idx] <= 0.50:
-                        available_pellet_pos = np.delete(gamestates.iloc[i-1]['available_pellets'], closest_pellet_idx, axis=0)
-                        gamestate_df.at[gamestate.Index, 'available_pellets'] = available_pellet_pos
-                    else:
-                        gamestate_df.at[gamestate.Index, 'available_pellets'] = gamestates.iloc[i-1]['available_pellets']
+                        available_pellet_pos = np.delete(
+                            prev_pellets, closest_pellet_idx, axis=0
+                        )
 
+                        powerpill_mask = np.any(
+                            np.all(
+                                available_pellet_pos[:, None] == initial_powerpill_pos,
+                                axis=2,
+                            ),
+                            axis=1,
+                        )
+                        available_powerpills = available_pellet_pos[powerpill_mask]
+
+                        gamestate_df.at[gamestate.Index, "available_pellets"] = (
+                            available_pellet_pos
+                        )
+                        gamestate_df.at[gamestate.Index, "available_powerpills"] = (
+                            available_powerpills
+                        )
+                    else:
+                        gamestate_df.at[gamestate.Index, "available_pellets"] = (
+                            prev_pellets
+                        )
+                        gamestate_df.at[gamestate.Index, "available_powerpills"] = (
+                            gamestate_df.at[gamestate.Index - 1, "available_powerpills"]
+                        )
 
         return gamestate_df
 
     def _restructure_game_data(self):
+        """
+        Restructures the raw data to be more consistent in its naming and structure.
+
+        The raw game_df is refactored to level_df. Game_df contains metadata regarding a single
+        run of Pacman (which may encompass several levels, if the players are good). level_df contains
+        the data as originally recorded, per level. and gamestate_df points to level_df
+        """
         # Create level_df by renaming game_id to level_id and setting it as index
         level_df = self.game_df.rename(
             columns={
@@ -228,7 +324,10 @@ class PacmanDataReader:
         ).set_index(keys="level_id", drop=False)
 
         # Rename game_id to level_id in gamestate_df for consistency
-        gamestate_df = self.gamestate_df.rename(columns={"game_id": "level_id"})
+        if "game_id" in self.gamestate_df.columns:
+            gamestate_df = self.gamestate_df.rename(columns={"game_id": "level_id"})
+        else:
+            gamestate_df = self.gamestate_df
 
         # Calculate max score for each level
         scores = gamestate_df.groupby("level_id").agg({"score": "max"})
