@@ -47,6 +47,7 @@ class GeomClustering:
         similarity_measure: str = "euclidean",
         cluster_method: str = "HDBSCAN",
         verbose: bool = False,
+        **kwargs
     ):
         """
         Initialize the GeomClustering object.
@@ -416,7 +417,7 @@ class GeomClustering:
         )
 
     def plot_cluster_overview(
-        self, cluster_id: int, figsize: tuple[int, int] = (18, 6), seed: int = 42
+        self, cluster_id: int, figsize: tuple[int, int] = (18, 6), seed: int = 42, darkmode: bool = True
     ):
         """
         Plot an overview of a specific cluster showing velocity grid, heatmap and sample trajectories.
@@ -439,7 +440,7 @@ class GeomClustering:
 
         from src.visualization.game_visualizer import GameVisualizer  # Lazy import
 
-        game_viz = GameVisualizer()
+        game_viz = GameVisualizer(darkmode=darkmode)
         fig = plt.figure(figsize=figsize)
         G = GridSpec(2, 4, width_ratios=[2, 2, 1, 1], height_ratios=[1, 1])
         ax1 = fig.add_subplot(G[:, 0])
