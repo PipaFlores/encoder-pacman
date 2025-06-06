@@ -330,7 +330,8 @@ class GameReplayer:
 
                 available_powerpills = row["available_powerpills"]
                 remaining_powerpills.set_data(
-                    available_powerpills[:, 0], available_powerpills[:, 1]
+                    [p[0] for p in available_powerpills],
+                    [p[1] for p in available_powerpills],  # to solve weird TypeError
                 )
 
                 if self.ghosts_columns:

@@ -47,7 +47,7 @@ class GeomClustering:
         similarity_measure: str = "euclidean",
         cluster_method: str = "HDBSCAN",
         verbose: bool = False,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize the GeomClustering object.
@@ -417,7 +417,11 @@ class GeomClustering:
         )
 
     def plot_cluster_overview(
-        self, cluster_id: int, figsize: tuple[int, int] = (18, 6), seed: int = 42, darkmode: bool = True
+        self,
+        cluster_id: int,
+        figsize: tuple[int, int] = (18, 6),
+        seed: int = 42,
+        darkmode: bool = True,
     ):
         """
         Plot an overview of a specific cluster showing velocity grid, heatmap and sample trajectories.
