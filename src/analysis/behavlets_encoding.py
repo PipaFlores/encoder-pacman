@@ -1,4 +1,5 @@
 import os
+import time
 from typing import List
 
 from src.datahandlers import PacmanDataReader
@@ -16,7 +17,7 @@ class BehavletsEncoding:
     A class to perform the calculation, analysis and visualizations of Behavlets (Cowley & Charles, 2016)
     """
 
-    def __init__(self, verbose: bool = False):
+    def __init__(self, verbose: bool = False, data_folder="../data"):
         """
         Initialize the Behavlets class
         """
@@ -24,11 +25,14 @@ class BehavletsEncoding:
             logger.setLevel("INFO")
 
         logger.info("Initializing BehavletsEncoding")
-        self.reader = PacmanDataReader(data_folder="../data")
+        self.reader = PacmanDataReader(data_folder=data_folder)
         self.behavlets = {name: Behavlets(name=name) for name in Behavlets.NAMES}
 
     def calculate_behavlets(
-        self, level_id: int, user_id: int, behavlet_type: str = "all"
+        self,
+        level_id: int | None = None,
+        user_id: int | None = None,
+        behavlet_type: str = "all",
     ) -> List[Behavlets]:
         """
         Calculates behavlets for a level or game id
@@ -37,6 +41,9 @@ class BehavletsEncoding:
         gamestates = self.reader._filter_gamestate_data(
             level_id=level_id, user_id=user_id
         )[0]
+
+        for behavlet in self.behavlets.values():
+            behavlet._reset_values()
 
         results = []
 
@@ -48,12 +55,16 @@ class BehavletsEncoding:
 
         return results
 
+    def behavlet_path_geom_clustering(self, behavlets: list[Behavlets]):
+        raise NotImplementedError
+
     def create_replay(
         self,
         behavlet: Behavlets,
         instance: str | int | list[int] = "all",
         folder_path: str = "temp",
         save_format: str = "mp4",
+        **kwargs,
     ):
         """
         Creates and stores a visualization of behavlets using GameReplayer.
@@ -111,19 +122,33 @@ class BehavletsEncoding:
                 instances.append(behavlet.gamesteps[value])
                 timesteps.append(behavlet.timesteps[value])
 
+        os.makedirs(folder_path, exist_ok=True)
+
         for idx, gamesteps in enumerate(instances):
+            start_time = time.time()
+
             save_path = os.path.join(
                 folder_path, f"{behavlet.name}_{og_instance[idx]}.{save_format}"
             )
 
             behavlet_slice = self.reader.gamestate_df.loc[gamesteps[0] : gamesteps[1]]
 
-            replayer = GameReplayer(data=behavlet_slice)
+            replayer = GameReplayer(
+                data=behavlet_slice, pathfinding=kwargs.get("pathfinding", False)
+            )
 
+            animate_start = time.time()
             replayer.animate_session(
                 save_path=save_path,
                 title=f"Behavlet: {behavlet.full_name} instance {og_instance[idx]} at time {timesteps[idx]}",
                 save_format=save_format,
+            )
+            animate_time = time.time() - animate_start
+            logger.info(f"Animation took {animate_time:.3f} seconds")
+
+            total_time = time.time() - start_time
+            logger.info(
+                f"Total processing time for instance {idx}: {total_time:.3f} seconds"
             )
 
         return

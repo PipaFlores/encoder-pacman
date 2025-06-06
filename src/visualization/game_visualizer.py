@@ -20,7 +20,7 @@ class GameVisualizer(BaseVisualizer):
         data_folder: str = None,
         verbose: bool = False,
         figsize: Tuple[int, int] = config.figsize,
-        darkmode: bool = True
+        darkmode: bool = True,
     ):
         """
         Initialize the trajectory visualizer.
@@ -130,10 +130,9 @@ class GameVisualizer(BaseVisualizer):
         else:
             show_plot = False
 
-
         if self.darkmode:
             # Create a copy of the YlOrRd colormap and set the color for 0 to black
-            cmap = plt.cm.get_cmap("YlOrRd").copy()
+            cmap = plt.get_cmap("YlOrRd").copy()
             cmap.set_under("black")
 
         # Find the minimum nonzero value in the grid (if any)
@@ -143,13 +142,13 @@ class GameVisualizer(BaseVisualizer):
 
         # Create an alpha (transparency) mask that fades with value
         # Normalize grid to [0, 1] for alpha, with 0 mapped to 0 (fully transparent)
-        norm_grid = (grid - vmin) / (grid.max() - vmin) if grid.max() > vmin else np.zeros_like(grid)
-        alpha_min, alpha_max = 0.2, 1.0  # Minimum and maximum alpha values
-        alpha = np.where(
-            grid > 0,
-            alpha_min + (alpha_max - alpha_min) * norm_grid,
-            0.0
+        norm_grid = (
+            (grid - vmin) / (grid.max() - vmin)
+            if grid.max() > vmin
+            else np.zeros_like(grid)
         )
+        alpha_min, alpha_max = 0.2, 1.0  # Minimum and maximum alpha values
+        alpha = np.where(grid > 0, alpha_min + (alpha_max - alpha_min) * norm_grid, 0.0)
 
         # Plot the heatmap with fading (alpha)
         im = ax.imshow(
@@ -169,13 +168,13 @@ class GameVisualizer(BaseVisualizer):
 
         if self.darkmode:
             # Set background style to black
-            ax.set_facecolor('black')
+            ax.set_facecolor("black")
             if ax.figure is not None:
-                ax.figure.set_facecolor('black')
+                ax.figure.set_facecolor("black")
 
             # Set text color to white for all relevant elements
-            text_color = 'white'
-            ax.tick_params(colors=text_color, which='both')  # Tick labels
+            text_color = "white"
+            ax.tick_params(colors=text_color, which="both")  # Tick labels
             ax.xaxis.label.set_color(text_color)
             ax.yaxis.label.set_color(text_color)
             ax.title.set_color(text_color)
@@ -196,8 +195,9 @@ class GameVisualizer(BaseVisualizer):
                 title_id += f"{column} {trajectory.metadata[column]} "
 
         ax.set_title(
-            f"Trajectory Heatmap - {title_id if title_id is not None else ' '}"
-        , color=text_color if self.darkmode else "black")
+            f"Trajectory Heatmap - {title_id if title_id is not None else ' '}",
+            color=text_color if self.darkmode else "black",
+        )
         if show_plot:
             plt.show()
 
@@ -304,21 +304,24 @@ class GameVisualizer(BaseVisualizer):
         # Add colorbar to show time progression
         sm = plt.cm.ScalarMappable(cmap=colormap_str, norm=norm)
         sm.set_array([])  # Set array for the scalar mappable
-        
 
         if self.darkmode:
-            cbar = plt.colorbar(sm, ax=ax, label="Timestep")  # Specify the axis for the colorbar
-            cbar.set_label("Timestep", color='white')  # Set label color to white
-            cbar.ax.yaxis.set_tick_params(color='white')  # Set tick color to white
-            plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')  # Set tick label color to white
+            cbar = plt.colorbar(
+                sm, ax=ax, label="Timestep"
+            )  # Specify the axis for the colorbar
+            cbar.set_label("Timestep", color="white")  # Set label color to white
+            cbar.ax.yaxis.set_tick_params(color="white")  # Set tick color to white
+            plt.setp(
+                plt.getp(cbar.ax.axes, "yticklabels"), color="white"
+            )  # Set tick label color to white
             # Set background style to black
-            ax.set_facecolor('black')
+            ax.set_facecolor("black")
             if ax.figure is not None:
-                ax.figure.set_facecolor('black')
+                ax.figure.set_facecolor("black")
 
             # Set text color to white for all relevant elements
-            text_color = 'white'
-            ax.tick_params(colors=text_color, which='both')  # Tick labels
+            text_color = "white"
+            ax.tick_params(colors=text_color, which="both")  # Tick labels
             ax.xaxis.label.set_color(text_color)
             ax.yaxis.label.set_color(text_color)
             ax.title.set_color(text_color)
@@ -326,15 +329,16 @@ class GameVisualizer(BaseVisualizer):
             for spine in ax.spines.values():
                 spine.set_edgecolor(text_color)
         else:
-            text_color = 'black'
-            plt.colorbar(sm, ax=ax, label="Timestep")  # Specify the axis for the colorbar
-        
+            text_color = "black"
+            plt.colorbar(
+                sm, ax=ax, label="Timestep"
+            )  # Specify the axis for the colorbar
+
         # Plot maze layout
         self._plot_walls_and_pellets(walls=show_maze, pellets=show_pellet, ax=ax)
 
         ax.set_xlim(self.MAZE_X_MIN, self.MAZE_X_MAX)
         ax.set_ylim(self.MAZE_Y_MIN, self.MAZE_Y_MAX)
-
 
         # Set metadata on title
         if isinstance(trajectory, Trajectory) and metadata_label:
@@ -504,21 +508,25 @@ class GameVisualizer(BaseVisualizer):
             sm.set_array([])
             if self.darkmode:
                 cbar = plt.colorbar(sm, ax=ax, label="Normalized Recurrence")
-                cbar.set_label("Normalized Recurrence", color='white')  # Set label color to white
-                cbar.ax.yaxis.set_tick_params(color='white')  # Set tick color to white
-                plt.setp(plt.getp(cbar.ax.axes, 'yticklabels'), color='white')  # Set tick label color to white
+                cbar.set_label(
+                    "Normalized Recurrence", color="white"
+                )  # Set label color to white
+                cbar.ax.yaxis.set_tick_params(color="white")  # Set tick color to white
+                plt.setp(
+                    plt.getp(cbar.ax.axes, "yticklabels"), color="white"
+                )  # Set tick label color to white
             else:
                 plt.colorbar(sm, ax=ax, label="Normalized Recurrence")
-            
+
         if self.darkmode:
             # Set background style to black
-            ax.set_facecolor('black')
+            ax.set_facecolor("black")
             if ax.figure is not None:
-                ax.figure.set_facecolor('black')
+                ax.figure.set_facecolor("black")
 
             # Set text color to white for all relevant elements
-            text_color = 'white'
-            ax.tick_params(colors=text_color, which='both')  # Tick labels
+            text_color = "white"
+            ax.tick_params(colors=text_color, which="both")  # Tick labels
             ax.xaxis.label.set_color(text_color)
             ax.yaxis.label.set_color(text_color)
             ax.title.set_color(text_color)
@@ -526,7 +534,7 @@ class GameVisualizer(BaseVisualizer):
             for spine in ax.spines.values():
                 spine.set_edgecolor(text_color)
         else:
-            text_color = 'black'
+            text_color = "black"
 
         ax.set_xlabel("X", color=text_color)
         ax.set_ylabel("Y", color=text_color)
@@ -540,7 +548,10 @@ class GameVisualizer(BaseVisualizer):
             for column in metadata_label:
                 title_id += f"{column} {trajectory.metadata[column]} "
 
-        ax.set_title(f"Velocity Grid - {title_id if title_id is not None else ' '}", color=text_color)
+        ax.set_title(
+            f"Velocity Grid - {title_id if title_id is not None else ' '}",
+            color=text_color,
+        )
 
         ax.grid(True, alpha=0.3)
         if show_plot:

@@ -535,6 +535,7 @@ class PacmanDataReader:
         self,
         level_id: int | list[int] | None = None,
         user_id: int | list[int] | None = None,
+        game_states: tuple[int, int] | None = None,
         include_metadata: bool = False,
     ) -> Tuple[pd.DataFrame, Dict]:
         """
@@ -549,8 +550,8 @@ class PacmanDataReader:
                 - Dictionary with metadata about the filtered data
         """
 
-        if level_id is None and user_id is None:
-            raise ValueError("Either level_id or user_id must be provided")
+        if level_id is None and user_id is None and game_states is None:
+            raise ValueError("Either level_id, user_id, or gamestates must be provided")
 
         time_start = time.time()
 
@@ -585,6 +586,16 @@ class PacmanDataReader:
             else:
                 logger.info("No games found")
                 raise ValueError("No game founds")
+        elif game_states is not None:
+            logger.debug(f"filtering gamestate data for idx {game_states}")
+            filtered_df = self.gamestate_df.loc[game_states[0] : game_states[1]]
+            if len(filtered_df) == 0:
+                raise ValueError("No gamestates found in the specified index range")
+            if len(filtered_df["level_id"].unique()) > 1:
+                raise ValueError(
+                    "The specified index range includes more than one level_id. Please specify a range within a single level."
+                )
+            level_id = filtered_df["level_id"].unique()
 
         if include_metadata:
             levels_meta_df = (
@@ -596,7 +607,9 @@ class PacmanDataReader:
                 "level_id": levels_meta_df["level_id"].unique().tolist()
                 if len(levels_meta_df["level_id"].unique()) > 1
                 else levels_meta_df["level_id"].unique()[0],
-                "game_id": levels_meta_df["game_id"].unique()[0],
+                "game_id": levels_meta_df["game_id"].unique().tolist()
+                if len(levels_meta_df["game_id"].unique()) > 1
+                else levels_meta_df["game_id"].unique()[0],
                 "user_id": levels_meta_df["user_id"].unique().tolist()
                 if len(levels_meta_df["user_id"].unique()) > 1
                 else levels_meta_df["user_id"].unique()[0],
@@ -624,9 +637,9 @@ class PacmanDataReader:
         else:
             metadata = {}
 
-        logger.info(
-            f"Found {n_games} levels for {'user' if user_id is not None else 'level'} {level_id if level_id is not None else user_id}"
-        )
+        # logger.info(
+        #     f"Found {n_games} levels for {'user' if user_id is not None else 'level'} {level_id if level_id is not None else user_id}"
+        # )
         logger.debug(
             f"Time taken to filter gamestate data: {time.time() - time_start} seconds"
         )
@@ -635,8 +648,9 @@ class PacmanDataReader:
 
     def get_trajectory(
         self,
-        level_id: int | list[int] = None,
-        user_id: int | list[int] = None,
+        level_id: int | list[int] | None = None,
+        user_id: int | list[int] | None = None,
+        game_states: tuple[int, int] | None = None,
         get_timevalues: bool = False,
         include_metadata: bool = True,
     ) -> Trajectory:
@@ -645,6 +659,7 @@ class PacmanDataReader:
         Args:
             level_id: List of game ids to filter the data by.
             user_id: List of user ids to filter the data by.
+            game_states: Tuple of gamestates defining the start and end of a trajectory (based on game_state_id indexing)
             get_all_games: Boolean indicating whether to get all games.
             include_metadata: Boolean indicating whether to include metadata in the trajectory.
         Returns:
@@ -672,11 +687,14 @@ class PacmanDataReader:
         """
         time_start = time.time()
         logger.debug(f"Getting trajectory for game {level_id} and user {user_id}...")
-        if level_id is None and user_id is None:
-            raise ValueError("Either level_id or user_id must be provided")
+        if level_id is None and user_id is None and game_states is None:
+            raise ValueError("Either level_id, user_id, or gamestates must be provided")
 
         filtered_df, metadata = self._filter_gamestate_data(
-            level_id=level_id, user_id=user_id, include_metadata=include_metadata
+            level_id=level_id,
+            user_id=user_id,
+            game_states=game_states,
+            include_metadata=include_metadata,
         )
 
         if filtered_df is None:
