@@ -1,10 +1,13 @@
 import pandas as pd
 import numpy as np
 from typing import Callable
+from src.utils import setup_logger
+
+logger = setup_logger(__name__)
 
 
 class Behavlets:
-    NAMES = ["Aggression1", "Aggression3"]
+    NAMES = ["Aggression1", "Aggression3", "Aggression4"]
 
     @property
     def ENCODING_FUNCTIONS(self) -> dict[str, Callable]:
@@ -12,19 +15,55 @@ class Behavlets:
         return {
             "Aggression1": self._Aggression1,
             "Aggression3": self._Aggression3,
+            "Aggression4": self._Aggression4,
         }
 
-    def __init__(self, name: str, window_length=10):
+    def __init__(self, name: str, verbose: bool = False, debug: bool = False, **kwargs):
+        """
+        Initialize a Behavlets instance for analyzing player behavior in Pacman.
+
+        This class implements various behavlets (behavioral patterns) that can be used to analyze
+        player behavior in Pacman. Each behavlet represents a specific type of behavior that can
+        be measured and quantified during gameplay.
+
+        Args:
+            name (str): The name of the behavlet to initialize. Must be one of the predefined
+                       behavlet names in self.NAMES.
+            verbose (bool): If True, sets logging level to INFO. Defaults to False.
+            debug (bool): If True, sets logging level to DEBUG. Defaults to False.
+
+        Raises:
+            ValueError: If the provided name is not in the list of valid behavlet names.
+
+        Attributes:
+            name (str): Short name of the behavlet (e.g., "Aggression1")
+            full_name (str): Full descriptive name of the behavlet
+            category (str): Category of the behavlet (e.g., "Aggression")
+            value (int): Quantitative measure of the behavlet's occurrence
+            gamesteps (list): List of tuples containing (start, end) gamesteps for each instance
+            timesteps (list): List of tuples containing (start, end) timesteps for each instance
+            instances (int): Number of times the behavlet was observed
+            value_per_pill (list): Optional attribute for tracking values per powerpill
+            died (list): Optional attribute for tracking if player died during observation
+        """
+        if verbose:
+            logger.setLevel("INFO")
+            logger.info(f"Initializing {name}")
+        if debug:
+            logger.setLevel("DEBUG")
+            logger.debug(f"Initializing {name}")
+
+        self.kwargs = kwargs  # Store kwargs to be used in calculate() method
+
+        ###
+        ###  COMMON ATTRIBUTES TO ALL BEHAVLET TYPES
+        ###
         self.name = name  # Short name of behavlets (<category><number>)
         self.full_name = ""  # Full name of behavlets, as in literature. Attribute is set by specific functions when self.calculate()
         if name not in self.NAMES:
             raise ValueError(f"Unknown behavlet name: {name}")
 
         self.category = self._get_category(self.name)
-
-        # How many gamestates before and after the behavlet definition are extracted as context (for visualization or trajectory/environment analysis)
-        # e.g., for Aggresssion 3 - GhostKills, n# of gamesteps before and after the kill.
-        self.WINDOW_LENGTH = window_length
 
         ## this is the "output" of the original implementation.
         # Usually represents the number of behavlets observed. However, in some other, it represents other quantitative amounts
@@ -38,7 +77,13 @@ class Behavlets:
 
         self.instances = 0  # if multiple instances. Is len(gamesteps)
 
-    def calculate(self, gamestates: pd.DataFrame):
+        ###
+        ### OPTIONAL ATTRIBUTES SHARED OR UNIQUE OF CERTAIN BEHAVLET TYPES
+        ###
+        self.value_per_pill = []  ## e.g., Aggression4 counts for each pill in the game
+        self.died = []  ## Did the player died during the behavlet observation?
+
+    def calculate(self, gamestates: pd.DataFrame, **kwargs):
         """
         Calculates the behavlet using the specific algorithm, according to behavlet name
         (i.e., self.name = Aggression3 will map to self._Aggression3(data))
@@ -49,8 +94,8 @@ class Behavlets:
                 f"type(data) needs to be pd.Dataframe, not {type(gamestates)}"
             )
         # Calculate Behavlets
-        self.ENCODING_FUNCTIONS[self.name](gamestates)
-        self.instances = len(self.gamesteps)
+        self.ENCODING_FUNCTIONS[self.name](gamestates, **{**self.kwargs, **kwargs})
+        self.instances = len([x for x in self.gamesteps if x is not None])
 
         return self
 
@@ -131,18 +176,18 @@ class Behavlets:
         self.full_name = "Aggression 1 - Hunt close to ghost home"
 
         flag = False
-        for i, gamestate in enumerate(gamestates.itertuples()):
-            if gamestate.pacman_attack == 1:
-                Pacman_pos = np.array([gamestate.Pacman_X, gamestate.Pacman_Y])
-                Ghost_Positions = [
+        for i, state in enumerate(gamestates.itertuples()):
+            if state.pacman_attack == 1:
+                Pacman_pos = np.array([state.Pacman_X, state.Pacman_Y])
+                ghost_Positions = [
                     np.array(
                         [
-                            getattr(gamestate, f"Ghost{i}_X"),
-                            getattr(gamestate, f"Ghost{i}_Y"),
+                            getattr(state, f"Ghost{i}_X"),
+                            getattr(state, f"Ghost{i}_Y"),
                         ]
                     )
                     for i in range(1, 5)
-                    if getattr(gamestate, f"ghost{i}_state") not in [0, 4]
+                    if getattr(state, f"ghost{i}_state") not in [0, 4]
                 ]  # omit dead ghosts
 
                 if CLOSENESS_DEF == "Distance to house":
@@ -152,7 +197,7 @@ class Behavlets:
                     Ghost_house_distances = [
                         abs(HOUSE_POS[0] - ghost_pos[0])
                         + abs(HOUSE_POS[1] - ghost_pos[1])
-                        for ghost_pos in Ghost_Positions
+                        for ghost_pos in ghost_Positions
                     ]
                     Pacman_condition = Pacman_house_dist <= BOUNDARY_DISTANCE
                     Ghost_conditions = any(
@@ -165,26 +210,26 @@ class Behavlets:
                     Ghost_conditions = [
                         (X_BOUNDARIES[0] <= ghost_pos[0] <= X_BOUNDARIES[1])
                         and (Y_BOUNDARIES[0] <= ghost_pos[0] <= Y_BOUNDARIES[1])
-                        for ghost_pos in Ghost_Positions
+                        for ghost_pos in ghost_Positions
                     ]
 
                 if not flag and Pacman_condition and Ghost_conditions:
                     self.value += 1
-                    start_gamestep = gamestate.Index
-                    start_timestep = gamestate.time_elapsed
+                    start_gamestep = state.Index
+                    start_timestep = state.time_elapsed
                     flag = True
 
                 elif flag and (not Pacman_condition or not Ghost_conditions):
-                    end_gamestep = gamestate.Index
-                    end_timestep = gamestate.time_elapsed
+                    end_gamestep = state.Index
+                    end_timestep = state.time_elapsed
 
                     self.gamesteps.append((start_gamestep, end_gamestep))
                     self.timesteps.append((start_timestep, end_timestep))
                     flag = False
 
-            elif gamestate.pacman_attack == 0 and flag:
-                end_gamestep = gamestate.Index
-                end_timestep = gamestate.time_elapsed
+            elif state.pacman_attack == 0 and flag:
+                end_gamestep = state.Index
+                end_timestep = state.time_elapsed
 
                 self.gamesteps.append((start_gamestep, end_gamestep))
                 self.timesteps.append((start_timestep, end_timestep))
@@ -205,33 +250,198 @@ class Behavlets:
 
         raise NotImplementedError
 
-    def _Aggression3(self, gamestates: pd.DataFrame):
+    def _Aggression3(self, gamestates: pd.DataFrame, WINDOW_LENGTH: int = 10):
         """
-        Ghost Kills
+        Aggression3 - Ghost Kills
 
-        The amount of times that the player eats a ghost.
+        Measures the number of times the player successfully eats a ghost during gameplay.
+        This behavlet tracks when a ghost's state changes to "eaten" (state 4), indicating
+        the player has successfully captured and consumed the ghost.
+
+        The behavlet counts each ghost kill as a separate instance and records the
+        gamesteps and timesteps around each kill for visualization and analysis purposes.
+
+        Args:
+            gamestates (pd.DataFrame): DataFrame containing game state data
+            WINDOW_LENGTH (int): Number of frames to include before and after each ghost kill
+                               for visualization purposes. Defaults to 10.
+
+        Returns:
+            None: Updates the behavlet's value, gamesteps, and timesteps attributes
         """
         self.full_name = "Aggression 3 - Ghost kills"
 
         previous_ghost_states = [0, 0, 0, 0]
 
-        for gamestate in gamestates.itertuples():
+        for state in gamestates.itertuples():
             new_ghost_states = [
-                gamestate.ghost1_state,
-                gamestate.ghost2_state,
-                gamestate.ghost3_state,
-                gamestate.ghost4_state,
+                state.ghost1_state,
+                state.ghost2_state,
+                state.ghost3_state,
+                state.ghost4_state,
             ]
-            for i, state in enumerate(previous_ghost_states):
+            for i in range(len(previous_ghost_states)):
                 if previous_ghost_states[i] != 4 & new_ghost_states[i] == 4:
                     self.value += 1
                     self.gamesteps.append(
                         (
-                            gamestate.Index - self.WINDOW_LENGTH,
-                            gamestate.Index + self.WINDOW_LENGTH,
+                            state.Index - WINDOW_LENGTH,
+                            state.Index + WINDOW_LENGTH,
                         )
                     )
-                    self.timesteps.append(gamestate.time_elapsed)
+                    self.timesteps.append(state.time_elapsed)
             previous_ghost_states = new_ghost_states
+
+        return
+
+    def _Aggression4(
+        self,
+        gamestates: pd.DataFrame,
+        SEARCH_WINDOW: int = 10,
+        VALUE_THRESHOLD: int = 1,
+        GHOST_DISTANCE_THRESHOLD: int = 7,
+    ):
+        """
+        Tracks instances where the player continues hunting ghosts after a powerpill's effects have worn off.
+
+        This behavlet measures aggressive behavior by counting how often the player continues
+        pursuing ghosts even after losing the powerpill's protective effects. It tracks each
+        powerpill separately and records the gamesteps and timesteps around these instances
+        for visualization and analysis.
+
+        Args:
+            gamestates (pd.DataFrame): DataFrame containing game state data
+            SEARCH_WINDOW (int): Number of frames to include before and after each instance
+                               for visualization purposes. Defaults to 10.
+            VALUE_THRESHOLD (int): Minimum number of instances required to count as a valid
+                                 behavlet occurrence. Defaults to 1.
+            GHOST_DISTANCE_THRESHOLD (int): Maximum distance between Pacman and ghosts to
+                                          consider as "hunting". Defaults to 7.
+
+        Returns:
+            None: Updates the behavlet's value, gamesteps, timesteps, and died attributes
+        """
+        logger.debug(f"Searching for {self.name} with Search window {SEARCH_WINDOW}")
+
+        self.full_name = "Aggresssion 4 - Hunt even after powerpill finishes"
+
+        self.value_per_pill = [0] * 4  # Counter per pill
+        self.gamesteps = [None] * 4
+        self.timesteps = [None] * 4
+        self.died = [None] * 4
+
+        flag = False
+        pellet_eaten = False
+
+        for i, state in enumerate(gamestates.itertuples()):
+            if i == 0:
+                continue
+
+            # Check which pill was eaten
+            if (
+                gamestates.at[state.Index - 1, "pacman_attack"] == 0
+                and state.pacman_attack == 1  # Switch to attack mode
+            ):
+                pacman_pos = [state.Pacman_X, state.Pacman_Y]
+
+                # Quadrant based powerpill indexing (Aligned with Readme.md)
+                if pacman_pos[0] < 0 and pacman_pos[1] > 0:
+                    pellet_idx = 0
+                elif pacman_pos[0] > 0 and pacman_pos[1] > 0:
+                    pellet_idx = 1
+                elif pacman_pos[0] > 0 and pacman_pos[1] < 0:
+                    pellet_idx = 2
+                elif pacman_pos[0] < 0 and pacman_pos[1] < 0:
+                    pellet_idx = 3
+
+                pellet_eaten = True
+
+            # First gamestep after the pill wears off
+            elif (
+                gamestates.at[state.Index - 1, "pacman_attack"] == 1
+                and state.pacman_attack == 0
+                and pellet_eaten
+            ):
+                logger.debug(
+                    f"{self.name} - pellet {pellet_idx} wore off at step {state.Index}"
+                )
+                flag = True
+                starting_gamestep = state.Index
+                starting_timestep = state.time_elapsed
+                lives_at_wear_off = state.lives
+                pacman_pos = [state.Pacman_X, state.Pacman_Y]
+                ghost_positions = [
+                    np.array(
+                        [
+                            getattr(state, f"Ghost{i}_X"),
+                            getattr(state, f"Ghost{i}_Y"),
+                        ]
+                    )
+                    for i in range(1, 5)  # all ghosts
+                ]
+                prev_distance_to_ghosts = [
+                    abs(pacman_pos[0] - ghost_pos[0])
+                    + abs(pacman_pos[1] - ghost_pos[1])
+                    for ghost_pos in ghost_positions
+                ]
+            # look gamesteps after pill wears off, within SEARCH_WINDOW, and check if distance to any ghosts diminish
+            elif flag:
+                pacman_pos = [state.Pacman_X, state.Pacman_Y]
+                ghost_positions = [
+                    np.array(
+                        [
+                            getattr(state, f"Ghost{i}_X"),
+                            getattr(state, f"Ghost{i}_Y"),
+                        ]
+                    )
+                    for i in range(1, 5)  # all ghosts
+                ]
+                distance_to_ghosts = [
+                    abs(pacman_pos[0] - ghost_pos[0])
+                    + abs(pacman_pos[1] - ghost_pos[1])
+                    for ghost_pos in ghost_positions
+                ]
+
+                for i, distance in enumerate(distance_to_ghosts):
+                    if (
+                        (distance < prev_distance_to_ghosts[i])  # closer to ghost
+                        and (
+                            distance < GHOST_DISTANCE_THRESHOLD
+                        )  # withing certain distance (i.e., omit distant ghosts)
+                        and (getattr(state, f"ghost{i + 1}_state") not in [0, 4])
+                    ):  # Not at home
+                        self.value_per_pill[pellet_idx] += 1
+
+                prev_distance_to_ghosts = distance_to_ghosts
+
+                # Stop looking outside the search window or if player dies (Quite probable)
+                died = state.lives < lives_at_wear_off
+                if state.Index - starting_gamestep == SEARCH_WINDOW or died:
+                    if died:
+                        self.died[pellet_idx] = True
+                    if self.value_per_pill[pellet_idx] >= VALUE_THRESHOLD:
+                        ending_gamestep = state.Index - 1
+                        ending_timestep = float(
+                            gamestates.at[state.Index - 1, "time_elapsed"]
+                        )
+                        self.gamesteps[pellet_idx] = (
+                            starting_gamestep,
+                            ending_gamestep,
+                        )
+                        self.timesteps[pellet_idx] = (
+                            starting_timestep,
+                            ending_timestep,
+                        )
+                    else:
+                        self.value_per_pill[pellet_idx] = 0
+
+                    flag = False
+
+            if (
+                state.powerPellets == 0 and not flag
+            ):  # If no remaining pellets, stop looking.
+                break
+
+        self.value = sum([value for value in self.value_per_pill if value != None])
 
         return

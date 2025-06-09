@@ -1,4 +1,4 @@
-all: format lint test clean_temp_files
+all: format lint test
 
 format:
 	ruff format
@@ -10,7 +10,7 @@ test:
 	pytest -v
 
 
-clean_temp_files:
+clean:
 ifeq ($(OS),Windows_NT)
 	if exist temp\* del /f /q temp\*
 	if exist src\temp\* del /f /q src\temp\*
