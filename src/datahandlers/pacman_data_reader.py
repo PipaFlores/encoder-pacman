@@ -272,10 +272,20 @@ class PacmanDataReader:
                     prev_pellets = gamestate_df.at[
                         gamestate.Index - 1, "available_pellets"
                     ]
+                    if len(prev_pellets) == 0:
+                        break
                     distances = np.linalg.norm(prev_pellets - pacman_pos, axis=1)
                     closest_pellet_idx = np.argmin(distances)
+                    pellet_counter_change = (
+                        gamestate.pellets
+                        - gamestate_df.at[gamestate.Index - 1, "pellets"]
+                    )
 
-                    if distances[closest_pellet_idx] <= 0.50:
+                    # Double check for distance collision or counter change to be secure.
+                    if (
+                        distances[closest_pellet_idx] <= 0.50
+                        or pellet_counter_change == -1
+                    ):
                         available_pellet_pos = np.delete(
                             prev_pellets, closest_pellet_idx, axis=0
                         )
