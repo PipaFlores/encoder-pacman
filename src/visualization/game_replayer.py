@@ -98,6 +98,11 @@ class GameReplayer:
         )
         self.columns.extend(self.pellet_positions_column)
 
+        self.pacman_attack_column = (
+            ["pacman_attack"] if "pacman_attack" in data.columns else None
+        )
+        self.columns.extend(self.pacman_attack_column)
+
         self.stats_columns = [
             col
             for col in [
@@ -267,6 +272,9 @@ class GameReplayer:
 
         if self.ghosts_columns:
             ghost_colors = ["red", "pink", "cyan", "orange"]
+            self.flash_counter = 0
+            self.flash = False
+            self.flash_color = "white"
             ghost_dots = [
                 ax_game.plot(
                     [], [], "o", color=ghost_colors[i], label=f"Ghost {i + 1}"
@@ -367,11 +375,24 @@ class GameReplayer:
                             path_line.set_data([], [])
 
                 if self.ghosts_columns:
+                    if row["pacman_attack"] == 1:
+                        self.flash_counter += 1
+                        self.flash = True
+                        if self.flash_counter % 4 == 0:
+                            self.flash_color = "blue" if self.flash_color == "white" else "white"
+                    else:
+                        self.flash = False
+
                     for i, ghost_dot in enumerate(ghost_dots):
                         ghost_dot.set_data(
                             [row[f"Ghost{i + 1}_X"]], [row[f"Ghost{i + 1}_Y"]]
                         )
+                        ghost_dot.set_color(self.flash_color if self.flash else ghost_colors[i])
 
+                                
+
+
+                        
                 if (
                     self.stats_columns and not save_path
                 ):  # Only update stats if not saving
