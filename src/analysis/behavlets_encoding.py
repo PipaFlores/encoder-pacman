@@ -71,6 +71,8 @@ class BehavletsEncoding:
         instance: str | int | list[int] = "all",
         folder_path: str = "temp",
         save_format: str = "mp4",
+        path_prefix: str = None,
+        path_suffix: str = None,
         **kwargs,
     ):
         """
@@ -86,6 +88,8 @@ class BehavletsEncoding:
 
             folder_path (str): Path where the replay videos will be saved. Defaults to "temp".
             save_format (str): Format to save the video in (e.g., "mp4", "gif"). Defaults to "mp4".
+            path_prefix (str): Optional prefix to add to the saved file name. Defaults to None.
+            path_suffix (str): Optional suffix to add to the saved file name. Defaults to None.
 
         Returns:
             None: The method saves the visualization files but does not return anything.
@@ -136,7 +140,8 @@ class BehavletsEncoding:
                 start_time = time.time()
 
                 save_path = os.path.join(
-                    folder_path, f"{behavlet.name}_{og_instance[idx]}.{save_format}"
+                    folder_path,
+                    f"{path_prefix or ''}{behavlet.name}_{og_instance[idx]}{path_suffix or ''}.{save_format}",
                 )
 
                 behavlet_slice = self.reader.gamestate_df.loc[

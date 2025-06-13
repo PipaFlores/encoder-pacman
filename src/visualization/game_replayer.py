@@ -379,7 +379,9 @@ class GameReplayer:
                         self.flash_counter += 1
                         self.flash = True
                         if self.flash_counter % 4 == 0:
-                            self.flash_color = "blue" if self.flash_color == "white" else "white"
+                            self.flash_color = (
+                                "blue" if self.flash_color == "white" else "white"
+                            )
                     else:
                         self.flash = False
 
@@ -387,12 +389,10 @@ class GameReplayer:
                         ghost_dot.set_data(
                             [row[f"Ghost{i + 1}_X"]], [row[f"Ghost{i + 1}_Y"]]
                         )
-                        ghost_dot.set_color(self.flash_color if self.flash else ghost_colors[i])
+                        ghost_dot.set_color(
+                            self.flash_color if self.flash else ghost_colors[i]
+                        )
 
-                                
-
-
-                        
                 if (
                     self.stats_columns and not save_path
                 ):  # Only update stats if not saving
