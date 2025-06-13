@@ -157,6 +157,9 @@ class PacmanDataReader:
                 "Calculating pellet positions for each game state in pacman game, estimated time of 10-15 minutes"
             )
             self.gamestate_df = self._process_pellet_positions()
+            self.gamestate_df = (
+                self._process_logging_bugs()
+            )  # Whatever bugs are encountered (e.g., attackmode at initial gamestates)
             self.gamestate_df.to_pickle(os.path.join(self.data_folder, "gamestate.pkl"))
 
         if not read_games_only:
@@ -540,6 +543,26 @@ class PacmanDataReader:
 
         bisbas_df = bisbas_df.rename(columns={"record_id": "user_id"})
         return bisbas_df
+
+    def _process_logging_bugs(self):
+        """
+        Preprocessing of identified bugs in the data
+
+        Attack mode bug: In several levels, pacman starts in attack mode.
+        This happens when the player wins the previous game shortly after eating a powerpill.
+        """
+        gamestate_df = self.gamestate_df.copy()
+
+        # Fix attack mode bug at start of levels
+        for level_id in gamestate_df["level_id"].unique():
+            level_data = gamestate_df[gamestate_df["level_id"] == level_id]
+            first_50_states = level_data.iloc[:50]
+
+            for state in first_50_states.itertuples():
+                if state.powerPellets == 4 and state.pacman_attack == 1:
+                    gamestate_df.loc[state.Index, "pacman_attack"] = 0
+
+        return gamestate_df
 
     def _filter_gamestate_data(
         self,

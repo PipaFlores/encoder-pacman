@@ -17,7 +17,7 @@ class TestBehavlets:
         assert list(Beh_encodings.behavlets.keys()) == Behavlets.NAMES
 
     def test_calculation(self):
-        # Complete when behavlets are done.
+        # TODO Complete when behavlets are done.
 
         Beh_encodings = BehavletsEncoding(data_folder="data")
         results = Beh_encodings.calculate_behavlets(
@@ -34,11 +34,12 @@ class TestBehavlets:
         )
 
         assert results == Beh
-        assert results.value == 1
-        assert results.gamesteps == [(461343, 461374)]
+        assert sum(results.value) == 25
+        assert results.instances == 1
+        assert results.gamesteps == [(461345, 461370)]
 
     def test_Aggression3(self, reader):
-        Beh = Behavlets(name="Aggression3", WINDOW_LENGTH=20)
+        Beh = Behavlets(name="Aggression3", CONTEXT_LENGTH=20)
 
         results = Beh.calculate(
             gamestates=reader._filter_gamestate_data(level_id=600)[0]
@@ -64,3 +65,19 @@ class TestBehavlets:
         assert results.gamesteps.__len__() == 4
         assert results.died[3] == True
         assert results.gamesteps[3] == (457881, 457887)
+
+
+    def test_Aggression6(self, reader):
+        Beh = Behavlets(name="Aggression6", NORMALIZE_VALUE = True)
+
+        results = Beh.calculate(
+            gamestates=reader._filter_gamestate_data(level_id=600)[0],
+            SEARCH_WINDOW=10,
+            VALUE_THRESHOLD=1,
+            GHOST_DISTANCE_THRESHOLD=7,
+        ) 
+
+        assert Beh == results
+        assert Beh.value == 0.6519927536231884
+        assert Beh.value_per_pill == [0, 0.8913043478260869, 0.825, 0.8916666666666667]
+        assert Beh.gamesteps == [None, (458403, 458633), (458811, 458931), (457761, 457881)]
