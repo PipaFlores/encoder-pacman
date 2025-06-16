@@ -6,10 +6,7 @@ from typing import Dict, Any, Optional, Tuple
 class Aggression1Config:
     """Hunt close to ghost house
     Counts instances where the player follows the ghosts right up to their house while attacking them.
-
-
     """
-
     HOUSE_POS: Tuple[float, float] = (0, -0.5)
     # CLOSENESS_DEF can be "House perimeter" or "Distance to house" and it
     # determines how the closeness to ghost house is defined, either by
@@ -25,7 +22,6 @@ class Aggression1Config:
     X_BOUNDARIES: Tuple[float, float] = (-6.5, 6.5)
     Y_BOUNDARIES: Tuple[float, float] = (-5.5, 4.5)
     CONTEXT_LENGTH: Optional[int] = None
-
 
 @dataclass
 class Aggression3Config:

@@ -55,7 +55,7 @@ class Behavlets:
         if verbose:
             logger.setLevel("INFO")
             logger.info(f"Initializing {name}")
-        if debug:
+        elif debug:
             logger.setLevel("DEBUG")
             logger.debug(f"Initializing {name}")
         else:
@@ -89,6 +89,10 @@ class Behavlets:
         # (e.g., Speed - cycles per sector is a value of time)
         self.value = 0
 
+        # All behavlets output at least to the value attribute, 
+        # but it can be expanded to the other ones (handled by each behavlet algorithm)
+        self.output_attributes = ["value"]
+
         ## list of tuples with (initial_gamestate, end_gamestate) that define the behavlet.
         # For some behavlet types, multiple can appear in a game, so there will be one tuple per each.
         self.gamesteps = []
@@ -100,6 +104,7 @@ class Behavlets:
         ###
         ### OPTIONAL ATTRIBUTES SHARED OR UNIQUE OF CERTAIN BEHAVLET TYPES
         ###
+        self.value_per_instance = [] ## e.g, Aggression 1 can have multiple instances and the value is different in each one.
         self.value_per_pill = []  ## e.g., Aggression4 counts for each pill in the game
         self.died = []  ## Did the player died during the behavlet observation?
 
@@ -123,6 +128,18 @@ class Behavlets:
             raise ValueError(f"measurement_type not set for behavlet {self.name}")
 
         return self
+    
+    def report(self):
+        """
+        Report results based on self.output_attributes list of attributes"""
+        
+        print(f"Results for {self.full_name} ({self.name})")
+        for attr in self.output_attributes:
+            try:
+                value = getattr(self, attr)
+            except AttributeError:
+                print(f"Attribute '{attr}' not found")
+            print(f"{attr} : {value}")
 
     def _get_category(self, name: str) -> str:
         """
@@ -195,6 +212,7 @@ class Behavlets:
 
         self.full_name = "Aggression 1 - Hunt close to ghost home"
         self.measurement_type = "interval"
+        self.output_attributes = ["value", "instances","value_per_instance","gamesteps", "timesteps"]
 
         BOUNDARY_DISTANCE = kwargs.get("BOUNDARY_DISTANCE", 7.5)
         HOUSE_POS = kwargs.get("HOUSE_POS", (0, -0.5))
@@ -203,8 +221,17 @@ class Behavlets:
         CLOSENESS_DEF = kwargs.get("CLOSENESS_DEF", "House perimeter")
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
 
+        logger.info(
+            f"Calculating Aggression 1 with BOUNDARY_DISTANCE={BOUNDARY_DISTANCE}, "
+            f"HOUSE_POS={HOUSE_POS}, "
+            f"X_BOUNDARIES={X_BOUNDARIES}, "
+            f"Y_BOUNDARIES={Y_BOUNDARIES}, "
+            f"CLOSENESS_DEF={CLOSENESS_DEF}, "
+            f"CONTEXT_LENGTH={CONTEXT_LENGTH}"
+        )
+
         flag = False
-        self.value = []  # value for each instance observed.
+        self.value_per_instance = []  # value for each instance observed.
         for i, state in enumerate(gamestates.itertuples()):
             if state.pacman_attack == 1:
                 Pacman_pos = np.array([state.Pacman_X, state.Pacman_Y])
@@ -255,7 +282,7 @@ class Behavlets:
                             end_gamestep + CONTEXT_LENGTH,
                         )
 
-                    self.value.append(value)
+                    self.value_per_instance.append(value)
                     self.gamesteps.append((start_gamestep, end_gamestep))
                     self.timesteps.append((start_timestep, end_timestep))
                     flag = False
@@ -267,6 +294,8 @@ class Behavlets:
                 self.gamesteps.append((start_gamestep, end_gamestep))
                 self.timesteps.append((start_timestep, end_timestep))
                 flag = False
+        
+        self.value = sum(self.value_per_instance)
 
         return
 
@@ -304,8 +333,14 @@ class Behavlets:
         """
         self.full_name = "Aggression 3 - Ghost kills"
         self.measurement_type = "point"
+        self.output_attributes = ["value", "instances", "gamesteps", "timesteps"]
 
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", 10)
+
+        logger.info(
+            f"Calculating Aggression 3 with CONTEXT_LENGTH={CONTEXT_LENGTH}"
+        )
+
 
         previous_ghost_states = [0, 0, 0, 0]
 
@@ -361,11 +396,20 @@ class Behavlets:
 
         self.full_name = "Aggresssion 4 - Hunt even after powerpill finishes"
         self.measurement_type = "interval"
+        self.output_attributes = ["value", "value_per_pill", "instances", "gamesteps", "timesteps", "died"]
 
         SEARCH_WINDOW = kwargs.get("SEARCH_WINDOW", 10)
         VALUE_THRESHOLD = kwargs.get("VALUE_THRESHOLD", 1)
         GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 7)
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
+
+        logger.info(
+            f"Calculating Aggression 4 with SEARCH_WINDOW={SEARCH_WINDOW}, "
+            f"VALUE_THRESHOLD={VALUE_THRESHOLD}, "
+            f"GHOST_DISTANCE_THRESHOLD={GHOST_DISTANCE_THRESHOLD}, "
+            f"CONTEXT_LENGTH={CONTEXT_LENGTH}"
+        )
+
 
         logger.debug(f"Searching for {self.name} with Search window {SEARCH_WINDOW}")
 
@@ -515,11 +559,20 @@ class Behavlets:
 
         self.full_name = "Aggression 6 - Chase Ghosts or Collect Pellets"
         self.measurement_type = "interval"
+        self.output_attributes = ["value", "value_per_pill", "instances", "gamesteps", "timesteps"]
 
         VALUE_THRESHOLD = kwargs.get("VALUE_THRESHOLD", 1)
         ONLY_CLOSEST_GHOST = kwargs.get("ONLY_CLOSEST_GHOST", True)
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
         NORMALIZE_VALUE = kwargs.get("NORMALIZE_VALUE", False)
+
+        logger.info(
+            f"Calculating Aggression 6 with VALUE_THRESHOLD={VALUE_THRESHOLD}, "
+            f"ONLY_CLOSEST_GHOST={ONLY_CLOSEST_GHOST}, "
+            f"CONTEXT_LENGTH={CONTEXT_LENGTH}, "
+            f"NORMALIZE_VALUE={NORMALIZE_VALUE}"
+        )
+
 
         self.value_per_pill = [0] * 4
         self.gamesteps = [None] * 4
