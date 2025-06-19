@@ -157,6 +157,8 @@ class PacmanDataReader:
                 "Calculating pellet positions for each game state in pacman game, estimated time of 10-15 minutes"
             )
             self.gamestate_df = self._process_pellet_positions()
+
+            logger.warning("Processing logging bugs")
             self.gamestate_df = (
                 self._process_logging_bugs()
             )  # Whatever bugs are encountered (e.g., attackmode at initial gamestates)
@@ -552,15 +554,41 @@ class PacmanDataReader:
         This happens when the player wins the previous game shortly after eating a powerpill.
         """
         gamestate_df = self.gamestate_df.copy()
+        HOUSE_X = [-3.5, 3.5]
+        HOUSE_Y = [-2.5, 1.5]
 
+        def is_in_house(state, ghost_number):
+            return (
+                getattr(state, f"Ghost{ghost_number}_X") > HOUSE_X[0]
+                and getattr(state, f"Ghost{ghost_number}_X") < HOUSE_X[1]
+                and getattr(state, f"Ghost{ghost_number}_Y") > HOUSE_Y[0]
+                and getattr(state, f"Ghost{ghost_number}_Y") < HOUSE_Y[1]
+                and getattr(state, "powerPellets") == 4
+            )
+        
         # Fix attack mode bug at start of levels
         for level_id in gamestate_df["level_id"].unique():
             level_data = gamestate_df[gamestate_df["level_id"] == level_id]
-            first_50_states = level_data.iloc[:50]
+            first_350_states = level_data.iloc[:350] # First 350 are the first 17.5 seconds
 
-            for state in first_50_states.itertuples():
+            for state in first_350_states.itertuples():
+                # Fix attack mode bug at start of levels
                 if state.powerPellets == 4 and state.pacman_attack == 1:
                     gamestate_df.loc[state.Index, "pacman_attack"] = 0
+
+                # Fix ghost in house with hunted state bug (ghosts are in house but not hunted)
+                if state.ghost1_state == 4:
+                    if is_in_house(state, 1):
+                        gamestate_df.loc[state.Index, "ghost1_state"] = 0
+                if state.ghost2_state == 4:
+                    if is_in_house(state, 2):
+                        gamestate_df.loc[state.Index, "ghost2_state"] = 0
+                if state.ghost3_state == 4:
+                    if is_in_house(state, 3):
+                        gamestate_df.loc[state.Index, "ghost3_state"] = 0
+                if state.ghost4_state == 4:
+                    if is_in_house(state, 4):
+                        gamestate_df.loc[state.Index, "ghost4_state"] = 0
 
         return gamestate_df
 
@@ -626,7 +654,7 @@ class PacmanDataReader:
                 raise ValueError("No gamestates found in the specified index range")
             if len(filtered_df["level_id"].unique()) > 1:
                 raise ValueError(
-                    "The specified index range includes more than one level_id. Please specify a range within a single level."
+                    f"The specified index range {game_states} includes more than one level_id. Please specify a range within a single level. {filtered_df['level_id'].unique()}"
                 )
             level_id = filtered_df["level_id"].unique()
 

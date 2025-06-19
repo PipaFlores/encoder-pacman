@@ -1,6 +1,7 @@
 import os
 import time
 from typing import List
+import pandas as pd
 
 from src.datahandlers import PacmanDataReader
 from src.visualization import GameReplayer
@@ -15,6 +16,15 @@ logger = setup_logger(__name__)
 class BehavletsEncoding:
     """
     A class to perform the calculation, analysis and visualizations of Behavlets (Cowley & Charles, 2016)
+
+    TODO:
+    - Data structure for results
+      - All attributes, full with none values it doesnt matter
+      
+    - Trajectory extractions of behavlets (Gett all trajectories where X behavlet happens)
+    - Aggregate visualizations (Heatmaps and velocity grids)
+    - Maybe avoid clustering procedure in this script.
+
     """
 
     def __init__(
@@ -35,19 +45,22 @@ class BehavletsEncoding:
             for name in Behavlets.NAMES
         }
 
+        self.summary_results = pd.DataFrame()
+        self.instance_details = pd.DataFrame()
+        self.special_attributes = pd.DataFrame()
+
     def calculate_behavlets(
         self,
         level_id: int | None = None,
-        user_id: int | None = None,
         behavlet_type: str = "all",
     ) -> List[Behavlets]:
         """
-        Calculates behavlets for a level or game id
+        Calculates behavlets for a level
         """
 
-        gamestates = self.reader._filter_gamestate_data(
-            level_id=level_id, user_id=user_id
-        )[0]
+        fitered_data = self.reader._filter_gamestate_data(level_id=level_id, include_metadata=True)
+        gamestates = fitered_data[0]
+        metadata = fitered_data[1]
 
         for behavlet in self.behavlets.values():
             behavlet._reset_values()
@@ -60,7 +73,87 @@ class BehavletsEncoding:
         else:
             results.append(self.behavlets[behavlet_type].calculate(gamestates))
 
-        return results
+        self._store_results(results, metadata)
+
+
+    def _store_results(self, results: list[Behavlets], metadata: pd.DataFrame):
+        """Store behavlet results in a structured format"""
+
+        
+
+        ## Store summary results (one row per level with all behavlets as columns)
+        summary_data = {
+            "level_id": metadata["level_id"], 
+            "user_id": metadata["user_id"]
+        }
+        
+        # Add all behavlet metrics to a single row
+        for behavlet in results:
+            summary_data[f"{behavlet.name}_value"] = behavlet.value
+            summary_data[f"{behavlet.name}_instances"] = behavlet.instances
+            
+            # Add behavlet-specific attributes based on output_attributes
+            for attr in behavlet.output_attributes:
+                if attr not in ['value', 'instances']:
+                    summary_data[f"{behavlet.name}_{attr}"] = getattr(behavlet, attr, None)
+
+        # Create summary row and append to results
+        summary_row = pd.DataFrame([summary_data], index=[metadata["level_id"]])
+        self.summary_results = pd.concat([self.summary_results, summary_row], ignore_index=False)
+
+        ## Store instance details (one row per behavlet instance)
+        for behavlet in results:
+            # Handle multiple instances per behavlet
+            if len(behavlet.gamesteps) > 0:
+                for i, (gamestep, timestep) in enumerate(zip(behavlet.gamesteps, behavlet.timesteps)):
+                    if gamestep is not None:  # Skip None entries
+                        instance_data = {
+                            "level_id": metadata["level_id"],
+                            "user_id": metadata["user_id"],
+                            "behavlet_name": behavlet.name,
+                            "instance_idx": i,
+                            "start_gamestep": gamestep[0] if isinstance(gamestep, tuple) else gamestep,
+                            "end_gamestep": gamestep[1] if isinstance(gamestep, tuple) else gamestep,
+                            "start_timestep": timestep[0] if isinstance(timestep, tuple) else timestep,
+                            "end_timestep": timestep[1] if isinstance(timestep, tuple) else timestep,
+                            "value_per_instance": behavlet.value_per_instance[i] if i < len(behavlet.value_per_instance) else None
+                        }
+                        instance_row = pd.DataFrame([instance_data])
+                        self.instance_details = pd.concat([self.instance_details, instance_row], ignore_index=True)
+            else:
+                # Even if no instances, record the behavlet was calculated
+                instance_data = {
+                    "level_id": metadata["level_id"],
+                    "user_id": metadata["user_id"],
+                    "behavlet_name": behavlet.name,
+                    "instance_idx": None,
+                    "start_gamestep": None,
+                    "end_gamestep": None,
+                    "start_timestep": None,
+                    "end_timestep": None,
+                    "value_per_instance": None
+                }
+                instance_row = pd.DataFrame([instance_data])
+                self.instance_details = pd.concat([self.instance_details, instance_row], ignore_index=True)
+
+        ## Store special attributes (for complex nested data like value_per_pill, died)
+        for behavlet in results:
+            for attr in behavlet.output_attributes:
+                if attr not in ['value', 'instances', 'gamesteps', 'timesteps', 'value_per_instance']:
+                    attr_value = getattr(behavlet, attr, None)
+                    if attr_value is not None and (isinstance(attr_value, list) and len(attr_value) > 0):
+                        special_data = {
+                            "level_id": metadata["level_id"],
+                            "user_id": metadata["user_id"],
+                            "behavlet_name": behavlet.name,
+                            "attribute_name": attr,
+                            "attribute_value": attr_value
+                        }
+                        special_row = pd.DataFrame([special_data])
+                        self.special_attributes = pd.concat([self.special_attributes, special_row], ignore_index=True)
+
+        return
+
 
     def behavlet_path_geom_clustering(self, behavlets: list[Behavlets]):
         raise NotImplementedError
