@@ -1,10 +1,14 @@
 import pandas as pd
 import numpy as np
+import os
+import time
 import math
 from typing import Callable, NamedTuple
 from src.utils import setup_logger
 from src.analysis.behavlets_config import BehavletsConfig
+from src.visualization import GameReplayer
 
+## TODO = Expand all behavlets to include simple features such as quadrant idx or geometrical space.
 
 logger = setup_logger(__name__)
 
@@ -276,7 +280,7 @@ class Behavlets:
                     end_timestep = state.time_elapsed
 
                     if CONTEXT_LENGTH:
-                        start_gamestep = max(0, start_gamestep - CONTEXT_LENGTH)
+                        start_gamestep = max(gamestates.iloc[0]["game_state_id"], start_gamestep - CONTEXT_LENGTH)
                         end_gamestep = min(
                             gamestates.iloc[-1]["game_state_id"],
                             end_gamestep + CONTEXT_LENGTH,
@@ -341,8 +345,11 @@ class Behavlets:
             f"Calculating Aggression 3 with CONTEXT_LENGTH={CONTEXT_LENGTH}"
         )
 
-
-        previous_ghost_states = [0, 0, 0, 0]
+        first_state = gamestates.iloc[0]
+        previous_ghost_states = [first_state.ghost1_state, 
+                                 first_state.ghost2_state, 
+                                 first_state.ghost3_state, 
+                                 first_state.ghost4_state]
 
         for state in gamestates.itertuples():
             new_ghost_states = [
@@ -352,12 +359,12 @@ class Behavlets:
                 state.ghost4_state,
             ]
             for i in range(len(previous_ghost_states)):
-                if previous_ghost_states[i] != 4 & new_ghost_states[i] == 4:
+                if previous_ghost_states[i] == 3 and new_ghost_states[i] == 4:
                     self.value += 1
 
                     self.gamesteps.append(
                         (
-                            max(0, state.Index - CONTEXT_LENGTH),
+                            max(gamestates.iloc[0]["game_state_id"], state.Index - CONTEXT_LENGTH),
                             min(
                                 gamestates.iloc[-1]["game_state_id"],
                                 state.Index + CONTEXT_LENGTH,
@@ -503,7 +510,7 @@ class Behavlets:
                         )
                         if CONTEXT_LENGTH:
                             starting_gamestep = max(
-                                0, starting_gamestep - CONTEXT_LENGTH
+                                gamestates.iloc[0]["game_state_id"], starting_gamestep - CONTEXT_LENGTH
                             )
                             ending_gamestep = min(
                                 gamestates.iloc[-1]["game_state_id"],
@@ -555,6 +562,10 @@ class Behavlets:
             - value_per_pill: List of values for each power pill
             - gamesteps: List of tuples containing start/end frames for each instance
             - timesteps: List of tuples containing start/end times for each instance
+        
+        NOTE:
+            Unnacounted situation: If player eats multiple powerpills and extend the effects, the 
+            instance is counted as one and assigned to the idx of the first pellet eaten.
         """
 
         self.full_name = "Aggression 6 - Chase Ghosts or Collect Pellets"
@@ -642,7 +653,7 @@ class Behavlets:
                                 end_gamestep,
                             )  # For normalization
                             starting_gamestep = max(
-                                0, starting_gamestep - CONTEXT_LENGTH
+                                gamestates.iloc[0]["game_state_id"], starting_gamestep - CONTEXT_LENGTH
                             )
                             end_gamestep = min(
                                 gamestates.iloc[-1]["game_state_id"],
@@ -743,3 +754,4 @@ class Behavlets:
             return 3  # Bottom-left
         else:
             raise ValueError("Pacman position does not fall into any quadrant")
+        
