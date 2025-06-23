@@ -709,8 +709,7 @@ class PacmanDataReader:
 
     def get_trajectory(
         self,
-        level_id: int | list[int] | None = None,
-        user_id: int | list[int] | None = None,
+        level_id: int | None = None,
         game_states: tuple[int, int] | None = None,
         get_timevalues: bool = False,
         include_metadata: bool = True,
@@ -718,10 +717,9 @@ class PacmanDataReader:
         """
         Get Pacman trajectory data from the dataframes, without any metadata.
         Args:
-            level_id: List of game ids to filter the data by.
-            user_id: List of user ids to filter the data by.
+            level_id: level id to filter the data by. If None, game_states must be provided.
             game_states: Tuple of gamestates defining the start and end of a trajectory (based on game_state_id indexing)
-            get_all_games: Boolean indicating whether to get all games.
+            get_timevalues: Boolean indicating whether to include time values in the trajectory.
             include_metadata: Boolean indicating whether to include metadata in the trajectory.
         Returns:
             trajectory: `Trajectory` object containing Pacman trajectory data (x,y) coordinates and metadata.
@@ -730,9 +728,6 @@ class PacmanDataReader:
         ```python
         # Get trajectory for a specific level
         trajectory = data_reader.get_trajectory(level_id=123)
-
-        # Get trajectory for a specific user
-        trajectory = data_reader.get_trajectory(user_id=456)
 
         # Get trajectory with time values
         trajectory = data_reader.get_trajectory(level_id=123, get_timevalues=True)
@@ -747,13 +742,12 @@ class PacmanDataReader:
         ```
         """
         time_start = time.time()
-        logger.debug(f"Getting trajectory for game {level_id} and user {user_id}...")
-        if level_id is None and user_id is None and game_states is None:
-            raise ValueError("Either level_id, user_id, or gamestates must be provided")
+        logger.debug(f"Getting trajectory for game {level_id}...")
+        if level_id is None and game_states is None:
+            raise ValueError("Either level_id or gamestates must be provided")
 
         filtered_df, metadata = self._filter_gamestate_data(
             level_id=level_id,
-            user_id=user_id,
             game_states=game_states,
             include_metadata=include_metadata,
         )
@@ -778,7 +772,6 @@ class PacmanDataReader:
     def get_partial_trajectory(
         self,
         level_id: int | list[int] | None = None,
-        user_id: int | list[int] | None = None,
         start_timestep: int = 0,
         end_timestep: int = -1,
         get_timevalues: bool = False,
@@ -794,7 +787,7 @@ class PacmanDataReader:
             trajectory: `Trajectory` object containing Pacman trajectory data (x,y) coordinates.
         """
         trajectory = self.get_trajectory(
-            level_id=level_id, user_id=user_id, get_timevalues=get_timevalues
+            level_id=level_id, get_timevalues=get_timevalues
         )
 
         partial_trajectory = trajectory.get_segment(start_timestep, end_timestep)

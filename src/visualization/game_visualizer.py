@@ -359,10 +359,10 @@ class GameVisualizer(BaseVisualizer):
     def plot_velocity_grid(
         self,
         level_id: int | None = None,
-        trajectory: torch.Tensor
-        | np.ndarray
-        | Trajectory
+        trajectory: Trajectory
         | list[Trajectory]
+        | torch.Tensor
+        | np.ndarray
         | None = None,
         show_maze: bool = True,
         show_pellet: bool = False,
