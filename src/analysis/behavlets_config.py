@@ -13,7 +13,7 @@ class Aggression1Config:
     # a distance threshold or by a bounded region of space.
     CLOSENESS_DEF: str = "House perimeter"
 
-    # If CLOSENESS_DEF is Distance to house,
+    # If CLOSENESS_DEF == Distance to house,
     BOUNDARY_DISTANCE: float = 7.5
 
     # If CLOSENESS_DEF == "House Perimeter"
@@ -56,7 +56,7 @@ class Aggression6Config:
     )
     CONTEXT_LENGTH: Optional[int] = None
     NORMALIZE_VALUE: bool = (
-        False  # Normalize the value according to overall duration of the hunt state
+        True  # Normalize the value according to overall duration of the hunt state
     )
 
 

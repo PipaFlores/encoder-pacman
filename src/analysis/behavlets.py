@@ -110,6 +110,10 @@ class Behavlets:
         ###
         self.value_per_instance = [] ## e.g, Aggression 1 can have multiple instances and the value is different in each one.
         self.value_per_pill = []  ## e.g., Aggression4 counts for each pill in the game
+
+        self.instant_gamestep = [] ## For point-based behavlets, the gamestep of the instant when the behavlet is observed
+        self.instant_position = [] ## For point-based behavlets, the position of the instant when the behavlet is observed
+
         self.died = []  ## Did the player died during the behavlet observation?
 
     def calculate(self, gamestates: pd.DataFrame, **kwargs):
@@ -218,14 +222,15 @@ class Behavlets:
         self.measurement_type = "interval"
         self.output_attributes = ["value", "instances","value_per_instance","gamesteps", "timesteps"]
 
-        BOUNDARY_DISTANCE = kwargs.get("BOUNDARY_DISTANCE", 7.5)
-        HOUSE_POS = kwargs.get("HOUSE_POS", (0, -0.5))
-        X_BOUNDARIES = kwargs.get("X_BOUNDARIES", (-6.5, 6.5))
-        Y_BOUNDARIES = kwargs.get("Y_BOUNDARIES", (-5.5, 4.5))
-        CLOSENESS_DEF = kwargs.get("CLOSENESS_DEF", "House perimeter")
-        CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
+        CLOSENESS_DEF = kwargs.get("CLOSENESS_DEF")
+        BOUNDARY_DISTANCE = kwargs.get("BOUNDARY_DISTANCE")
+        HOUSE_POS = kwargs.get("HOUSE_POS")
+        X_BOUNDARIES = kwargs.get("X_BOUNDARIES")
+        Y_BOUNDARIES = kwargs.get("Y_BOUNDARIES")
+        CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH")
+        
 
-        logger.info(
+        logger.debug(
             f"Calculating Aggression 1 with BOUNDARY_DISTANCE={BOUNDARY_DISTANCE}, "
             f"HOUSE_POS={HOUSE_POS}, "
             f"X_BOUNDARIES={X_BOUNDARIES}, "
@@ -255,7 +260,7 @@ class Behavlets:
                         dist <= BOUNDARY_DISTANCE for dist in Ghost_house_distances
                     )
                 elif CLOSENESS_DEF == "House perimeter":
-                    logger.debug(f"step {state.Index} ghost positions{ghost_Positions}")
+                    # logger.debug(f"step {state.Index} ghost positions{ghost_Positions}")
                     Pacman_condition = (
                         X_BOUNDARIES[0] <= Pacman_pos[0] <= X_BOUNDARIES[1]
                     ) and (Y_BOUNDARIES[0] <= Pacman_pos[1] <= Y_BOUNDARIES[1])
@@ -295,6 +300,7 @@ class Behavlets:
                 end_gamestep = state.Index
                 end_timestep = state.time_elapsed
 
+                self.value_per_instance.append(value)
                 self.gamesteps.append((start_gamestep, end_gamestep))
                 self.timesteps.append((start_timestep, end_timestep))
                 flag = False
@@ -337,11 +343,11 @@ class Behavlets:
         """
         self.full_name = "Aggression 3 - Ghost kills"
         self.measurement_type = "point"
-        self.output_attributes = ["value", "instances", "gamesteps", "timesteps"]
+        self.output_attributes = ["value", "instances", "gamesteps", "timesteps", "instant_gamestep", "instant_position"]
 
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", 10)
 
-        logger.info(
+        logger.debug(
             f"Calculating Aggression 3 with CONTEXT_LENGTH={CONTEXT_LENGTH}"
         )
 
@@ -371,6 +377,8 @@ class Behavlets:
                             ),
                         )
                     )
+                    self.instant_gamestep.append(state.Index)
+                    self.instant_position.append((state.Pacman_X, state.Pacman_Y))
                     self.timesteps.append(state.time_elapsed)
             previous_ghost_states = new_ghost_states
 
@@ -410,7 +418,7 @@ class Behavlets:
         GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 7)
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
 
-        logger.info(
+        logger.debug(
             f"Calculating Aggression 4 with SEARCH_WINDOW={SEARCH_WINDOW}, "
             f"VALUE_THRESHOLD={VALUE_THRESHOLD}, "
             f"GHOST_DISTANCE_THRESHOLD={GHOST_DISTANCE_THRESHOLD}, "
@@ -503,6 +511,8 @@ class Behavlets:
                 ):
                     if died:
                         self.died[pellet_idx] = True
+                    else:
+                        self.died[pellet_idx] = False
                     if self.value_per_pill[pellet_idx] >= VALUE_THRESHOLD:
                         ending_gamestep = state.Index - 1
                         ending_timestep = float(
@@ -577,7 +587,7 @@ class Behavlets:
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
         NORMALIZE_VALUE = kwargs.get("NORMALIZE_VALUE", False)
 
-        logger.info(
+        logger.debug(
             f"Calculating Aggression 6 with VALUE_THRESHOLD={VALUE_THRESHOLD}, "
             f"ONLY_CLOSEST_GHOST={ONLY_CLOSEST_GHOST}, "
             f"CONTEXT_LENGTH={CONTEXT_LENGTH}, "
