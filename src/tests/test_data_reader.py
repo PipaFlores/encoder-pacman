@@ -47,18 +47,13 @@ class TestPacmanDataReader:
         assert isinstance(trajectory, Trajectory)
         assert trajectory.coordinates.shape[1] == 2  # x,y coordinates
 
-        # Test getting trajectory by user_id
-        test_user_id = reader.level_df["user_id"].iloc[0]
-        trajectory = reader.get_trajectory(user_id=test_user_id)
-        assert isinstance(trajectory, Trajectory)
-
         # Test getting trajectory with time values
         trajectory = reader.get_trajectory(level_id=test_level_id, get_timevalues=True)
         assert trajectory.timevalues is not None
         assert len(trajectory.timevalues) == len(trajectory.coordinates)
 
         # Test getting trajectory with metadata
-        trajectory = reader.get_trajectory(user_id=test_user_id)
+        trajectory = reader.get_trajectory(level_id=test_level_id)
         assert trajectory.metadata is not None
         assert list(trajectory.metadata.keys()) == [
             "level_id",
@@ -148,10 +143,7 @@ class TestPacmanDataReader:
         """Test error handling for invalid inputs"""
         # Test invalid level_id
         with pytest.raises(ValueError):
-            reader.get_trajectory(level_id=None, user_id=None)
-
-        with pytest.raises(ValueError):
-            reader.get_trajectory(user_id=0)
+            reader.get_trajectory(level_id=None)
 
         # Test invalid trajectory segment
         test_level_id = reader.level_df["level_id"].iloc[0]

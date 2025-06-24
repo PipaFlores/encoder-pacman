@@ -169,7 +169,9 @@ class TestGameVisualizer:
         """Test aggregated velocity grid visualization"""
 
         fig, ax = plt.subplots(figsize=(6, 6))
-        trajectories = [reader.get_trajectory(level_id=level_id) for level_id in range(600, 650)]
+        trajectories = [
+            reader.get_trajectory(level_id=level_id) for level_id in range(600, 650)
+        ]
         visualizer.plot_velocity_grid(trajectory=trajectories, ax=ax)
 
         assert self.save_and_compare(fig, "aggregated_velocity_grid", setup_dirs)

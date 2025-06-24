@@ -1,12 +1,9 @@
 import pandas as pd
 import numpy as np
-import os
-import time
 import math
 from typing import Callable, NamedTuple
 from src.utils import setup_logger
 from src.analysis.behavlets_config import BehavletsConfig
-from src.visualization import GameReplayer
 
 ## TODO = Expand all behavlets to include simple features such as quadrant idx or geometrical space.
 
@@ -93,7 +90,7 @@ class Behavlets:
         # (e.g., Speed - cycles per sector is a value of time)
         self.value = 0
 
-        # All behavlets output at least to the value attribute, 
+        # All behavlets output at least to the value attribute,
         # but it can be expanded to the other ones (handled by each behavlet algorithm)
         self.output_attributes = ["value"]
 
@@ -108,11 +105,11 @@ class Behavlets:
         ###
         ### OPTIONAL ATTRIBUTES SHARED OR UNIQUE OF CERTAIN BEHAVLET TYPES
         ###
-        self.value_per_instance = [] ## e.g, Aggression 1 can have multiple instances and the value is different in each one.
+        self.value_per_instance = []  ## e.g, Aggression 1 can have multiple instances and the value is different in each one.
         self.value_per_pill = []  ## e.g., Aggression4 counts for each pill in the game
 
-        self.instant_gamestep = [] ## For point-based behavlets, the gamestep of the instant when the behavlet is observed
-        self.instant_position = [] ## For point-based behavlets, the position of the instant when the behavlet is observed
+        self.instant_gamestep = []  ## For point-based behavlets, the gamestep of the instant when the behavlet is observed
+        self.instant_position = []  ## For point-based behavlets, the position of the instant when the behavlet is observed
 
         self.died = []  ## Did the player died during the behavlet observation?
 
@@ -136,11 +133,11 @@ class Behavlets:
             raise ValueError(f"measurement_type not set for behavlet {self.name}")
 
         return self
-    
+
     def report(self):
         """
         Report results based on self.output_attributes list of attributes"""
-        
+
         print(f"Results for {self.full_name} ({self.name})")
         for attr in self.output_attributes:
             try:
@@ -220,7 +217,13 @@ class Behavlets:
 
         self.full_name = "Aggression 1 - Hunt close to ghost home"
         self.measurement_type = "interval"
-        self.output_attributes = ["value", "instances","value_per_instance","gamesteps", "timesteps"]
+        self.output_attributes = [
+            "value",
+            "instances",
+            "value_per_instance",
+            "gamesteps",
+            "timesteps",
+        ]
 
         CLOSENESS_DEF = kwargs.get("CLOSENESS_DEF")
         BOUNDARY_DISTANCE = kwargs.get("BOUNDARY_DISTANCE")
@@ -228,7 +231,6 @@ class Behavlets:
         X_BOUNDARIES = kwargs.get("X_BOUNDARIES")
         Y_BOUNDARIES = kwargs.get("Y_BOUNDARIES")
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH")
-        
 
         logger.debug(
             f"Calculating Aggression 1 with BOUNDARY_DISTANCE={BOUNDARY_DISTANCE}, "
@@ -254,6 +256,7 @@ class Behavlets:
                         abs(HOUSE_POS[0] - ghost_pos[0])
                         + abs(HOUSE_POS[1] - ghost_pos[1])
                         for ghost_pos in ghost_Positions
+                        if ghost_pos is not None
                     ]
                     Pacman_condition = Pacman_house_dist <= BOUNDARY_DISTANCE
                     Ghost_conditions = any(
@@ -269,6 +272,7 @@ class Behavlets:
                             (X_BOUNDARIES[0] <= ghost_pos[0] <= X_BOUNDARIES[1])
                             and (Y_BOUNDARIES[0] <= ghost_pos[1] <= Y_BOUNDARIES[1])
                             for ghost_pos in ghost_Positions
+                            if ghost_pos is not None
                         ]
                     )
 
@@ -285,7 +289,10 @@ class Behavlets:
                     end_timestep = state.time_elapsed
 
                     if CONTEXT_LENGTH:
-                        start_gamestep = max(gamestates.iloc[0]["game_state_id"], start_gamestep - CONTEXT_LENGTH)
+                        start_gamestep = max(
+                            gamestates.iloc[0]["game_state_id"],
+                            start_gamestep - CONTEXT_LENGTH,
+                        )
                         end_gamestep = min(
                             gamestates.iloc[-1]["game_state_id"],
                             end_gamestep + CONTEXT_LENGTH,
@@ -304,7 +311,7 @@ class Behavlets:
                 self.gamesteps.append((start_gamestep, end_gamestep))
                 self.timesteps.append((start_timestep, end_timestep))
                 flag = False
-        
+
         self.value = sum(self.value_per_instance)
 
         return
@@ -343,19 +350,26 @@ class Behavlets:
         """
         self.full_name = "Aggression 3 - Ghost kills"
         self.measurement_type = "point"
-        self.output_attributes = ["value", "instances", "gamesteps", "timesteps", "instant_gamestep", "instant_position"]
+        self.output_attributes = [
+            "value",
+            "instances",
+            "gamesteps",
+            "timesteps",
+            "instant_gamestep",
+            "instant_position",
+        ]
 
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", 10)
 
-        logger.debug(
-            f"Calculating Aggression 3 with CONTEXT_LENGTH={CONTEXT_LENGTH}"
-        )
+        logger.debug(f"Calculating Aggression 3 with CONTEXT_LENGTH={CONTEXT_LENGTH}")
 
         first_state = gamestates.iloc[0]
-        previous_ghost_states = [first_state.ghost1_state, 
-                                 first_state.ghost2_state, 
-                                 first_state.ghost3_state, 
-                                 first_state.ghost4_state]
+        previous_ghost_states = [
+            first_state.ghost1_state,
+            first_state.ghost2_state,
+            first_state.ghost3_state,
+            first_state.ghost4_state,
+        ]
 
         for state in gamestates.itertuples():
             new_ghost_states = [
@@ -370,7 +384,10 @@ class Behavlets:
 
                     self.gamesteps.append(
                         (
-                            max(gamestates.iloc[0]["game_state_id"], state.Index - CONTEXT_LENGTH),
+                            max(
+                                gamestates.iloc[0]["game_state_id"],
+                                state.Index - CONTEXT_LENGTH,
+                            ),
                             min(
                                 gamestates.iloc[-1]["game_state_id"],
                                 state.Index + CONTEXT_LENGTH,
@@ -411,11 +428,18 @@ class Behavlets:
 
         self.full_name = "Aggresssion 4 - Hunt even after powerpill finishes"
         self.measurement_type = "interval"
-        self.output_attributes = ["value", "value_per_pill", "instances", "gamesteps", "timesteps", "died"]
+        self.output_attributes = [
+            "value",
+            "value_per_pill",
+            "instances",
+            "gamesteps",
+            "timesteps",
+            "died",
+        ]
 
         SEARCH_WINDOW = kwargs.get("SEARCH_WINDOW", 10)
         VALUE_THRESHOLD = kwargs.get("VALUE_THRESHOLD", 1)
-        GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 7)
+        GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 5)
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
 
         logger.debug(
@@ -424,7 +448,6 @@ class Behavlets:
             f"GHOST_DISTANCE_THRESHOLD={GHOST_DISTANCE_THRESHOLD}, "
             f"CONTEXT_LENGTH={CONTEXT_LENGTH}"
         )
-
 
         logger.debug(f"Searching for {self.name} with Search window {SEARCH_WINDOW}")
 
@@ -467,28 +490,25 @@ class Behavlets:
                 starting_timestep = state.time_elapsed
                 lives_at_wear_off = state.lives
                 pacman_pos = [state.Pacman_X, state.Pacman_Y]
-                ghost_positions = self._get_ghost_pos(state, only_alive=False)
+                ghost_positions = self._get_ghost_pos(state, only_alive=True)
 
-                prev_distance_to_ghosts = [
-                    abs(pacman_pos[0] - ghost_pos[0])
-                    + abs(pacman_pos[1] - ghost_pos[1])
-                    for ghost_pos in ghost_positions
-                ]
+                prev_distance_to_ghosts = self._get_distance_to_ghosts(
+                    pacman_pos, ghost_positions
+                )
+
             # look gamesteps after pill wears off, within SEARCH_WINDOW, and check if distance to any ghosts diminish
             elif flag:
                 pacman_pos = [state.Pacman_X, state.Pacman_Y]
-                ghost_positions = self._get_ghost_pos(
-                    state, only_alive=False
-                )  # Get all ghost to ensure alignment with prev_distances
+                ghost_positions = self._get_ghost_pos(state, only_alive=True)
 
-                distance_to_ghosts = [
-                    abs(pacman_pos[0] - ghost_pos[0])
-                    + abs(pacman_pos[1] - ghost_pos[1])
-                    for ghost_pos in ghost_positions
-                ]
+                distance_to_ghosts = self._get_distance_to_ghosts(
+                    pacman_pos, ghost_positions
+                )
 
                 for i, distance in enumerate(distance_to_ghosts):
                     if (
+                        (distance, prev_distance_to_ghosts[i]) != (math.inf, math.inf)
+                    ) and (
                         (distance < prev_distance_to_ghosts[i])  # closer to ghost
                         and (
                             distance < GHOST_DISTANCE_THRESHOLD
@@ -499,7 +519,7 @@ class Behavlets:
                     ):  # Not at home
                         self.value_per_pill[pellet_idx] += 1
 
-                prev_distance_to_ghosts = distance_to_ghosts
+                prev_distance_to_ghosts = distance_to_ghosts.copy()
 
                 # Stop looking outside the search window, if player dies (Quite probable), or level end.
                 died = state.lives < lives_at_wear_off
@@ -520,7 +540,8 @@ class Behavlets:
                         )
                         if CONTEXT_LENGTH:
                             starting_gamestep = max(
-                                gamestates.iloc[0]["game_state_id"], starting_gamestep - CONTEXT_LENGTH
+                                gamestates.iloc[0]["game_state_id"],
+                                starting_gamestep - CONTEXT_LENGTH,
                             )
                             ending_gamestep = min(
                                 gamestates.iloc[-1]["game_state_id"],
@@ -572,33 +593,41 @@ class Behavlets:
             - value_per_pill: List of values for each power pill
             - gamesteps: List of tuples containing start/end frames for each instance
             - timesteps: List of tuples containing start/end times for each instance
-        
+
         NOTE:
-            Unnacounted situation: If player eats multiple powerpills and extend the effects, the 
+            Unnacounted situation: If player eats multiple powerpills and extend the effects, the
             instance is counted as one and assigned to the idx of the first pellet eaten.
         """
 
         self.full_name = "Aggression 6 - Chase Ghosts or Collect Pellets"
         self.measurement_type = "interval"
-        self.output_attributes = ["value", "value_per_pill", "instances", "gamesteps", "timesteps"]
+        self.output_attributes = [
+            "value",
+            "value_per_pill",
+            "instances",
+            "gamesteps",
+            "timesteps",
+        ]
 
         VALUE_THRESHOLD = kwargs.get("VALUE_THRESHOLD", 1)
-        ONLY_CLOSEST_GHOST = kwargs.get("ONLY_CLOSEST_GHOST", True)
+        GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 5)
+        ONLY_CLOSEST_GHOST = kwargs.get("ONLY_CLOSEST_GHOST", False)
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
-        NORMALIZE_VALUE = kwargs.get("NORMALIZE_VALUE", False)
+        NORMALIZE_VALUE = kwargs.get("NORMALIZE_VALUE", True)
 
         logger.debug(
             f"Calculating Aggression 6 with VALUE_THRESHOLD={VALUE_THRESHOLD}, "
             f"ONLY_CLOSEST_GHOST={ONLY_CLOSEST_GHOST}, "
             f"CONTEXT_LENGTH={CONTEXT_LENGTH}, "
-            f"NORMALIZE_VALUE={NORMALIZE_VALUE}"
+            f"NORMALIZE_VALUE={NORMALIZE_VALUE}, "
+            f"GHOST_DISTANCE_THRESHOLD={GHOST_DISTANCE_THRESHOLD}"
         )
-
 
         self.value_per_pill = [0] * 4
         self.gamesteps = [None] * 4
         if CONTEXT_LENGTH:
             self.original_gamesteps = [None] * 4
+            self.output_attributes.append("original_gamesteps")
 
         self.timesteps = [None] * 4
 
@@ -609,51 +638,56 @@ class Behavlets:
                 prev_state = state
                 ghost_distances = [math.inf] * 4
             elif i > 0:
-                if prev_state.pacman_attack == 0 and state.pacman_attack == 1:
+                if (
+                    prev_state.pacman_attack == 0 and state.pacman_attack == 1
+                ):  # When powerpill is eaten
                     pellet_idx = self._get_quadrant_idx(state)
                     starting_gamestep = state.Index
                     starting_timestep = state.time_elapsed
                     end_timestep = state.Index
                     pacman_pos = (state.Pacman_X, state.Pacman_Y)
-                    ghost_positions = self._get_ghost_pos(state, only_alive=False)
-                    ghost_distances = [
-                        abs(pacman_pos[0] - ghost_pos[0])
-                        + abs(pacman_pos[1] - ghost_pos[1])
-                        for ghost_pos in ghost_positions
-                    ]
+                    ghost_positions = self._get_ghost_pos(state, only_alive=True)
+                    ghost_distances = self._get_distance_to_ghosts(
+                        pacman_pos, ghost_positions
+                    )
 
-                elif state.pacman_attack == 1 and (i != final_state):
+                elif state.pacman_attack == 1 and (
+                    i != final_state
+                ):  # While powerpill is active
                     pacman_pos = (state.Pacman_X, state.Pacman_Y)
-                    ghost_positions = self._get_ghost_pos(state, only_alive=False)
-                    ghost_distances = [
-                        abs(pacman_pos[0] - ghost_pos[0])
-                        + abs(pacman_pos[1] - ghost_pos[1])
-                        for ghost_pos in ghost_positions
-                    ]
+                    ghost_positions = self._get_ghost_pos(state, only_alive=True)
+                    ghost_distances = self._get_distance_to_ghosts(
+                        pacman_pos, ghost_positions
+                    )
 
-                    if ONLY_CLOSEST_GHOST:
-                        for close_idx in np.argsort(ghost_distances):
-                            if ghost_distances[close_idx] < prev_ghost_distances[
-                                close_idx
-                            ] and getattr(state, f"ghost{close_idx + 1}_state") not in [
-                                0,
-                                4,
-                            ]:
+                    if not ONLY_CLOSEST_GHOST:  ## Default behavior
+                        for ghost_idx, distance in enumerate(ghost_distances):
+                            if (
+                                distance < prev_ghost_distances[ghost_idx]
+                                and distance != math.inf
+                                and prev_ghost_distances[ghost_idx] != math.inf
+                                and distance < GHOST_DISTANCE_THRESHOLD
+                            ):
                                 self.value_per_pill[pellet_idx] += 1
-                                break
-                            else:  # If closest ghost is dead or at home, continue with the next closest one
-                                continue
 
-                    elif not ONLY_CLOSEST_GHOST:
-                        for i, distance in enumerate(ghost_distances):
-                            if distance < prev_ghost_distances[i] and getattr(
-                                state, f"ghost{i + 1}_state"
-                            ) not in [0, 4]:
-                                self.value_per_pill[pellet_idx] += 1
+                    elif ONLY_CLOSEST_GHOST:
+                        closest_ghost_idx = np.argmin(ghost_distances)
+                        if (
+                            (
+                                ghost_distances[closest_ghost_idx]
+                                < prev_ghost_distances[closest_ghost_idx]
+                            )
+                            and (
+                                ghost_distances[closest_ghost_idx]
+                                < GHOST_DISTANCE_THRESHOLD
+                            )
+                            and (prev_ghost_distances[closest_ghost_idx] != math.inf)
+                        ):
+                            self.value_per_pill[pellet_idx] += 1
 
                 elif prev_state.pacman_attack == 1 and (
                     state.pacman_attack == 0 or i == final_state
-                ):
+                ):  # When powerpill wears off, or at the end of the level
                     end_gamestep = state.Index
                     end_timestep = state.time_elapsed
                     if self.value_per_pill[pellet_idx] >= VALUE_THRESHOLD:
@@ -663,7 +697,8 @@ class Behavlets:
                                 end_gamestep,
                             )  # For normalization
                             starting_gamestep = max(
-                                gamestates.iloc[0]["game_state_id"], starting_gamestep - CONTEXT_LENGTH
+                                gamestates.iloc[0]["game_state_id"],
+                                starting_gamestep - CONTEXT_LENGTH,
                             )
                             end_gamestep = min(
                                 gamestates.iloc[-1]["game_state_id"],
@@ -679,26 +714,26 @@ class Behavlets:
                     break
 
                 prev_state = state
-                prev_ghost_distances = ghost_distances
+                prev_ghost_distances = ghost_distances.copy()
 
         if NORMALIZE_VALUE:
-            for i, pill_value in enumerate(self.value_per_pill):
+            for pill_idx, pill_value in enumerate(self.value_per_pill):
                 if pill_value is not None and pill_value != 0:
                     if CONTEXT_LENGTH:
                         # Use original gamesteps without context length adjustment
-                        self.value_per_pill[i] = pill_value / (
-                            self.original_gamesteps[i][1]
-                            - self.original_gamesteps[i][0]
+                        self.value_per_pill[pill_idx] = pill_value / (
+                            self.original_gamesteps[pill_idx][1]
+                            - self.original_gamesteps[pill_idx][0]
                         )
                     else:
-                        self.value_per_pill[i] = pill_value / (
-                            self.gamesteps[i][1] - self.gamesteps[i][0]
+                        self.value_per_pill[pill_idx] = pill_value / (
+                            self.gamesteps[pill_idx][1] - self.gamesteps[pill_idx][0]
                         )
             # Calculate simple average of normalized values
-            valid_values = [v for v in self.value_per_pill if v is not None]
+            valid_values = [v for v in self.value_per_pill if v not in [None, 0]]
             self.value = sum(valid_values) / len(valid_values) if valid_values else 0
         else:
-            valid_values = [v for v in self.value_per_pill if v is not None]
+            valid_values = [v for v in self.value_per_pill if v not in [None, 0]]
             self.value = sum(valid_values)
 
         return
@@ -707,28 +742,40 @@ class Behavlets:
 
     def _get_ghost_pos(
         self, gamestate: NamedTuple, only_alive: bool
-    ) -> list[np.ndarray]:
-        """Get positions of all live ghosts (not dead or in house).
+    ) -> list[np.ndarray | None]:
+        """Get fixed-length list of positions of ghosts based on specified criteria.
 
         Args:
             gamestate: Named tuple containing game state data
+            only_alive: If True, only return positions of live ghosts (not dead or in house), checked by both by ghost state and geometric position
 
         Returns:
-            List of numpy arrays containing (x,y) positions of live ghosts
+            List of numpy arrays containing (x,y) positions of ghosts, with None for excluded ghosts
         """
+        positions = [None] * 4
+        HOUSE_X = [-3.5, 3.5]
+        HOUSE_Y = [-2.5, 1.5]
+
         if only_alive:
-            return [
-                np.array(
-                    [
-                        getattr(gamestate, f"Ghost{i}_X"),
-                        getattr(gamestate, f"Ghost{i}_Y"),
-                    ]
-                )
-                for i in range(1, 5)
-                if getattr(gamestate, f"ghost{i}_state") not in [0, 4]
-            ]
+            for i in range(1, 5):
+                if (
+                    getattr(gamestate, f"ghost{i}_state") not in [0, 4]
+                    and not (  # and not in house (i.e., if ghost is in house, set position to None)
+                        HOUSE_X[0] < getattr(gamestate, f"Ghost{i}_X") < HOUSE_X[1]
+                        and HOUSE_Y[0] < getattr(gamestate, f"Ghost{i}_Y") < HOUSE_Y[1]
+                    )
+                ):
+                    positions[i - 1] = np.array(
+                        [
+                            getattr(gamestate, f"Ghost{i}_X"),
+                            getattr(gamestate, f"Ghost{i}_Y"),
+                        ]
+                    )
+                else:
+                    positions[i - 1] = None
+
         else:
-            return [
+            positions = [
                 np.array(
                     [
                         getattr(gamestate, f"Ghost{i}_X"),
@@ -737,6 +784,26 @@ class Behavlets:
                 )
                 for i in range(1, 5)  # all ghosts
             ]
+
+        return positions
+
+    def _get_distance_to_ghosts(
+        self, pacman_pos: np.ndarray, ghost_positions: list[np.ndarray | None]
+    ) -> list[float]:
+        """Get distance to ghosts from pacman position.
+        inputs a fixed-length list of ghost positions and returns a list of distances to ghosts.
+        If ghost position is None, the distance is set to math.inf.
+        This is used to avoid calculating distance to ghosts that are not alive or in house.
+        """
+        distance_to_ghosts = [math.inf] * 4
+        for ghost_idx, ghost_pos in enumerate(ghost_positions):
+            if ghost_pos is None:
+                distance_to_ghosts[ghost_idx] = math.inf
+            else:
+                distance_to_ghosts[ghost_idx] = abs(pacman_pos[0] - ghost_pos[0]) + abs(
+                    pacman_pos[1] - ghost_pos[1]
+                )
+        return distance_to_ghosts
 
     def _get_quadrant_idx(self, state: NamedTuple) -> int:
         """Get index number based on quadrant position of Pacman.
@@ -764,4 +831,3 @@ class Behavlets:
             return 3  # Bottom-left
         else:
             raise ValueError("Pacman position does not fall into any quadrant")
-        

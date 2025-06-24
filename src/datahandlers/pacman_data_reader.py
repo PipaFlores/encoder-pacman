@@ -565,11 +565,13 @@ class PacmanDataReader:
                 and getattr(state, f"Ghost{ghost_number}_Y") < HOUSE_Y[1]
                 and getattr(state, "powerPellets") == 4
             )
-        
+
         # Fix attack mode bug at start of levels
         for level_id in gamestate_df["level_id"].unique():
             level_data = gamestate_df[gamestate_df["level_id"] == level_id]
-            first_350_states = level_data.iloc[:350] # First 350 are the first 17.5 seconds
+            first_350_states = level_data.iloc[
+                :350
+            ]  # First 350 are the first 17.5 seconds
 
             for state in first_350_states.itertuples():
                 # Fix attack mode bug at start of levels
