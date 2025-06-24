@@ -20,7 +20,7 @@ class BehavletsEncoding:
     TODO:
     - Data structure for results
       - All attributes, full with none values it doesnt matter
-      
+
     - Trajectory extractions of behavlets (Gett all trajectories where X behavlet happens)
     - Aggregate visualizations (Heatmaps and velocity grids)
     - Maybe avoid clustering procedure in this script.
@@ -44,6 +44,7 @@ class BehavletsEncoding:
             name: Behavlets(name=name, verbose=verbose, debug=debug)
             for name in Behavlets.NAMES
         }
+        logger.info(f"Behavlets initialized: {Behavlets.NAMES}")
 
         self.summary_results = pd.DataFrame()
         self.instance_details = pd.DataFrame()
@@ -51,14 +52,23 @@ class BehavletsEncoding:
 
     def calculate_behavlets(
         self,
-        level_id: int | None = None,
-        behavlet_type: str = "all",
+        level_id: int,
+        behavlet_type: str | list[str] = "all",
     ) -> List[Behavlets]:
         """
-        Calculates behavlets for a level
+        Calculates behavlets for a level and updates the self.summary_results, self.instance_details and self.special_attributes.
+
+        Args:
+            level_id: The level id to calculate the behavlets for.
+            behavlet_type: The type of behavlet to calculate. If "all", all behavlets are calculated.
+
+        Returns:
+            None
         """
 
-        fitered_data = self.reader._filter_gamestate_data(level_id=level_id, include_metadata=True)
+        fitered_data = self.reader._filter_gamestate_data(
+            level_id=level_id, include_metadata=True
+        )
         gamestates = fitered_data[0]
         metadata = fitered_data[1]
 
@@ -68,92 +78,170 @@ class BehavletsEncoding:
         results = []
 
         if behavlet_type == "all":
-            for behavlet in self.behavlets.values():
-                results.append(behavlet.calculate(gamestates))
-        else:
+            for behavlet_name in self.behavlets.keys():
+                results.append(self.behavlets[behavlet_name].calculate(gamestates))
+        elif isinstance(behavlet_type, list):
+            for behavlet_name in behavlet_type:
+                if behavlet_name not in self.behavlets:
+                    raise ValueError(f"Invalid behavlet name: {behavlet_name}")
+                results.append(self.behavlets[behavlet_name].calculate(gamestates))
+        elif isinstance(behavlet_type, str):
+            if behavlet_type not in self.behavlets:
+                raise ValueError(f"Invalid behavlet name: {behavlet_type}")
             results.append(self.behavlets[behavlet_type].calculate(gamestates))
+        else:
+            raise ValueError(f"Invalid behavlet type: {behavlet_type}")
 
         self._store_results(results, metadata)
 
-
     def _store_results(self, results: list[Behavlets], metadata: pd.DataFrame):
-        """Store behavlet results in a structured format"""
-
-        
+        """Store behavlet results of a single level in a structured format"""
 
         ## Store summary results (one row per level with all behavlets as columns)
         summary_data = {
-            "level_id": metadata["level_id"], 
-            "user_id": metadata["user_id"]
+            "level_id": metadata["level_id"],
+            "user_id": metadata["user_id"],
         }
-        
+
         # Add all behavlet metrics to a single row
         for behavlet in results:
             summary_data[f"{behavlet.name}_value"] = behavlet.value
             summary_data[f"{behavlet.name}_instances"] = behavlet.instances
-            
+
             # Add behavlet-specific attributes based on output_attributes
             for attr in behavlet.output_attributes:
-                if attr not in ['value', 'instances']:
-                    summary_data[f"{behavlet.name}_{attr}"] = getattr(behavlet, attr, None)
+                if attr not in ["value", "instances"]:
+                    summary_data[f"{behavlet.name}_{attr}"] = getattr(
+                        behavlet, attr, None
+                    )
 
         # Create summary row and append to results
         summary_row = pd.DataFrame([summary_data], index=[metadata["level_id"]])
-        self.summary_results = pd.concat([self.summary_results, summary_row], ignore_index=False)
+        self.summary_results = pd.concat(
+            [self.summary_results, summary_row], ignore_index=False
+        )
 
         ## Store instance details (one row per behavlet instance)
         for behavlet in results:
             # Handle multiple instances per behavlet
             if len(behavlet.gamesteps) > 0:
-                for i, (gamestep, timestep) in enumerate(zip(behavlet.gamesteps, behavlet.timesteps)):
+                for i, (gamestep, timestep) in enumerate(
+                    zip(behavlet.gamesteps, behavlet.timesteps)
+                ):
                     if gamestep is not None:  # Skip None entries
                         instance_data = {
                             "level_id": metadata["level_id"],
                             "user_id": metadata["user_id"],
                             "behavlet_name": behavlet.name,
                             "instance_idx": i,
-                            "start_gamestep": gamestep[0] if isinstance(gamestep, tuple) else gamestep,
-                            "end_gamestep": gamestep[1] if isinstance(gamestep, tuple) else gamestep,
-                            "start_timestep": timestep[0] if isinstance(timestep, tuple) else timestep,
-                            "end_timestep": timestep[1] if isinstance(timestep, tuple) else timestep,
-                            "value_per_instance": behavlet.value_per_instance[i] if i < len(behavlet.value_per_instance) else None
+                            "start_gamestep": gamestep[0]
+                            if isinstance(gamestep, tuple)
+                            else gamestep,
+                            "end_gamestep": gamestep[1]
+                            if isinstance(gamestep, tuple)
+                            else gamestep,
+                            "start_timestep": timestep[0]
+                            if isinstance(timestep, tuple)
+                            else timestep,
+                            "end_timestep": timestep[1]
+                            if isinstance(timestep, tuple)
+                            else timestep,
+                            "instant_gamestep": behavlet.instant_gamestep[i]
+                            if i < len(behavlet.instant_gamestep)
+                            else None,
+                            "instant_position": behavlet.instant_position[i]
+                            if i < len(behavlet.instant_position)
+                            else None,
+                            "value_per_instance": behavlet.value_per_instance[i]
+                            if i < len(behavlet.value_per_instance)
+                            else None,
+                            "value_per_pill": behavlet.value_per_pill[i]
+                            if i < len(behavlet.value_per_pill)
+                            else None,
                         }
-                        instance_row = pd.DataFrame([instance_data])
-                        self.instance_details = pd.concat([self.instance_details, instance_row], ignore_index=True)
+                        for attr in behavlet.output_attributes:
+                            if attr not in [
+                                "value",
+                                "instances",
+                                "gamesteps",
+                                "timesteps",
+                                "value_per_instance",
+                                "instant_gamestep",
+                                "instant_position",
+                                "value_per_pill",
+                            ]:
+                                attr_value = getattr(behavlet, attr, None)
+                                if (
+                                    attr_value is not None
+                                    and isinstance(attr_value, list)
+                                    and i < len(attr_value)
+                                ):
+                                    instance_data[attr] = attr_value[i]
+                                else:
+                                    instance_data[attr] = None
+
+                        # Filter out None values to avoid FutureWarning
+                        filtered_instance_data = {
+                            k: v for k, v in instance_data.items() if v is not None
+                        }
+
+                        if (
+                            filtered_instance_data
+                        ):  # Only create DataFrame if we have non-None data
+                            instance_row = pd.DataFrame([filtered_instance_data])
+                            self.instance_details = pd.concat(
+                                [self.instance_details, instance_row], ignore_index=True
+                            )
+
+    def get_trajectories(self, behavlet_name: str, level_id: int | None = None):
+        """Get trajectories for a behavlet"""
+        if level_id is None:
+            level_ids = self.summary_results["level_id"].unique()
+        else:
+            level_ids = [level_id]
+
+        trajectories = []
+
+        for level_id in level_ids:
+            gamesteps = self.summary_results.loc[level_id, f"{behavlet_name}_gamesteps"]
+            if gamesteps is None:
+                continue
+            if isinstance(gamesteps, tuple):
+                gamesteps = [gamesteps]
+                timesteps = [
+                    self.summary_results.loc[level_id, f"{behavlet_name}_timesteps"]
+                ]
+                trajectory = self.reader.get_trajectory(
+                    game_states=gamesteps, get_timevalues=True
+                )
+                trajectory.metadata["behavlet"] = f"{behavlet_name}"
+                trajectories.append(trajectory)
+                for output_attribute in self.behavlets[behavlet_name].output_attributes:
+                    trajectory.metadata[output_attribute] = self.summary_results.loc[
+                        level_id, f"{behavlet_name}_{output_attribute}"
+                    ]
+                    trajectory.metadata["instance_idx"] = 0
+
+            elif isinstance(gamesteps, list):
+                for idx, gamestep in enumerate(gamesteps):
+                    trajectory = self.reader.get_trajectory(
+                        game_states=gamestep, get_timevalues=True
+                    )
+                    trajectory.metadata["behavlet"] = f"{behavlet_name}"
+                    for output_attribute in self.behavlets[
+                        behavlet_name
+                    ].output_attributes:
+                        trajectory.metadata[output_attribute] = (
+                            self.summary_results.loc[
+                                level_id, f"{behavlet_name}_{output_attribute}"
+                            ]
+                        )
+                        trajectory.metadata["instance_idx"] = idx
+                    trajectories.append(trajectory)
             else:
-                # Even if no instances, record the behavlet was calculated
-                instance_data = {
-                    "level_id": metadata["level_id"],
-                    "user_id": metadata["user_id"],
-                    "behavlet_name": behavlet.name,
-                    "instance_idx": None,
-                    "start_gamestep": None,
-                    "end_gamestep": None,
-                    "start_timestep": None,
-                    "end_timestep": None,
-                    "value_per_instance": None
-                }
-                instance_row = pd.DataFrame([instance_data])
-                self.instance_details = pd.concat([self.instance_details, instance_row], ignore_index=True)
+                raise ValueError(f"Invalid type for gamesteps: {type(gamesteps)}")
 
-        ## Store special attributes (for complex nested data like value_per_pill, died)
-        for behavlet in results:
-            for attr in behavlet.output_attributes:
-                if attr not in ['value', 'instances', 'gamesteps', 'timesteps', 'value_per_instance']:
-                    attr_value = getattr(behavlet, attr, None)
-                    if attr_value is not None and (isinstance(attr_value, list) and len(attr_value) > 0):
-                        special_data = {
-                            "level_id": metadata["level_id"],
-                            "user_id": metadata["user_id"],
-                            "behavlet_name": behavlet.name,
-                            "attribute_name": attr,
-                            "attribute_value": attr_value
-                        }
-                        special_row = pd.DataFrame([special_data])
-                        self.special_attributes = pd.concat([self.special_attributes, special_row], ignore_index=True)
-
-        return
-
+        return trajectories
 
     def behavlet_path_geom_clustering(self, behavlets: list[Behavlets]):
         raise NotImplementedError
@@ -193,10 +281,10 @@ class BehavletsEncoding:
             - Each instance of the behavlet will be saved as a separate video file
         """
         if behavlet.value == 0:
-            logger.info("Behavlet has a value of 0, no visualization created")
+            logger.debug("Behavlet has a value of 0, no visualization created")
             return
         elif len(behavlet.gamesteps) == 0:
-            logger.info(
+            logger.debug(
                 "Behavlet has non-zero value, but is not defined in any slice of gameplay, no visualization created"
             )
             return
@@ -252,10 +340,10 @@ class BehavletsEncoding:
                     save_format=save_format,
                 )
                 animate_time = time.time() - animate_start
-                logger.info(f"Animation took {animate_time:.3f} seconds")
+                logger.debug(f"Animation took {animate_time:.3f} seconds")
 
                 total_time = time.time() - start_time
-                logger.info(
+                logger.debug(
                     f"Total processing time for instance {idx}: {total_time:.3f} seconds"
                 )
 
