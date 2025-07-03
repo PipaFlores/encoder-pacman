@@ -32,15 +32,25 @@ def _compute_distance_chunk(args):
     return results
 
 def _compute_distance_chunk_with_progress(args):
-    """Helper function to compute distances for a chunk with individual progress updates."""
+    """Helper function to compute distances for a chunk with batched progress updates."""
     similarity_measures, trajectories, indices, progress_queue = args
     results = []
-    for i, j in indices:
+    batch_size = 10  # Update progress every 10 calculations
+    
+    for idx, (i, j) in enumerate(indices):
         distance = similarity_measures.calculate_distance(trajectories[i], trajectories[j])
         results.append((i, j, distance))
-        # Update progress for each calculation
-        if progress_queue is not None:
-            progress_queue.put(1)
+        
+        # Batch progress updates to reduce IOPub message rate
+        if progress_queue is not None and (idx + 1) % batch_size == 0:
+            progress_queue.put(batch_size)
+    
+    # Send remaining progress for incomplete batch
+    if progress_queue is not None:
+        remaining = len(indices) % batch_size
+        if remaining > 0:
+            progress_queue.put(remaining)
+    
     return results
 
 class GeomClustering:
@@ -644,7 +654,7 @@ class GeomClustering:
         show_setup_progress: bool = True
     ) -> np.ndarray:
         """
-        Calculate affinity matrix with improved progress tracking and setup monitoring.
+        Calculate affinity matrix with improved progress tracking and reduced IOPub messages.
         """
         logger.info("Calculating affinity matrix with improved CPU parallelization")
         time_start = time.time()
@@ -654,36 +664,30 @@ class GeomClustering:
         
         num_trajectories = len(trajectories)
         
-        # Show setup progress
+        # Show setup progress (reduced output)
         if show_setup_progress:
-            print(f"Setting up calculation for {num_trajectories} trajectories...")
-            print(f"Total pairs to calculate: {num_trajectories * (num_trajectories - 1) // 2}")
+            print(f"Setup: {num_trajectories} trajectories, {num_trajectories * (num_trajectories - 1) // 2} pairs")
         
-        # Pre-allocate matrix (this can be slow for large matrices)
+        # Pre-allocate matrix
         setup_start = time.time()
         self.affinity_matrix = np.zeros((num_trajectories, num_trajectories))
-        if show_setup_progress:
-            print(f"Matrix allocation took {time.time() - setup_start:.2f}s")
+        if show_setup_progress and (time.time() - setup_start) > 0.1:  # Only show if slow
+            print(f"Matrix allocation: {time.time() - setup_start:.2f}s")
         
-        # Generate all upper triangular indices
-        indices_start = time.time()
+        # Generate indices
         indices = [(i, j) for i in range(num_trajectories) for j in range(i + 1, num_trajectories)]
         total_pairs = len(indices)
-        if show_setup_progress:
-            print(f"Index generation took {time.time() - indices_start:.2f}s")
         
-        # Use smaller chunks for better progress granularity
+        # Use smaller chunks but not too small to avoid overhead
         if self.similarity_measures.measure_type in ["dtw", "dtw_optimized", "EDR", "LCSS", "frechet"]:
-            # For DTW, use much smaller chunks for better progress visibility
-            base_chunk_size = max(1, min(50, total_pairs // (n_jobs * 10)))
+            base_chunk_size = max(20, min(100, total_pairs // (n_jobs * 5)))
         else:
-            base_chunk_size = max(1, total_pairs // (n_jobs * 4))
+            base_chunk_size = max(10, total_pairs // (n_jobs * 4))
         
         chunks = [indices[i:i + base_chunk_size] for i in range(0, len(indices), base_chunk_size)]
         
         if show_setup_progress:
-            print(f"Created {len(chunks)} chunks of size ~{base_chunk_size}")
-            print("Starting multiprocessing calculation...")
+            print(f"Starting parallel calculation: {len(chunks)} chunks, ~{base_chunk_size} pairs each")
         
         # Use a manager for progress tracking across processes
         with Manager() as manager:
@@ -694,7 +698,7 @@ class GeomClustering:
             
             # Start progress monitoring in a separate thread
             progress_thread = threading.Thread(
-                target=self._monitor_progress, 
+                target=self._monitor_progress_batched, 
                 args=(progress_queue, total_pairs, time_start)
             )
             progress_thread.daemon = True
@@ -706,118 +710,93 @@ class GeomClustering:
             
             # Stop progress monitoring
             progress_queue.put(None)  # Signal to stop
-            progress_thread.join(timeout=1)
+            progress_thread.join(timeout=2)
         
         # Fill the affinity matrix
-        fill_start = time.time()
         for chunk_result in chunk_results:
             for i, j, distance in chunk_result:
                 self.affinity_matrix[i, j] = distance
-                self.affinity_matrix[j, i] = distance  # Symmetric matrix
+                self.affinity_matrix[j, i] = distance
         
-        if show_setup_progress:
-            print(f"Matrix filling took {time.time() - fill_start:.2f}s")
-        
-        logger.info(f"Improved parallel affinity matrix calculation complete in {round(time.time() - time_start, 2)} seconds")
+        total_time = time.time() - time_start
+        logger.info(f"Parallel calculation complete in {total_time:.2f}s")
         return self.affinity_matrix
     
-    def _monitor_progress(self, progress_queue, total_pairs, start_time):
-        """Monitor progress from the queue and update tqdm."""
+    def _monitor_progress_batched(self, progress_queue, total_pairs, start_time):
+        """Monitor progress with batched updates to reduce IOPub message rate."""
         completed = 0
-        with tqdm.tqdm(total=total_pairs, desc="DTW calculations") as pbar:
+        update_interval = max(1, total_pairs // 200)  # Update at most 200 times total
+        
+        with tqdm.tqdm(total=total_pairs, desc="DTW calculations", 
+                       mininterval=0.5, maxinterval=2.0) as pbar:  # Limit update frequency
             while True:
                 try:
-                    # Non-blocking check for progress updates
-                    update = progress_queue.get(timeout=0.1)
+                    update = progress_queue.get(timeout=0.5)  # Less frequent checks
                     if update is None:  # Stop signal
                         break
+                    
                     completed += update
                     pbar.update(update)
                     
-                    # Update description with timing info
-                    elapsed = time.time() - start_time
-                    if completed > 0:
-                        rate = completed / elapsed
-                        eta = (total_pairs - completed) / rate if rate > 0 else 0
-                        pbar.set_postfix({
-                            'rate': f'{rate:.1f}/s',
-                            'eta': f'{eta:.0f}s'
-                        })
+                    # Update timing info less frequently
+                    if completed % update_interval == 0 or completed >= total_pairs:
+                        elapsed = time.time() - start_time
+                        if completed > 0:
+                            rate = completed / elapsed
+                            eta = (total_pairs - completed) / rate if rate > 0 else 0
+                            pbar.set_postfix({
+                                'rate': f'{rate:.1f}/s',
+                                'eta': f'{eta:.0f}s'
+                            }, refresh=False)  # Don't force refresh
+                            
                 except:
                     continue
     
-    def calculate_affinity_matrix_with_timing_analysis(
+    def calculate_affinity_matrix_with_simple_progress(
         self, trajectories: List[Trajectory] | np.ndarray | List[np.ndarray]
     ) -> np.ndarray:
         """
-        Calculate affinity matrix with detailed timing analysis to identify bottlenecks.
+        Calculate affinity matrix with minimal progress updates to avoid IOPub issues.
         """
-        logger.info("Calculating affinity matrix with timing analysis")
+        logger.info("Calculating affinity matrix with simple progress tracking")
         time_start = time.time()
         
         num_trajectories = len(trajectories)
-        
-        # Analyze trajectory sizes
-        traj_lengths = [len(traj) for traj in trajectories]
-        print(f"Trajectory statistics:")
-        print(f"  Count: {num_trajectories}")
-        print(f"  Length range: {min(traj_lengths)} - {max(traj_lengths)}")
-        print(f"  Average length: {np.mean(traj_lengths):.1f}")
-        
-        # Matrix allocation timing
-        alloc_start = time.time()
         self.affinity_matrix = np.zeros((num_trajectories, num_trajectories))
-        alloc_time = time.time() - alloc_start
-        print(f"Matrix allocation: {alloc_time:.3f}s")
         
-        # Sample a few calculations to estimate timing
-        sample_start = time.time()
-        sample_indices = [(0, 1), (0, 2), (1, 2)] if num_trajectories > 2 else [(0, 1)]
-        for i, j in sample_indices[:min(3, len(sample_indices))]:
-            calc_start = time.time()
-            _ = self.similarity_measures.calculate_distance(trajectories[i], trajectories[j])
-            calc_time = time.time() - calc_start
-            print(f"Sample DTW({i},{j}): {calc_time:.3f}s (trajectories: {len(trajectories[i])}, {len(trajectories[j])})")
-        
-        sample_time = time.time() - sample_start
-        print(f"Sample calculations: {sample_time:.3f}s")
-        
-        # Estimate total time
-        avg_sample_time = sample_time / len(sample_indices)
         total_pairs = num_trajectories * (num_trajectories - 1) // 2
-        estimated_time = avg_sample_time * total_pairs
-        print(f"Estimated total time (single-threaded): {estimated_time:.1f}s")
-        
-        # Actual calculation with fine-grained progress
-        calc_start = time.time()
         completed = 0
         
-        with tqdm.tqdm(total=total_pairs, desc="DTW calculations") as pbar:
+        # Update progress only every N calculations to reduce messages
+        update_every = max(1, total_pairs // 50)  # Maximum 50 updates total
+        
+        print(f"Calculating {total_pairs} DTW distances...")
+        
+        with tqdm.tqdm(total=total_pairs, desc="DTW calculations", 
+                       mininterval=1.0) as pbar:  # Update at most once per second
             for i in range(num_trajectories):
                 for j in range(i + 1, num_trajectories):
-                    pair_start = time.time()
                     distance = self.similarity_measures.calculate_distance(trajectories[i], trajectories[j])
-                    pair_time = time.time() - pair_start
                     
                     self.affinity_matrix[i, j] = distance
                     self.affinity_matrix[j, i] = distance
                     
                     completed += 1
-                    pbar.update(1)
                     
-                    # Update with timing info every 10 calculations
-                    if completed % 10 == 0:
-                        elapsed = time.time() - calc_start
+                    # Only update progress bar periodically
+                    if completed % update_every == 0 or completed == total_pairs:
+                        pbar.update(min(update_every, total_pairs - pbar.n))
+                        
+                        # Update timing info
+                        elapsed = time.time() - time_start
                         rate = completed / elapsed
                         eta = (total_pairs - completed) / rate if rate > 0 else 0
                         pbar.set_postfix({
-                            'last': f'{pair_time:.3f}s',
                             'rate': f'{rate:.1f}/s',
                             'eta': f'{eta:.0f}s'
-                        })
+                        }, refresh=False)
         
         total_time = time.time() - time_start
-        logger.info(f"Timing analysis complete in {total_time:.2f}s")
-        
+        logger.info(f"Simple calculation complete in {total_time:.2f}s")
         return self.affinity_matrix
 
