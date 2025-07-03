@@ -18,10 +18,8 @@ class BehavletsEncoding:
     A class to perform the calculation, analysis and visualizations of Behavlets (Cowley & Charles, 2016)
 
     TODO:
-    - Data structure for results
-      - All attributes, full with none values it doesnt matter
 
-    - Trajectory extractions of behavlets (Gett all trajectories where X behavlet happens)
+    - Trajectory extractions of behavlets (Get all trajectories where X behavlet happens)
     - Aggregate visualizations (Heatmaps and velocity grids)
     - Maybe avoid clustering procedure in this script.
 
@@ -194,7 +192,9 @@ class BehavletsEncoding:
                             )
 
     def get_trajectories(self, behavlet_name: str, level_id: int | None = None):
-        """Get trajectories for a behavlet"""
+        """Get trajectories for a behavlet type, from the summary results.
+        If level_id is provided, only trajectories for that level are returned.
+        """
         if level_id is None:
             level_ids = self.summary_results["level_id"].unique()
         else:
