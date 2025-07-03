@@ -1,10 +1,10 @@
 all: format lint test
 
 format:
-	ruff format
+	ruff format --exclude notebook,playground
 
 lint:
-	ruff check --fix-only
+	ruff check --fix-only --exclude notebook,playground
 
 test:
 	pytest -v

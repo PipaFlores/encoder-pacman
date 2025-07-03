@@ -104,7 +104,7 @@ class PacmanDataReader:
         else:
             logger.setLevel("WARNING")
 
-    def _read_data(self, read_games_only: bool):
+    def _read_data(self, read_games_only: bool, force_preprocess: bool = False):
         """
         Initialize the dataframes.
         Reads the data from the data folder and filters out banned users.
@@ -152,7 +152,7 @@ class PacmanDataReader:
         self.game_df, self.level_df, self.gamestate_df = self._restructure_game_data()
 
         ## If pellet positions have not been processed (using the .csv)
-        if "available_pellets" not in self.gamestate_df.columns:
+        if "available_pellets" not in self.gamestate_df.columns or force_preprocess:
             logger.warning(
                 "Calculating pellet positions for each game state in pacman game, estimated time of 10-15 minutes"
             )

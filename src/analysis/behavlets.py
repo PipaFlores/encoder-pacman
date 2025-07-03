@@ -2,8 +2,9 @@ import pandas as pd
 import numpy as np
 import math
 from typing import Callable, NamedTuple
-from src.utils import setup_logger
+from src.utils import setup_logger, Astar
 from src.analysis.behavlets_config import BehavletsConfig
+
 
 ## TODO = Expand all behavlets to include simple features such as quadrant idx or geometrical space.
 
@@ -109,6 +110,7 @@ class Behavlets:
         self.value_per_pill = []  ## e.g., Aggression4 counts for each pill in the game
 
         self.instant_gamestep = []  ## For point-based behavlets, the gamestep of the instant when the behavlet is observed
+        self.instant_timestep = []  ## For point-based behavlets, the timestep of the instant when the behavlet is observed
         self.instant_position = []  ## For point-based behavlets, the position of the instant when the behavlet is observed
 
         self.died = []  ## Did the player died during the behavlet observation?
@@ -173,9 +175,16 @@ class Behavlets:
         """Reset behavlet values to 0 for fresh calculations"""
 
         self.value = 0
+        self.instances = 0
         self.gamesteps = []
         self.timesteps = []
-        self.instances = 0
+
+        self.value_per_instance = []
+        self.value_per_pill = []
+        self.instant_gamestep = []
+        self.instant_timestep = []
+        self.instant_position = []
+        self.died =[]
 
     def _Aggression1(self, gamestates: pd.DataFrame, **kwargs):
         """
@@ -340,7 +349,7 @@ class Behavlets:
         The behavlet counts each ghost kill as a separate instance and records the
         gamesteps and timesteps around each kill for visualization and analysis purposes.
 
-        Args:
+        Parameters:
             gamestates (pd.DataFrame): DataFrame containing game state data
             CONTEXT_LENGTH (int): Number of frames to include before and after each ghost kill
                                for visualization purposes. Defaults to 10.
@@ -356,6 +365,7 @@ class Behavlets:
             "gamesteps",
             "timesteps",
             "instant_gamestep",
+            "instant_timestep",
             "instant_position",
         ]
 
@@ -396,6 +406,7 @@ class Behavlets:
                     )
                     self.instant_gamestep.append(state.Index)
                     self.instant_position.append((state.Pacman_X, state.Pacman_Y))
+                    self.instant_timestep.append(state.time_elapsed)
                     self.timesteps.append(state.time_elapsed)
             previous_ghost_states = new_ghost_states
 
@@ -411,7 +422,7 @@ class Behavlets:
         powerpill separately and records the gamesteps and timesteps around these instances
         for visualization and analysis.
 
-        Args:
+        Parameters:
             gamestates (pd.DataFrame): DataFrame containing game state data
             SEARCH_WINDOW (int): Number of frames to include before and after each instance
                                for visualization purposes. Defaults to 10.
@@ -737,6 +748,51 @@ class Behavlets:
             self.value = sum(valid_values)
 
         return
+    
+    def _Caution1(self, gamestates: pd.DataFrame, **kwargs):
+        """
+        Times trapped by Ghosts
+        
+        Pacman trapped in corridor by ghosts, and possibly losing a life.
+
+        Parameters:
+            gamestates (pd.DataFrame): DataFrame containing game state data
+            CONTEXT_LENGTH (int): Number of frames to include before and after each instance
+                               for visualization purposes. Defaults to 10.
+            SEARCH_WINDOW (int): Number of frames to look ahead from the moment Pacman is trapped, to check if Pacman loses a life.
+            GHOST_DISTANCE_THRESHOLD (int): Distance threshold to consider a ghost as a threat.
+
+            
+        Returns:
+        """
+        self.full_name = "Caution 1 - Times trapped by Ghosts"
+        self.measurement_type = "interval"
+        self.output_attributes = [
+            "value",
+            "instances",
+            "gamesteps",
+            "timesteps",
+            "instant_gamestep",
+            "instant_timestep",
+            "instant_position",
+            "died"
+        ]
+
+        CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
+        SEARCH_WINDOW = kwargs.get("SEARCH_WINDOW", 10)
+        GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 5)
+
+        logger.debug(
+            f"Calculating Caution 1 with CONTEXT_LENGTH={CONTEXT_LENGTH}, "
+            f"SEARCH_WINDOW={SEARCH_WINDOW}, "
+            f"GHOST_DISTANCE_THRESHOLD={GHOST_DISTANCE_THRESHOLD}"
+        )
+
+        final_state = len(gamestates) - 1
+
+        for i, state in enumerate(gamestates.itertuples()):
+            raise NotImplementedError
+
 
     ##### Utility Functions
 

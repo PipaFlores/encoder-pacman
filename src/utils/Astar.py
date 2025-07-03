@@ -1,3 +1,5 @@
+import math
+
 def manhattan_distance(pos1, pos2):
     """Calculate the Manhattan distance between two positions."""
     return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
@@ -39,7 +41,7 @@ def generate_squared_walls(wall_positions):
     return squared_walls
 
 
-def get_neighbors(pos, wall_positions, step):
+def get_neighbors(pos, wall_positions, step, blocked_positions= None):
     """Get valid neighboring positions (up, right, down, left)."""
     TUNNEL_POS = [(-13.5, -0.5), (13.5, -0.5)]
     x, y = pos
@@ -49,7 +51,10 @@ def get_neighbors(pos, wall_positions, step):
         (x, y - step),  # down
         (x - step, y),  # left
     ]
-    valid_neighbors = [(x, y) for (x, y) in neighbors if (x, y) not in wall_positions]
+    if blocked_positions is None:
+        valid_neighbors = [(x, y) for (x, y) in neighbors if (x, y) not in wall_positions]
+    else:
+        valid_neighbors = [(x, y) for (x, y) in neighbors if (x, y) not in wall_positions and (x, y) not in blocked_positions]
 
     # Add the other tunnel position as a neighbor if in tunnel
     if pos == TUNNEL_POS[0]:
@@ -59,10 +64,9 @@ def get_neighbors(pos, wall_positions, step):
 
     return valid_neighbors
 
-    # return [(x, y) for (x, y) in neighbors if (x, y) not in wall_positions]
 
 
-def calculate_path_and_distance(start, goal, grid):
+def calculate_path_and_distance(start, goal, grid, blocked_positions= None):
     """
     Calculate shortest path and distance between two points using A* algorithm.
 
@@ -70,6 +74,7 @@ def calculate_path_and_distance(start, goal, grid):
         start (tuple): Starting position (x, y)
         goal (tuple): Goal position (x, y)
         grid (set): Set of wall positions, discretized to 0.5 units.
+        blocked_positions (set): Set of positions that are blocked. (e.g., ghost positions)
 
     Returns:
         tuple: (path, distance) where path is a list of positions and distance is the path length
@@ -77,6 +82,10 @@ def calculate_path_and_distance(start, goal, grid):
     from heapq import heappush, heappop
 
     STEP = 0.5
+    if blocked_positions is not None:
+        if goal in blocked_positions: # if the goal is blocked, return an empty path and infinity distance
+            return [], math.inf
+
     frontier = []
     heappush(frontier, (0, start))
 
@@ -95,7 +104,7 @@ def calculate_path_and_distance(start, goal, grid):
             path.reverse()
             return path, cost_so_far[goal]
 
-        for next_pos in get_neighbors(current, grid, STEP):
+        for next_pos in get_neighbors(current, grid, STEP, blocked_positions):
             new_cost = cost_so_far[current] + STEP
 
             if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
@@ -107,7 +116,7 @@ def calculate_path_and_distance(start, goal, grid):
     return [], float("inf")  # No path found
 
 
-def calculate_ghost_paths_and_distances(pacman_pos, ghost_positions, grid):
+def calculate_ghost_paths_and_distances(pacman_pos, ghost_positions, grid, blocked_positions= None):
     """
     Calculate the shortest paths and distances between Pacman and all ghosts.
 
@@ -115,6 +124,7 @@ def calculate_ghost_paths_and_distances(pacman_pos, ghost_positions, grid):
         pacman_pos (tuple): Pacman's position (x, y)
         ghost_positions (list): List of ghost positions [(x, y), ...]
         grid (set): Set of wall positions, discretized to 0.5 units.
+        blocked_positions (set): Set of positions that are blocked. 
 
     Returns:
         list: Tuples of (path, distance) to each ghost, in the same order as ghost_positions
@@ -128,7 +138,7 @@ def calculate_ghost_paths_and_distances(pacman_pos, ghost_positions, grid):
     results = []
     for ghost_pos in ghost_pos_transformed:
         path, distance = calculate_path_and_distance(
-            ghost_pos, pacman_pos_transformed, grid
+            ghost_pos, pacman_pos_transformed, grid, blocked_positions
         )
         results.append(([(pos[0], pos[1]) for pos in path], distance))
     return results
