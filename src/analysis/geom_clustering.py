@@ -13,10 +13,20 @@ from src.datahandlers import Trajectory
 from src.utils import setup_logger
 from bokeh.plotting import show, row
 import time
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # Initialize module-level logger
 logger = setup_logger(__name__)
 
+def _compute_distance_chunk(args):
+    """Helper function to compute distances for a chunk of trajectory pairs."""
+    similarity_measures, trajectories, indices = args
+    results = []
+    for i, j in indices:
+        distance = similarity_measures.calculate_distance(trajectories[i], trajectories[j])
+        results.append((i, j, distance))
+    return results
 
 class GeomClustering:
     """
@@ -560,3 +570,55 @@ class GeomClustering:
 
         logger.debug("Cluster centroids calculated")
         return np.array(cluster_centroids), np.array(cluster_sizes)
+    def calculate_affinity_matrix_parallel_cpu(
+        self, trajectories: List[Trajectory] | np.ndarray | List[np.ndarray], 
+        n_jobs: int = None, chunk_size_multiplier: int = 1
+    ) -> np.ndarray:
+        """
+        Calculate affinity matrix using CPU multiprocessing with optimized chunking for DTW.
+        """
+        logger.info("Calculating affinity matrix with CPU parallelization")
+        time_start = time.time()
+        
+        if n_jobs is None:
+            n_jobs = cpu_count()
+        
+        num_trajectories = len(trajectories)
+        self.affinity_matrix = np.zeros((num_trajectories, num_trajectories))
+        
+        # Generate all upper triangular indices
+        indices = [(i, j) for i in range(num_trajectories) for j in range(i + 1, num_trajectories)]
+        total_pairs = len(indices)
+        
+        # Optimize chunk size based on similarity measure
+        if self.similarity_measures.measure_type in ["dtw", "dtw_optimized", "EDR", "LCSS", "frechet"]:
+            # For expensive operations, use larger chunks to reduce overhead
+            base_chunk_size = max(10, total_pairs // (n_jobs * chunk_size_multiplier))
+        else:
+            # For cheap operations, use smaller chunks for better load balancing  
+            base_chunk_size = max(1, total_pairs // (n_jobs * 4))
+        
+        chunks = [indices[i:i + base_chunk_size] for i in range(0, len(indices), base_chunk_size)]
+        
+        # Prepare arguments for each chunk
+        chunk_args = [(self.similarity_measures, trajectories, chunk) for chunk in chunks]
+        
+        logger.info(f"Processing {total_pairs} pairs using {n_jobs} cores in {len(chunks)} chunks (chunk_size: {base_chunk_size}), with similarity measure: {self.similarity_measures.measure_type}")
+        
+        # Process chunks in parallel
+        with Pool(n_jobs) as pool:
+            with tqdm.tqdm(total=len(chunks), desc="Processing chunks") as pbar:
+                chunk_results = []
+                for result in pool.map(_compute_distance_chunk, chunk_args):
+                    chunk_results.append(result)
+                    pbar.update(1)
+        
+        # Fill the affinity matrix
+        for chunk_result in chunk_results:
+            for i, j, distance in chunk_result:
+                self.affinity_matrix[i, j] = distance
+                self.affinity_matrix[j, i] = distance  # Symmetric matrix
+        
+        logger.info(f"Parallel affinity matrix calculation complete in {round(time.time() - time_start, 2)} seconds")
+        return self.affinity_matrix
+
