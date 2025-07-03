@@ -13,7 +13,6 @@ class SimilarityMeasures:
     A class for calculating different similarity measures between trajectories.
     """
 
-    MEASURES = ["euclidean", "manhattan", "dtw", "EDR", "LCSS", "hausdorff", "frechet"]
 
     @property
     def MEASURE_FUNCTIONS(self) -> Dict[str, Callable]:
@@ -22,6 +21,7 @@ class SimilarityMeasures:
             "euclidean": self.calculate_euclidean_distance,
             "manhattan": self.calculate_manhattan_distance,
             "dtw": self.calculate_dtw_distance,
+            "dtw_optimized": self.calculate_dtw_distance_optimized,
             "EDR": self.calculate_edr_distance,
             "LCSS": self.calculate_lcss_distance,
             "hausdorff": self.calculate_hausdorff_distance,
@@ -38,9 +38,9 @@ class SimilarityMeasures:
         Raises:
             ValueError: If measure_type is not a valid measure
         """
-        if measure_type not in self.MEASURES:
+        if measure_type not in self.MEASURE_FUNCTIONS.keys():
             raise ValueError(
-                f"Invalid measure type: {measure_type}. Must be one of: {', '.join(self.MEASURES)}"
+                f"Invalid measure type: {measure_type}. Must be one of: {', '.join(self.MEASURE_FUNCTIONS.keys())}"
             )
         self.measure_type = measure_type
 
@@ -136,6 +136,44 @@ class SimilarityMeasures:
             return dtw_matrix
         else:
             return dtw_matrix[-1, -1]  # last element of the matrix, total distance
+
+    def calculate_dtw_distance_optimized(
+        self, trajectory1: np.ndarray, trajectory2: np.ndarray, 
+        window: int = None, _return_matrix: bool = False
+    ) -> float:
+        """
+        Optimized DTW with optional Sakoe-Chiba band constraint.
+        """
+        n, m = len(trajectory1), len(trajectory2)
+        
+        # Optional: limit search to a window around the diagonal (speeds up DTW significantly)
+        if window is None:
+            window = max(n, m)  # No constraint
+        
+        # Use more efficient array initialization
+        dtw_matrix = np.full((n + 1, m + 1), np.inf, dtype=np.float32)  # Use float32 for memory
+        dtw_matrix[0, 0] = 0
+        
+        # Use the same coordinate access pattern as the original DTW
+        for i in range(1, n + 1):
+            j_start = max(1, i - window)
+            j_end = min(m + 1, i + window + 1)
+            
+            for j in range(j_start, j_end):
+                # Calculate Euclidean distance between points (same as original)
+                cost = np.sqrt(
+                    (trajectory1[i - 1, 0] - trajectory2[j - 1, 0]) ** 2
+                    + (trajectory1[i - 1, 1] - trajectory2[j - 1, 1]) ** 2
+                )
+                
+                # Dynamic programming step
+                dtw_matrix[i, j] = cost + min(
+                    dtw_matrix[i-1, j],      # insertion
+                    dtw_matrix[i, j-1],      # deletion  
+                    dtw_matrix[i-1, j-1]     # match
+                )
+        
+        return dtw_matrix if _return_matrix else dtw_matrix[n, m]
 
     def _plot_dtw_path(self, trajectory1, trajectory2, ax: plt.Axes | None = None):
         """
