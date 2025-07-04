@@ -224,6 +224,8 @@ class BehavletsEncoding:
 
             elif isinstance(gamesteps, list):
                 for idx, gamestep in enumerate(gamesteps):
+                    if gamestep is None:
+                        continue
                     trajectory = self.reader.get_trajectory(
                         game_states=gamestep, get_timevalues=True
                     )
