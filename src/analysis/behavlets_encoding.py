@@ -2,6 +2,8 @@ import os
 import time
 from typing import List
 import pandas as pd
+import multiprocessing as mp
+from functools import partial
 
 from src.datahandlers import PacmanDataReader
 from src.visualization import GameReplayer
@@ -13,16 +15,57 @@ from .behavlets import Behavlets
 logger = setup_logger(__name__)
 
 
+def _calculate_single_level(level_id, data_folder, behavlet_types, verbose=False, debug=False):
+    """
+    Calculate behavlets for a single level in isolation.
+    This function needs to be at module level to be pickleable for multiprocessing.
+    
+    Args:
+        level_id: The level id to calculate behavlets for
+        data_folder: Path to the data folder
+        behavlet_types: Which behavlets to calculate ("all", str, or list[str])
+        verbose: Enable verbose logging
+        debug: Enable debug logging
+        
+    Returns:
+        dict: Contains level_id and the three result dataframes
+    """
+    try:
+        # Each process gets its own BehavletsEncoding instance
+        encoder = BehavletsEncoding(
+            data_folder=data_folder, 
+            verbose=verbose, 
+            debug=debug
+        )
+        
+        # Calculate behavlets for this level
+        encoder.calculate_behavlets(level_id=level_id, behavlet_type=behavlet_types)
+        
+        # Return the results instead of storing in instance variables
+        return {
+            'level_id': level_id,
+            'summary_results': encoder.summary_results,
+            'instance_details': encoder.instance_details,
+            'special_attributes': encoder.special_attributes,
+            'success': True,
+            'error': None
+        }
+    except Exception as e:
+        # Return error information if something goes wrong
+        logger.error(f"Error processing level {level_id}: {str(e)}")
+        return {
+            'level_id': level_id,
+            'summary_results': pd.DataFrame(),
+            'instance_details': pd.DataFrame(),
+            'special_attributes': pd.DataFrame(),
+            'success': False,
+            'error': str(e)
+        }
+
+
 class BehavletsEncoding:
     """
-    A class to perform the calculation, analysis and visualizations of Behavlets (Cowley & Charles, 2016)
-
-    TODO:
-
-    - Trajectory extractions of behavlets (Get all trajectories where X behavlet happens)
-    - Aggregate visualizations (Heatmaps and velocity grids)
-    - Maybe avoid clustering procedure in this script.
-
+    A class to perform the calculation and storage of results of Behavlets encodings (Cowley & Charles, 2016)
     """
 
     def __init__(
@@ -37,6 +80,7 @@ class BehavletsEncoding:
             logger.setLevel("INFO")
 
         logger.info("Initializing BehavletsEncoding")
+        self.data_folder = data_folder  # Store data_folder for parallel processing
         self.reader = PacmanDataReader(data_folder=data_folder)
         self.behavlets = {
             name: Behavlets(name=name, verbose=verbose, debug=debug)
@@ -91,6 +135,133 @@ class BehavletsEncoding:
             raise ValueError(f"Invalid behavlet type: {behavlet_type}")
 
         self._store_results(results, metadata)
+
+    def calculate_behavlets_parallel(
+        self, 
+        level_ids: list[int], 
+        behavlet_type: str | list[str] = "all",
+        n_processes: int = None,
+        verbose: bool = False,
+        debug: bool = False
+    ):
+        """
+        Calculate behavlets for multiple levels in parallel using multiprocessing.
+        
+        Args:
+            level_ids: List of level IDs to process
+            behavlet_type: Which behavlets to calculate ("all", str, or list[str])
+            n_processes: Number of processes to use (defaults to min(cpu_count, len(level_ids)))
+            verbose: Enable verbose logging for worker processes
+            debug: Enable debug logging for worker processes
+            
+        Returns:
+            None: Results are stored in self.summary_results, self.instance_details, self.special_attributes
+        """
+        if not level_ids:
+            logger.warning("No level IDs provided for parallel calculation")
+            return
+            
+        if n_processes is None:
+            n_processes = min(mp.cpu_count(), len(level_ids))
+        
+        logger.info(f"Starting parallel calculation for {len(level_ids)} levels using {n_processes} processes")
+        start_time = time.time()
+        
+        # Create partial function with fixed arguments
+        calc_func = partial(
+            _calculate_single_level,
+            data_folder=self.data_folder,
+            behavlet_types=behavlet_type,
+            verbose=verbose,
+            debug=debug
+        )
+        
+        # Process levels in parallel
+        try:
+            with mp.Pool(n_processes) as pool:
+                results = pool.map(calc_func, level_ids)
+        except Exception as e:
+            logger.error(f"Error in parallel processing: {str(e)}")
+            raise
+        
+        # Track successful and failed calculations
+        successful_results = []
+        failed_levels = []
+        
+        for result in results:
+            if result['success']:
+                successful_results.append(result)
+            else:
+                failed_levels.append((result['level_id'], result['error']))
+        
+        # Report any failures
+        if failed_levels:
+            logger.warning(f"Failed to process {len(failed_levels)} levels:")
+            for level_id, error in failed_levels:
+                logger.warning(f"  Level {level_id}: {error}")
+        
+        # Merge successful results
+        logger.info(f"Merging results from {len(successful_results)} successful calculations")
+        
+        for result in successful_results:
+            if not result['summary_results'].empty:
+                self.summary_results = pd.concat(
+                    [self.summary_results, result['summary_results']], 
+                    ignore_index=False
+                )
+            
+            if not result['instance_details'].empty:
+                self.instance_details = pd.concat(
+                    [self.instance_details, result['instance_details']], 
+                    ignore_index=True
+                )
+            
+            if not result['special_attributes'].empty:
+                self.special_attributes = pd.concat(
+                    [self.special_attributes, result['special_attributes']], 
+                    ignore_index=True
+                )
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"Parallel calculation completed in {elapsed_time:.2f} seconds")
+        logger.info(f"Successfully processed {len(successful_results)}/{len(level_ids)} levels")
+
+    def calculate_all_levels_parallel(
+        self, 
+        behavlet_type: str | list[str] = "all",
+        n_processes: int = None,
+        batch_size: int = 100,
+        verbose: bool = False,
+        debug: bool = False
+    ):
+        """
+        Calculate behavlets for all available levels in parallel, processing in batches.
+        
+        Args:
+            behavlet_type: Which behavlets to calculate ("all", str, or list[str])
+            n_processes: Number of processes to use
+            batch_size: Number of levels to process in each batch (helps manage memory)
+            verbose: Enable verbose logging for worker processes
+            debug: Enable debug logging for worker processes
+        """
+        all_level_ids = self.reader.level_df["level_id"].tolist()
+        logger.info(f"Processing {len(all_level_ids)} levels in batches of {batch_size}")
+        
+        # Process in batches to manage memory
+        for i in range(0, len(all_level_ids), batch_size):
+            batch_ids = all_level_ids[i:i+batch_size]
+            batch_num = (i // batch_size) + 1
+            total_batches = (len(all_level_ids) + batch_size - 1) // batch_size
+            
+            logger.info(f"Processing batch {batch_num}/{total_batches} ({len(batch_ids)} levels)")
+            
+            self.calculate_behavlets_parallel(
+                level_ids=batch_ids,
+                behavlet_type=behavlet_type,
+                n_processes=n_processes,
+                verbose=verbose,
+                debug=debug
+            )
 
     def _store_results(self, results: list[Behavlets], metadata: pd.DataFrame):
         """Store behavlet results of a single level in a structured format"""
@@ -191,6 +362,17 @@ class BehavletsEncoding:
                                 [self.instance_details, instance_row], ignore_index=True
                             )
 
+    def get_vector_encodings(self):
+        """Get vector encodings from summary results, filtering for overall value columns."""
+        # Get all rows from summary_results
+        all_rows = self.summary_results
+        
+        # Filter columns to only include those ending with '_value'
+        value_columns = [col for col in all_rows.columns if col.endswith('_value')]
+        
+        # Return the filtered DataFrame with only value columns
+        return all_rows[value_columns]
+
     def get_trajectories(self, behavlet_name: str, level_id: int | None = None):
         """Get trajectories for a behavlet type, from the summary results.
         If level_id is provided, only trajectories for that level are returned.
@@ -250,8 +432,7 @@ class BehavletsEncoding:
 
     def create_replay(
         self,
-        behavlet: Behavlets,
-        instance: str | int | list[int] = "all",
+        instance_row: pd.Series,
         folder_path: str = "temp",
         save_format: str = "mp4",
         path_prefix: str = None,
@@ -259,16 +440,15 @@ class BehavletsEncoding:
         **kwargs,
     ):
         """
-        Creates and stores a visualization of behavlets using GameReplayer.
+        Creates and stores a visualization of a behavlet instance using GameReplayer.
 
         This method generates a video replay of the gameplay segment where a specific behavlet
         instance occurs. The replay is saved to the specified folder path in the given format.
 
         Args:
-            behavlet (Behavlets): The behavlet instance to visualize
-            instance (str | int): The specific instance/index, starting from 0, of the behavlet to visualize.
-                If "all", visualizes all instances. Defaults to "all".
-
+            instance_row (pd.Series): A row from self.instance_details dataframe containing
+                the behavlet instance information including instance_idx, start_gamestep, 
+                end_gamestep, behavlet name, and other metadata.
             folder_path (str): Path where the replay videos will be saved. Defaults to "temp".
             save_format (str): Format to save the video in (e.g., "mp4", "gif"). Defaults to "mp4".
             path_prefix (str): Optional prefix to add to the saved file name. Defaults to None.
@@ -278,75 +458,51 @@ class BehavletsEncoding:
             None: The method saves the visualization files but does not return anything.
 
         Note:
-            - If the behavlet has a value of 0, no visualization is created
-            - If the behavlet has no defined gameplay segments, no visualization is created
-            - Each instance of the behavlet will be saved as a separate video file
+            - The method uses the instance_idx, start_gamestep, and end_gamestep from the instance_row
+            - Each instance will be saved as a separate video file
         """
-        if behavlet.value == 0:
-            logger.debug("Behavlet has a value of 0, no visualization created")
+        # Extract information from the instance row
+        instance_idx = instance_row["instance_idx"]
+        start_gamestep = instance_row["start_gamestep"]
+        end_gamestep = instance_row["end_gamestep"]
+        behavlet_name = instance_row["behavlet_name"]
+        
+        # Get gamesteps as tuple
+        gamesteps = (start_gamestep, end_gamestep)
+        
+        if gamesteps is None or start_gamestep is None or end_gamestep is None:
+            logger.debug("Invalid gamesteps, no visualization created")
             return
-        elif len(behavlet.gamesteps) == 0:
-            logger.debug(
-                "Behavlet has non-zero value, but is not defined in any slice of gameplay, no visualization created"
-            )
-            return
-
-        if instance == "all":
-            instances = behavlet.gamesteps
-            timesteps = behavlet.timesteps
-            og_instance = list(range(len(behavlet.gamesteps)))
-        elif isinstance(instance, int):
-            instances = [behavlet.gamesteps[instance]]
-            og_instance = [instance]
-            timesteps = [behavlet.timesteps[instance]]
-        elif isinstance(instance, list):
-            if not isinstance(instance[0], int):
-                raise ValueError(
-                    f"Specific instances need to be given as a list of integers: {instance}"
-                )
-            if len(instance) > behavlet.instances:
-                raise ValueError(
-                    f"Requested more instances ({instance}) of {behavlet.name} than observed ({behavlet.instances})"
-                )
-
-            instances = []
-            timesteps = []
-            og_instance = instance
-            for value in instance:
-                instances.append(behavlet.gamesteps[value])
-                timesteps.append(behavlet.timesteps[value])
 
         os.makedirs(folder_path, exist_ok=True)
 
-        for idx, gamesteps in enumerate(instances):
-            if gamesteps is not None:
-                start_time = time.time()
+        start_time = time.time()
 
-                save_path = os.path.join(
-                    folder_path,
-                    f"{path_prefix or ''}{behavlet.name}_{og_instance[idx]}{path_suffix or ''}.{save_format}",
-                )
+        save_path = os.path.join(
+            folder_path,
+            f"{path_prefix or ''}{behavlet_name}_{instance_idx}{path_suffix or ''}.{save_format}",
+        )
 
-                behavlet_slice = self.reader.gamestate_df.loc[
-                    gamesteps[0] : gamesteps[1]
-                ]
+        behavlet_slice = self.reader.gamestate_df.loc[
+            gamesteps[0] : gamesteps[1]
+        ]
 
-                replayer = GameReplayer(
-                    data=behavlet_slice, pathfinding=kwargs.get("pathfinding", False)
-                )
+        replayer = GameReplayer(
+            data=behavlet_slice, pathfinding=kwargs.get("pathfinding", False)
+        )
 
-                animate_start = time.time()
-                replayer.animate_session(
-                    save_path=save_path,
-                    title=f"Behavlet: {behavlet.full_name} instance {og_instance[idx]} at time {timesteps[idx]}",
-                    save_format=save_format,
-                )
-                animate_time = time.time() - animate_start
-                logger.debug(f"Animation took {animate_time:.3f} seconds")
+        animate_start = time.time()
+        replayer.animate_session(
+            save_path=save_path,
+            title=f"Behavlet: {behavlet_name} instance {instance_idx}",
+            save_format=save_format,
+        )
+        animate_time = time.time() - animate_start
+        logger.debug(f"Animation took {animate_time:.3f} seconds")
 
-                total_time = time.time() - start_time
-                logger.debug(
-                    f"Total processing time for instance {idx}: {total_time:.3f} seconds"
-                )
+        total_time = time.time() - start_time
+        logger.debug(
+            f"Total processing time for instance {instance_idx}: {total_time:.3f} seconds"
+        )
 
         return
