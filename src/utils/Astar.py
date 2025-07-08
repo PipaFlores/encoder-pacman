@@ -77,7 +77,8 @@ def calculate_path_and_distance(start, goal, grid, blocked_positions= None):
         blocked_positions (set): Set of positions that are blocked. (e.g., ghost positions)
 
     Returns:
-        tuple: (path, distance) where path is a list of positions and distance is the path length
+        tuple: (path, distance) where path is a list of positions and distance is the path length.
+        Returns `[], math.inf` if no path is found.
     """
     from heapq import heappush, heappop
 
@@ -113,7 +114,7 @@ def calculate_path_and_distance(start, goal, grid, blocked_positions= None):
                 heappush(frontier, (priority, next_pos))
                 came_from[next_pos] = current
 
-    return [], float("inf")  # No path found
+    return [], math.inf  # No path found
 
 
 def calculate_ghost_paths_and_distances(pacman_pos, ghost_positions, grid, blocked_positions= None):

@@ -20,7 +20,7 @@ class TestBehavlets:
         for behavlet_name in Behavlets.NAMES:
             beh = Behavlets(name=behavlet_name)
             assert beh.name == behavlet_name
-            assert beh.category in ["Aggression"]
+            assert beh.category in ["Aggression", "Caution"]
             assert beh.value == 0
             assert beh.instances == 0
             assert beh.gamesteps == []
