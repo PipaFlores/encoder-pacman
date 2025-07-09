@@ -66,7 +66,7 @@ class Caution1Config:
     Times trapped by ghost
     """
     CONTEXT_LENGTH = None
-    SEARCH_WINDOW =  10
+    # SEARCH_WINDOW =  10
     GHOST_DISTANCE_THRESHOLD = 5
     OPPOSITE_POSITIONS = {0 : (12.5,-9.5),
                           1: (-12.5,-9.5),

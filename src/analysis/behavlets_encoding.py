@@ -108,16 +108,12 @@ class BehavletsEncoding:
             None
         """
 
-        fitered_data = self.reader._filter_gamestate_data(
+        gamestates, metadata = self.reader._filter_gamestate_data(
             level_id=level_id, include_metadata=True
         )
-        gamestates = fitered_data[0]
-        metadata = fitered_data[1]
 
-        for behavlet in self.behavlets.values():
-            behavlet._reset_values()
 
-        results = []
+        results = [] # List of behavlet objects
 
         if behavlet_type == "all":
             for behavlet_name in self.behavlets.keys():
@@ -135,6 +131,24 @@ class BehavletsEncoding:
             raise ValueError(f"Invalid behavlet type: {behavlet_type}")
 
         self._store_results(results, metadata)
+
+    def calculate_behavlets_category(self, level_id, behavlet_category):
+        """
+        Calculates behavlets of a specific category for a single level
+        """
+
+        gamestates, metadata = self.reader._filter_gamestate_data(
+            level_id=level_id, include_metadata=True
+        )
+
+        results = []
+
+        for behavlet_name in self.behavlets.keys():
+            if self.behavlets[behavlet_name].category == behavlet_category:
+                results.append(self.behavlets[behavlet_name].calculate(gamestates))
+        
+        self._store_results(results, metadata)
+
 
     def calculate_behavlets_parallel(
         self, 
@@ -362,7 +376,7 @@ class BehavletsEncoding:
                                 [self.instance_details, instance_row], ignore_index=True
                             )
 
-    def get_vector_encodings(self):
+    def get_vector_encodings(self) -> pd.DataFrame:
         """Get vector encodings from summary results, filtering for overall value columns."""
         # Get all rows from summary_results
         all_rows = self.summary_results
@@ -374,56 +388,46 @@ class BehavletsEncoding:
         return all_rows[value_columns]
 
     def get_trajectories(self, behavlet_name: str, level_id: int | None = None):
-        """Get trajectories for a behavlet type, from the summary results.
+        """
+        Get trajectories for a behavlet type, from the instance_details.
         If level_id is provided, only trajectories for that level are returned.
         """
-        if level_id is None:
-            level_ids = self.summary_results["level_id"].unique()
-        else:
-            level_ids = [level_id]
+
+        # Filter instance_details for the given behavlet_name and (optionally) level_id
+        df = self.instance_details
+        df = df[df["behavlet_name"] == behavlet_name]
+        if level_id is not None:
+            df = df[df["level_id"] == level_id]
 
         trajectories = []
 
-        for level_id in level_ids:
-            gamesteps = self.summary_results.loc[level_id, f"{behavlet_name}_gamesteps"]
-            if gamesteps is None:
+        for idx, row in df.iterrows():
+            # Each row should have start_gamestep and end_gamestep
+            start_gamestep = row.get("start_gamestep")
+            end_gamestep = row.get("end_gamestep")
+            if start_gamestep is None or end_gamestep is None:
                 continue
-            if isinstance(gamesteps, tuple):
-                gamesteps = [gamesteps]
-                timesteps = [
-                    self.summary_results.loc[level_id, f"{behavlet_name}_timesteps"]
-                ]
-                trajectory = self.reader.get_trajectory(
-                    game_states=gamesteps, get_timevalues=True
-                )
-                trajectory.metadata["behavlet"] = f"{behavlet_name}"
-                trajectories.append(trajectory)
-                for output_attribute in self.behavlets[behavlet_name].output_attributes:
-                    trajectory.metadata[output_attribute] = self.summary_results.loc[
-                        level_id, f"{behavlet_name}_{output_attribute}"
-                    ]
-                    trajectory.metadata["instance_idx"] = 0
+            gamesteps = (start_gamestep, end_gamestep)
+            trajectory = self.reader.get_trajectory(
+                game_states=gamesteps, get_timevalues=True
+            )
+            trajectory.metadata["behavlet"] = behavlet_name
+            # Add all output attributes from the behavlet to the metadata if present in row
+            for output_attribute in self.behavlets[behavlet_name].output_attributes:
+                if output_attribute in row:
+                    trajectory.metadata[output_attribute] = row[output_attribute]
+            # Add instance_idx if present
+            if "instance_idx" in row:
+                trajectory.metadata["instance_idx"] = row["instance_idx"]
 
-            elif isinstance(gamesteps, list):
-                for idx, gamestep in enumerate(gamesteps):
-                    if gamestep is None:
-                        continue
-                    trajectory = self.reader.get_trajectory(
-                        game_states=gamestep, get_timevalues=True
-                    )
-                    trajectory.metadata["behavlet"] = f"{behavlet_name}"
-                    for output_attribute in self.behavlets[
-                        behavlet_name
-                    ].output_attributes:
-                        trajectory.metadata[output_attribute] = (
-                            self.summary_results.loc[
-                                level_id, f"{behavlet_name}_{output_attribute}"
-                            ]
-                        )
-                        trajectory.metadata["instance_idx"] = idx
-                    trajectories.append(trajectory)
-            else:
-                raise ValueError(f"Invalid type for gamesteps: {type(gamesteps)}")
+            trajectory.metadata["gamesteps"] = gamesteps
+            trajectory.metadata["timesteps"] = (row.get("start_timestep") , row.get("end_timestep"))
+            trajectories.append(trajectory)
+
+        if len(trajectories) == 1:
+            trajectories = trajectories[0] 
+
+        return trajectories
 
         return trajectories
 
@@ -437,6 +441,7 @@ class BehavletsEncoding:
         save_format: str = "mp4",
         path_prefix: str = None,
         path_suffix: str = None,
+        context_lenth: int = None,
         **kwargs,
     ):
         """
@@ -453,6 +458,7 @@ class BehavletsEncoding:
             save_format (str): Format to save the video in (e.g., "mp4", "gif"). Defaults to "mp4".
             path_prefix (str): Optional prefix to add to the saved file name. Defaults to None.
             path_suffix (str): Optional suffix to add to the saved file name. Defaults to None.
+            context_length (int): Optional number of gamesteps to enlarge the visualization sequence.
 
         Returns:
             None: The method saves the visualization files but does not return anything.
@@ -466,6 +472,10 @@ class BehavletsEncoding:
         start_gamestep = instance_row["start_gamestep"]
         end_gamestep = instance_row["end_gamestep"]
         behavlet_name = instance_row["behavlet_name"]
+
+        if context_lenth:
+            start_gamestep -= context_lenth
+            end_gamestep += context_lenth
         
         # Get gamesteps as tuple
         gamesteps = (start_gamestep, end_gamestep)

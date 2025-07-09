@@ -159,7 +159,7 @@ class GeomClustering:
         )  # Reset cluster centroids and sizes
         self.labels = self.clusterer.labels_
         self.labels = self._sort_labels()
-        logger.info(f"Clustering complete. Found {len(set(self.labels))} clusters")
+        logger.info(f"Clustering complete. Found {len(set(self.labels)) - 1} clusters")
 
         self.cluster_vis = ClusterVisualizer(
             self.affinity_matrix,
@@ -475,7 +475,8 @@ class GeomClustering:
         ]
         # Create a local random number generator with a fixed seed for reproducibility
         rng = random.Random(42)
-        subset = rng.sample(cluster_trajectories, min(4, len(cluster_trajectories)))
+        cluster_size = len(cluster_trajectories)
+        subset = rng.sample(cluster_trajectories, min(4, cluster_size))
 
         from src.visualization.game_visualizer import GameVisualizer  # Lazy import
 
@@ -493,7 +494,7 @@ class GeomClustering:
             trajectory=cluster_trajectories,
             normalize=True,
             ax=ax1,
-            title_id=f"Cluster {cluster_id}",
+            title_id=f"Cluster {cluster_id} (n = {cluster_size})",
         )
         game_viz.plot_heatmap(
             trajectory=cluster_trajectories,
