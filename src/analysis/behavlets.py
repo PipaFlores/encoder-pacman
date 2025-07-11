@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import math
 from typing import Callable, NamedTuple
-from src.utils import setup_logger, Astar, generate_squared_walls, load_maze_data
+from src.utils import setup_logger, Astar, load_maze_data
 from src.analysis.behavlets_config import BehavletsConfig
 
 
@@ -12,8 +12,7 @@ logger = setup_logger(__name__)
 
 
 class Behavlets:
-    NAMES = ["Aggression1", "Aggression3", "Aggression4", "Aggression6",
-             "Caution1"]
+    NAMES = ["Aggression1", "Aggression3", "Aggression4", "Aggression6", "Caution1"]
 
     @property
     def ENCODING_FUNCTIONS(self) -> dict[str, Callable]:
@@ -131,7 +130,7 @@ class Behavlets:
         self.instant_gamestep = []
         self.instant_timestep = []
         self.instant_position = []
-        self.died =[]
+        self.died = []
 
     def calculate(self, gamestates: pd.DataFrame, **kwargs):
         """
@@ -189,7 +188,6 @@ class Behavlets:
             return "Control_Skill"
         else:
             raise ValueError(f"Unknown behavlet category for name: {name}")
-
 
     def _Aggression1(self, gamestates: pd.DataFrame, **kwargs):
         """
@@ -299,12 +297,12 @@ class Behavlets:
                     value += 1  # increase value the longer the conditions remain true
 
                 elif flag and (not Pacman_condition or not Ghost_conditions):
-                    instance_gamestep , instance_timestep = self._end_instance(
+                    instance_gamestep, instance_timestep = self._end_instance(
                         state,
                         gamestates,
                         start_gamestep,
                         start_gamestep,
-                        CONTEXT_LENGTH
+                        CONTEXT_LENGTH,
                     )
 
                     self.gamesteps.append(instance_gamestep)
@@ -314,11 +312,7 @@ class Behavlets:
 
             elif state.pacman_attack == 0 and flag:
                 instance_gamestep, instance_timestep = self._end_instance(
-                    state,
-                    gamestates,
-                    start_gamestep,
-                    start_timestep,
-                    CONTEXT_LENGTH
+                    state, gamestates, start_gamestep, start_timestep, CONTEXT_LENGTH
                 )
                 self.value_per_instance.append(value)
                 flag = False
@@ -750,11 +744,11 @@ class Behavlets:
             self.value = sum(valid_values)
 
         return
-    
+
     def _Caution1(self, gamestates: pd.DataFrame, **kwargs):
         """
         Times trapped by Ghosts
-        
+
         Pacman trapped in corridor by ghosts, and possibly losing a life.
 
         Parameters:
@@ -764,29 +758,29 @@ class Behavlets:
             SEARCH_WINDOW (int): Number of frames to look ahead from the moment Pacman is trapped, to check if Pacman loses a life.
             GHOST_DISTANCE_THRESHOLD (int): Distance threshold to consider a ghost as a threat.
 
-            
+
         Returns:
         """
         self.full_name = "Caution 1 - Times trapped by Ghosts"
         self.measurement_type = "interval"
         self.output_attributes = [
-            "value", # Times trapped
-            "value_per_instance", # Number of gamesteps trapped.
+            "value",  # Times trapped
+            "value_per_instance",  # Number of gamesteps trapped.
             "instances",
             "gamesteps",
             "timesteps",
-            "died"
+            "died",
         ]
 
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
         # SEARCH_WINDOW = kwargs.get("SEARCH_WINDOW", 10)
         GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 5)
         OPPOSITE_POSITIONS = {
-            0 : (12.5,-9.5),
-            1: (-12.5,-9.5),
-            2: (-12.5,8.5),
-            3: (12.5, 8.5)
-            }
+            0: (12.5, -9.5),
+            1: (-12.5, -9.5),
+            2: (-12.5, 8.5),
+            3: (12.5, 8.5),
+        }
         logger.debug(
             f"Calculating Caution 1 with CONTEXT_LENGTH={CONTEXT_LENGTH}, "
             # f"SEARCH_WINDOW={SEARCH_WINDOW}, "
@@ -808,11 +802,13 @@ class Behavlets:
                 if not flag:
                     return
                 elif flag:
-                    instance_gamestep, instance_timestep = self._end_instance(state, 
-                                                                              gamestates, 
-                                                                              start_gamestep=start_gamestep, 
-                                                                              start_timestep=start_timestep,
-                                                                              CONTEXT_LENGTH=CONTEXT_LENGTH)
+                    instance_gamestep, instance_timestep = self._end_instance(
+                        state,
+                        gamestates,
+                        start_gamestep=start_gamestep,
+                        start_timestep=start_timestep,
+                        CONTEXT_LENGTH=CONTEXT_LENGTH,
+                    )
                     if state.lives > 1:
                         died = False
                     elif state.lives == 1 and state.pellets >= 2:
@@ -822,18 +818,15 @@ class Behavlets:
                     self.timesteps.append(instance_timestep)
                     self.value_per_instance.append(value_per_instance)
                     self.died.append(died)
-                    logger.debug(f"trapped and ended game (died) on steps {instance_gamestep}")
+                    logger.debug(
+                        f"trapped and ended game (died) on steps {instance_gamestep}"
+                    )
 
-            
             # Trapped but took powerpill
             elif flag and state.pacman_attack == 1:
                 flag = False
                 instance_gamestep, instance_timestep = self._end_instance(
-                    state,
-                    gamestates,
-                    start_gamestep,
-                    start_timestep,
-                    CONTEXT_LENGTH
+                    state, gamestates, start_gamestep, start_timestep, CONTEXT_LENGTH
                 )
                 self.gamesteps.append(instance_gamestep)
                 self.timesteps.append(instance_timestep)
@@ -842,55 +835,79 @@ class Behavlets:
                 logger.debug(f"trapped but took powerpill. steps {instance_gamestep}")
 
             # Main logic
-            elif state.pacman_attack == 0: 
+            elif state.pacman_attack == 0:
                 # Get relevant positions and transform to grid for Astar algorithm
-                pacman_position = Astar.transform_to_grid((state.Pacman_X, state.Pacman_Y))
+                pacman_position = Astar.transform_to_grid(
+                    (state.Pacman_X, state.Pacman_Y)
+                )
                 ghost_positions = self._get_ghost_pos(state, only_alive=True)
-                ghost_positions = [Astar.transform_to_grid(ghost_pos) for ghost_pos in ghost_positions if ghost_pos is not None]
-                ghost_distances = self._get_distance_to_ghosts(pacman_pos=pacman_position, ghost_positions=ghost_positions)
+                ghost_positions = [
+                    Astar.transform_to_grid(ghost_pos)
+                    for ghost_pos in ghost_positions
+                    if ghost_pos is not None
+                ]
+                ghost_distances = self._get_distance_to_ghosts(
+                    pacman_pos=pacman_position, ghost_positions=ghost_positions
+                )
 
                 # Filter out ghosts based on distance threshold
-                ghost_positions = [position for idx, position in enumerate(ghost_positions) if ghost_distances[idx] <= GHOST_DISTANCE_THRESHOLD]
-                ghost_distances = [distance for distance in ghost_distances if distance <= GHOST_DISTANCE_THRESHOLD]
+                ghost_positions = [
+                    position
+                    for idx, position in enumerate(ghost_positions)
+                    if ghost_distances[idx] <= GHOST_DISTANCE_THRESHOLD
+                ]
+                ghost_distances = [
+                    distance
+                    for distance in ghost_distances
+                    if distance <= GHOST_DISTANCE_THRESHOLD
+                ]
                 quadrant = self._get_quadrant_idx(state)
                 opposite_position = OPPOSITE_POSITIONS[quadrant]
 
                 ghosts_in_valid_distance = len(ghost_distances) >= 2
 
-                if not ghosts_in_valid_distance: # Avoid calculating Astar when not necessary, close instance if flagged.
+                if not ghosts_in_valid_distance:  # Avoid calculating Astar when not necessary, close instance if flagged.
                     if flag:
-                       logger.debug(f"conditions in flagged state {state.Index}: ghosts in distance:{ghosts_in_valid_distance}, blocked :{blocked_path}")
-                       flag = False
-                       instance_gamestep, instance_timestep = self._end_instance(
-                           state,
-                           gamestates,
-                           start_gamestep,
-                           start_timestep,
-                           CONTEXT_LENGTH
-                       )
-                       self.gamesteps.append(instance_gamestep)
-                       self.timesteps.append(instance_timestep)
-                       self.value_per_instance.append(value_per_instance)
-                       self.died.append(False)
-                       logger.debug(f"no longer trapped, instance finished at {instance_gamestep[1]}")
+                        logger.debug(
+                            f"conditions in flagged state {state.Index}: ghosts in distance:{ghosts_in_valid_distance}, blocked :{blocked_path}"
+                        )
+                        flag = False
+                        instance_gamestep, instance_timestep = self._end_instance(
+                            state,
+                            gamestates,
+                            start_gamestep,
+                            start_timestep,
+                            CONTEXT_LENGTH,
+                        )
+                        self.gamesteps.append(instance_gamestep)
+                        self.timesteps.append(instance_timestep)
+                        self.value_per_instance.append(value_per_instance)
+                        self.died.append(False)
+                        logger.debug(
+                            f"no longer trapped, instance finished at {instance_gamestep[1]}"
+                        )
 
                     continue
-                
+
                 # logger.debug(f"Calculating astar from {grid_pac_pos} to {opposite_position}, blocked by {grid_ghost_positions}")
-                _, astar_to_opposite = Astar.calculate_path_and_distance(start=pacman_position,
-                                                                         goal=opposite_position,
-                                                                         grid= wall_grid,
-                                                                         blocked_positions=ghost_positions)
-                
+                _, astar_to_opposite = Astar.calculate_path_and_distance(
+                    start=pacman_position,
+                    goal=opposite_position,
+                    grid=wall_grid,
+                    blocked_positions=ghost_positions,
+                )
+
                 blocked_path = astar_to_opposite == math.inf
 
                 if flag:
-                    logger.debug(f"conditions in flagged state {state.Index}: ghosts in distance:{ghosts_in_valid_distance}, blocked :{blocked_path}")
-            
+                    logger.debug(
+                        f"conditions in flagged state {state.Index}: ghosts in distance:{ghosts_in_valid_distance}, blocked :{blocked_path}"
+                    )
+
                 # If two or more ghosts are in valid distance and blocked paths,
-                    # create flag.
-                    # get instance starting step
-                    # increase value
+                # create flag.
+                # get instance starting step
+                # increase value
                 if not flag and ghosts_in_valid_distance and blocked_path:
                     flag = True
                     start_gamestep = state.Index
@@ -900,7 +917,7 @@ class Behavlets:
                     logger.debug(f"trapped at gamestep {start_gamestep}")
 
                     if flag and gamestates.iloc[i + 1]["lives"] < state.lives:
-                        # If dead right after trapped, use gamestep before to avoid an len() == 1 interval 
+                        # If dead right after trapped, use gamestep before to avoid an len() == 1 interval
                         start_gamestep -= 1
                         start_timestep = gamestates.loc[state.Index - 1, "time_elapsed"]
                         flag = False
@@ -909,18 +926,22 @@ class Behavlets:
                             gamestates,
                             start_gamestep,
                             start_timestep,
-                            CONTEXT_LENGTH
+                            CONTEXT_LENGTH,
                         )
                         self.gamesteps.append(instance_gamestep)
                         self.timesteps.append(instance_timestep)
                         self.died.append(True)
                         self.value_per_instance.append(value_per_instance)
-                        logger.debug(f"Died right after trapped, ending instance with len(interval) = 2. gamesteps {instance_gamestep}")
+                        logger.debug(
+                            f"Died right after trapped, ending instance with len(interval) = 2. gamesteps {instance_gamestep}"
+                        )
 
                 # Increase value for each state trapped.
                 elif flag and ghosts_in_valid_distance and blocked_path:
                     value_per_instance += 1
-                    logger.debug(f"still trapped at gamestep {state.Index}, increasing instance value")
+                    logger.debug(
+                        f"still trapped at gamestep {state.Index}, increasing instance value"
+                    )
                     # If dies, end instance
                     if flag and gamestates.iloc[i + 1]["lives"] < state.lives:
                         flag = False
@@ -929,14 +950,16 @@ class Behavlets:
                             gamestates,
                             start_gamestep,
                             start_timestep,
-                            CONTEXT_LENGTH
+                            CONTEXT_LENGTH,
                         )
                         self.gamesteps.append(instance_gamestep)
                         self.timesteps.append(instance_timestep)
                         self.died.append(True)
                         self.value_per_instance.append(value_per_instance)
-                        logger.debug(f"Died after trapped, ending instance. gamesteps {instance_gamestep}")
-                
+                        logger.debug(
+                            f"Died after trapped, ending instance. gamesteps {instance_gamestep}"
+                        )
+
                 # If not trapped anymore, end instance
                 elif flag and not (ghosts_in_valid_distance and blocked_path):
                     flag = False
@@ -945,15 +968,17 @@ class Behavlets:
                         gamestates,
                         start_gamestep,
                         start_timestep,
-                        CONTEXT_LENGTH
+                        CONTEXT_LENGTH,
                     )
                     self.gamesteps.append(instance_gamestep)
                     self.timesteps.append(instance_timestep)
                     self.value_per_instance.append(value_per_instance)
                     self.died.append(False)
-                    logger.debug(f"no longer trapped, instance finished at {instance_gamestep[1]}")
+                    logger.debug(
+                        f"no longer trapped, instance finished at {instance_gamestep[1]}"
+                    )
 
-        self._Caution1_post_process() ## Post-processing after calculations
+        self._Caution1_post_process()  ## Post-processing after calculations
 
     def _Caution1_post_process(self):
         """
@@ -967,13 +992,17 @@ class Behavlets:
         gap between the end of one instance and the start of the next for them to be merged. This threshold is based on empirical
         analysis of gameplay and is intended to robustly identify contiguous trapping episodes.
         """
-         # Merge Caution1 instances that are close in time (gamesteps)
+        # Merge Caution1 instances that are close in time (gamesteps)
         if not self.gamesteps or len(self.gamesteps) <= 1:
             return  # Nothing to merge
 
-        MERGE_THRESHOLD = self.kwargs.get("MERGE_THRESHOLD", 20)  # Gamesteps or frames between instances to consider merging
-        
-        logger.debug(f"Post-processing of results, merging proximal instances (MERGE_THRESHOLD: {MERGE_THRESHOLD})")
+        MERGE_THRESHOLD = self.kwargs.get(
+            "MERGE_THRESHOLD", 20
+        )  # Gamesteps or frames between instances to consider merging
+
+        logger.debug(
+            f"Post-processing of results, merging proximal instances (MERGE_THRESHOLD: {MERGE_THRESHOLD})"
+        )
 
         merged_gamesteps = []
         merged_timesteps = []
@@ -982,7 +1011,7 @@ class Behavlets:
 
         # Prepare for merging
         current_start_gamestep = self.gamesteps[0][0]
-        current_end_gamestep = self.gamesteps[0][1] 
+        current_end_gamestep = self.gamesteps[0][1]
         current_start_timestep = self.timesteps[0][0]
         current_end_timestep = self.timesteps[0][1]
         current_value_per_instance = self.value_per_instance[0]
@@ -991,7 +1020,7 @@ class Behavlets:
         for i in range(1, len(self.gamesteps)):
             prev_end = current_end_gamestep
             this_start = self.gamesteps[i][0]
-            this_end = self.gamesteps[i][1] 
+            this_end = self.gamesteps[i][1]
             this_start_timestep = self.timesteps[i][0]
             this_end_timestep = self.timesteps[i][1]
             this_value_per_instance = self.value_per_instance[i]
@@ -1004,7 +1033,9 @@ class Behavlets:
                 current_end_timestep = this_end_timestep
                 current_value_per_instance += this_value_per_instance
                 current_died = this_died  # Use the last instance's died status
-                logger.debug(f"merged instances: start={current_start_gamestep}, end={current_end_gamestep}, value={current_value_per_instance}, died={current_died}")
+                logger.debug(
+                    f"merged instances: start={current_start_gamestep}, end={current_end_gamestep}, value={current_value_per_instance}, died={current_died}"
+                )
             else:
                 # Save current merged instance
                 merged_gamesteps.append((current_start_gamestep, current_end_gamestep))
@@ -1033,7 +1064,6 @@ class Behavlets:
         self.instances = len(self.gamesteps)
         self.value = self.instances
 
-
     def _Caution2a(self, gamestates: pd.DataFrame, **kwargs):
         """
         Average distance to ghosts - not on powerpill
@@ -1043,10 +1073,7 @@ class Behavlets:
         """
         self.full_name = "Caution 2a - Average distance to ghosts - not on powerpill"
         self.measurement_type = "interval"
-        self.output_attributes = [
-            "value"
-        ]
-
+        self.output_attributes = ["value"]
 
         final_state = len(gamestates) - 1
         self.died = []
@@ -1055,6 +1082,7 @@ class Behavlets:
         flag = False
 
         return
+
     ##### Utility Functions
 
     def _get_ghost_pos(
@@ -1149,14 +1177,16 @@ class Behavlets:
         else:
             raise ValueError("Pacman position does not fall into any quadrant")
 
-    def _end_instance(self, state, gamestates ,start_gamestep, start_timestep, CONTEXT_LENGTH = None):
+    def _end_instance(
+        self, state, gamestates, start_gamestep, start_timestep, CONTEXT_LENGTH=None
+    ):
         """
         Sets the instance's start and end values for gamestep and timestep.
-        
+
         This helper method calculates the final gamestep and timestep boundaries for a behavlet
         instance, optionally applying context length adjustments to include additional frames
         before and after the observed behavior.
-        
+
         Parameters:
             state: Named tuple containing the current game state data
             gamestates (pd.DataFrame): DataFrame containing all game state data
@@ -1164,25 +1194,25 @@ class Behavlets:
             start_timestep (float): The starting timestep of the instance
             CONTEXT_LENGTH (int, optional): Number of frames to include before/after the instance
                                           for visualization purposes. Defaults to None.
-        
+
         Returns:
             tuple: A tuple containing:
                 - instance_gamesteps (tuple): (start_gamestep, end_gamestep) with optional context
                 - instance_timesteps (tuple): (start_timestep, end_timestep), of the original behavior (no context modification ).
         """
-        
+
         end_gamestep = state.Index
         end_timestep = state.time_elapsed
 
         if CONTEXT_LENGTH:
-                start_gamestep = max(
-                    gamestates.iloc[0]["game_state_id"],
-                    start_gamestep - CONTEXT_LENGTH,
-                )
-                end_gamestep = min(
-                    gamestates.iloc[-1]["game_state_id"],
-                    end_gamestep + CONTEXT_LENGTH,
-                )
+            start_gamestep = max(
+                gamestates.iloc[0]["game_state_id"],
+                start_gamestep - CONTEXT_LENGTH,
+            )
+            end_gamestep = min(
+                gamestates.iloc[-1]["game_state_id"],
+                end_gamestep + CONTEXT_LENGTH,
+            )
         instance_gamesteps = (start_gamestep, end_gamestep)
         instance_timesteps = (start_timestep, end_timestep)
 

@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Tuple
-from dataclasses import field
-
 
 
 @dataclass
@@ -62,15 +60,20 @@ class Aggression6Config:
     )
     GHOST_DISTANCE_THRESHOLD: int = 5  ## Original value, from original implementation
 
+
 @dataclass
 class Caution1Config:
     """
     Times trapped by ghost
     """
+
     CONTEXT_LENGTH: Optional[int] = None
     # SEARCH_WINDOW: int =  10
-    GHOST_DISTANCE_THRESHOLD: int = 10 # Increased from original value of 5
-    MERGE_THRESHOLD: int = 20 # Gamesteps or frames between instances to consider merging
+    GHOST_DISTANCE_THRESHOLD: int = 10  # Increased from original value of 5
+    MERGE_THRESHOLD: int = (
+        20  # Gamesteps or frames between instances to consider merging
+    )
+
 
 class BehavletsConfig:
     """Configuration class for all behavlets parameters"""

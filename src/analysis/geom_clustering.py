@@ -14,44 +14,49 @@ from src.utils import setup_logger
 from bokeh.plotting import show, row
 import time
 from multiprocessing import Pool, cpu_count
-from functools import partial
-import multiprocessing
 from multiprocessing import Manager
 import threading
 
 # Initialize module-level logger
 logger = setup_logger(__name__)
 
+
 def _compute_distance_chunk(args):
     """Helper function to compute distances for a chunk of trajectory pairs."""
     similarity_measures, trajectories, indices = args
     results = []
     for i, j in indices:
-        distance = similarity_measures.calculate_distance(trajectories[i], trajectories[j])
+        distance = similarity_measures.calculate_distance(
+            trajectories[i], trajectories[j]
+        )
         results.append((i, j, distance))
     return results
+
 
 def _compute_distance_chunk_with_progress(args):
     """Helper function to compute distances for a chunk with batched progress updates."""
     similarity_measures, trajectories, indices, progress_queue = args
     results = []
     batch_size = 10  # Update progress every 10 calculations
-    
+
     for idx, (i, j) in enumerate(indices):
-        distance = similarity_measures.calculate_distance(trajectories[i], trajectories[j])
+        distance = similarity_measures.calculate_distance(
+            trajectories[i], trajectories[j]
+        )
         results.append((i, j, distance))
-        
+
         # Batch progress updates to reduce IOPub message rate
         if progress_queue is not None and (idx + 1) % batch_size == 0:
             progress_queue.put(batch_size)
-    
+
     # Send remaining progress for incomplete batch
     if progress_queue is not None:
         remaining = len(indices) % batch_size
         if remaining > 0:
             progress_queue.put(remaining)
-    
+
     return results
+
 
 class GeomClustering:
     """
@@ -598,40 +603,59 @@ class GeomClustering:
         return np.array(cluster_centroids), np.array(cluster_sizes)
 
     def calculate_affinity_matrix_parallel_cpu(
-        self, trajectories: List[Trajectory] | np.ndarray | List[np.ndarray], 
-        n_jobs: int = None, chunk_size_multiplier: int = 1
+        self,
+        trajectories: List[Trajectory] | np.ndarray | List[np.ndarray],
+        n_jobs: int = None,
+        chunk_size_multiplier: int = 1,
     ) -> np.ndarray:
         """
         Calculate affinity matrix using CPU multiprocessing with optimized chunking for DTW.
         """
         logger.info("Calculating affinity matrix with CPU parallelization")
         time_start = time.time()
-        
+
         if n_jobs is None:
             n_jobs = cpu_count()
-        
+
         num_trajectories = len(trajectories)
         self.affinity_matrix = np.zeros((num_trajectories, num_trajectories))
-        
+
         # Generate all upper triangular indices
-        indices = [(i, j) for i in range(num_trajectories) for j in range(i + 1, num_trajectories)]
+        indices = [
+            (i, j)
+            for i in range(num_trajectories)
+            for j in range(i + 1, num_trajectories)
+        ]
         total_pairs = len(indices)
-        
+
         # Optimize chunk size based on similarity measure
-        if self.similarity_measures.measure_type in ["dtw", "dtw_optimized", "EDR", "LCSS", "frechet"]:
+        if self.similarity_measures.measure_type in [
+            "dtw",
+            "dtw_optimized",
+            "EDR",
+            "LCSS",
+            "frechet",
+        ]:
             # For expensive operations, use larger chunks to reduce overhead
             base_chunk_size = max(10, total_pairs // (n_jobs * chunk_size_multiplier))
         else:
-            # For cheap operations, use smaller chunks for better load balancing  
+            # For cheap operations, use smaller chunks for better load balancing
             base_chunk_size = max(1, total_pairs // (n_jobs * 4))
-        
-        chunks = [indices[i:i + base_chunk_size] for i in range(0, len(indices), base_chunk_size)]
-        
+
+        chunks = [
+            indices[i : i + base_chunk_size]
+            for i in range(0, len(indices), base_chunk_size)
+        ]
+
         # Prepare arguments for each chunk
-        chunk_args = [(self.similarity_measures, trajectories, chunk) for chunk in chunks]
-        
-        logger.info(f"Processing {total_pairs} pairs using {n_jobs} cores in {len(chunks)} chunks (chunk_size: {base_chunk_size}), with similarity measure: {self.similarity_measures.measure_type}")
-        
+        chunk_args = [
+            (self.similarity_measures, trajectories, chunk) for chunk in chunks
+        ]
+
+        logger.info(
+            f"Processing {total_pairs} pairs using {n_jobs} cores in {len(chunks)} chunks (chunk_size: {base_chunk_size}), with similarity measure: {self.similarity_measures.measure_type}"
+        )
+
         # Process chunks in parallel
         with Pool(n_jobs) as pool:
             with tqdm.tqdm(total=len(chunks), desc="Processing chunks") as pbar:
@@ -639,120 +663,149 @@ class GeomClustering:
                 for result in pool.map(_compute_distance_chunk, chunk_args):
                     chunk_results.append(result)
                     pbar.update(1)
-        
+
         # Fill the affinity matrix
         for chunk_result in chunk_results:
             for i, j, distance in chunk_result:
                 self.affinity_matrix[i, j] = distance
                 self.affinity_matrix[j, i] = distance  # Symmetric matrix
-        
-        logger.info(f"Parallel affinity matrix calculation complete in {round(time.time() - time_start, 2)} seconds")
+
+        logger.info(
+            f"Parallel affinity matrix calculation complete in {round(time.time() - time_start, 2)} seconds"
+        )
         return self.affinity_matrix
 
     def calculate_affinity_matrix_parallel_cpu_improved(
-        self, trajectories: List[Trajectory] | np.ndarray | List[np.ndarray], 
-        n_jobs: int = None, chunk_size_multiplier: int = 1, 
-        show_setup_progress: bool = True
+        self,
+        trajectories: List[Trajectory] | np.ndarray | List[np.ndarray],
+        n_jobs: int = None,
+        chunk_size_multiplier: int = 1,
+        show_setup_progress: bool = True,
     ) -> np.ndarray:
         """
         Calculate affinity matrix with improved progress tracking and reduced IOPub messages.
         """
         logger.info("Calculating affinity matrix with improved CPU parallelization")
         time_start = time.time()
-        
+
         if n_jobs is None:
             n_jobs = cpu_count()
-        
+
         num_trajectories = len(trajectories)
-        
+
         # Show setup progress (reduced output)
         if show_setup_progress:
-            print(f"Setup: {num_trajectories} trajectories, {num_trajectories * (num_trajectories - 1) // 2} pairs")
-        
+            print(
+                f"Setup: {num_trajectories} trajectories, {num_trajectories * (num_trajectories - 1) // 2} pairs"
+            )
+
         # Pre-allocate matrix
         setup_start = time.time()
         self.affinity_matrix = np.zeros((num_trajectories, num_trajectories))
-        if show_setup_progress and (time.time() - setup_start) > 0.1:  # Only show if slow
+        if (
+            show_setup_progress and (time.time() - setup_start) > 0.1
+        ):  # Only show if slow
             print(f"Matrix allocation: {time.time() - setup_start:.2f}s")
-        
+
         # Generate indices
-        indices = [(i, j) for i in range(num_trajectories) for j in range(i + 1, num_trajectories)]
+        indices = [
+            (i, j)
+            for i in range(num_trajectories)
+            for j in range(i + 1, num_trajectories)
+        ]
         total_pairs = len(indices)
-        
+
         # Use smaller chunks but not too small to avoid overhead
-        if self.similarity_measures.measure_type in ["dtw", "dtw_optimized", "EDR", "LCSS", "frechet"]:
+        if self.similarity_measures.measure_type in [
+            "dtw",
+            "dtw_optimized",
+            "EDR",
+            "LCSS",
+            "frechet",
+        ]:
             base_chunk_size = max(20, min(100, total_pairs // (n_jobs * 5)))
         else:
             base_chunk_size = max(10, total_pairs // (n_jobs * 4))
-        
-        chunks = [indices[i:i + base_chunk_size] for i in range(0, len(indices), base_chunk_size)]
-        
+
+        chunks = [
+            indices[i : i + base_chunk_size]
+            for i in range(0, len(indices), base_chunk_size)
+        ]
+
         if show_setup_progress:
-            print(f"Starting parallel calculation: {len(chunks)} chunks, ~{base_chunk_size} pairs each")
-        
+            print(
+                f"Starting parallel calculation: {len(chunks)} chunks, ~{base_chunk_size} pairs each"
+            )
+
         # Use a manager for progress tracking across processes
         with Manager() as manager:
             progress_queue = manager.Queue()
-            
+
             # Prepare arguments for each chunk
-            chunk_args = [(self.similarity_measures, trajectories, chunk, progress_queue) for chunk in chunks]
-            
+            chunk_args = [
+                (self.similarity_measures, trajectories, chunk, progress_queue)
+                for chunk in chunks
+            ]
+
             # Start progress monitoring in a separate thread
             progress_thread = threading.Thread(
-                target=self._monitor_progress_batched, 
-                args=(progress_queue, total_pairs, time_start)
+                target=self._monitor_progress_batched,
+                args=(progress_queue, total_pairs, time_start),
             )
             progress_thread.daemon = True
             progress_thread.start()
-            
+
             # Process chunks in parallel
             with Pool(n_jobs) as pool:
-                chunk_results = pool.map(_compute_distance_chunk_with_progress, chunk_args)
-            
+                chunk_results = pool.map(
+                    _compute_distance_chunk_with_progress, chunk_args
+                )
+
             # Stop progress monitoring
             progress_queue.put(None)  # Signal to stop
             progress_thread.join(timeout=2)
-        
+
         # Fill the affinity matrix
         for chunk_result in chunk_results:
             for i, j, distance in chunk_result:
                 self.affinity_matrix[i, j] = distance
                 self.affinity_matrix[j, i] = distance
-        
+
         total_time = time.time() - time_start
         logger.info(f"Parallel calculation complete in {total_time:.2f}s")
         return self.affinity_matrix
-    
+
     def _monitor_progress_batched(self, progress_queue, total_pairs, start_time):
         """Monitor progress with batched updates to reduce IOPub message rate."""
         completed = 0
         update_interval = max(1, total_pairs // 200)  # Update at most 200 times total
-        
-        with tqdm.tqdm(total=total_pairs, desc="DTW calculations", 
-                       mininterval=0.5, maxinterval=2.0) as pbar:  # Limit update frequency
+
+        with tqdm.tqdm(
+            total=total_pairs, desc="DTW calculations", mininterval=0.5, maxinterval=2.0
+        ) as pbar:  # Limit update frequency
             while True:
                 try:
                     update = progress_queue.get(timeout=0.5)  # Less frequent checks
                     if update is None:  # Stop signal
                         break
-                    
+
                     completed += update
                     pbar.update(update)
-                    
+
                     # Update timing info less frequently
                     if completed % update_interval == 0 or completed >= total_pairs:
                         elapsed = time.time() - start_time
                         if completed > 0:
                             rate = completed / elapsed
                             eta = (total_pairs - completed) / rate if rate > 0 else 0
-                            pbar.set_postfix({
-                                'rate': f'{rate:.1f}/s',
-                                'eta': f'{eta:.0f}s'
-                            }, refresh=False)  # Don't force refresh
-                            
+                            pbar.set_postfix(
+                                {"rate": f"{rate:.1f}/s", "eta": f"{eta:.0f}s"},
+                                refresh=False,
+                            )  # Don't force refresh
+
                 except:
                     continue
-    
+
     def calculate_affinity_matrix_with_simple_progress(
         self, trajectories: List[Trajectory] | np.ndarray | List[np.ndarray]
     ) -> np.ndarray:
@@ -761,43 +814,45 @@ class GeomClustering:
         """
         logger.info("Calculating affinity matrix with simple progress tracking")
         time_start = time.time()
-        
+
         num_trajectories = len(trajectories)
         self.affinity_matrix = np.zeros((num_trajectories, num_trajectories))
-        
+
         total_pairs = num_trajectories * (num_trajectories - 1) // 2
         completed = 0
-        
+
         # Update progress only every N calculations to reduce messages
         update_every = max(1, total_pairs // 50)  # Maximum 50 updates total
-        
+
         print(f"Calculating {total_pairs} DTW distances...")
-        
-        with tqdm.tqdm(total=total_pairs, desc="DTW calculations", 
-                       mininterval=1.0) as pbar:  # Update at most once per second
+
+        with tqdm.tqdm(
+            total=total_pairs, desc="DTW calculations", mininterval=1.0
+        ) as pbar:  # Update at most once per second
             for i in range(num_trajectories):
                 for j in range(i + 1, num_trajectories):
-                    distance = self.similarity_measures.calculate_distance(trajectories[i], trajectories[j])
-                    
+                    distance = self.similarity_measures.calculate_distance(
+                        trajectories[i], trajectories[j]
+                    )
+
                     self.affinity_matrix[i, j] = distance
                     self.affinity_matrix[j, i] = distance
-                    
+
                     completed += 1
-                    
+
                     # Only update progress bar periodically
                     if completed % update_every == 0 or completed == total_pairs:
                         pbar.update(min(update_every, total_pairs - pbar.n))
-                        
+
                         # Update timing info
                         elapsed = time.time() - time_start
                         rate = completed / elapsed
                         eta = (total_pairs - completed) / rate if rate > 0 else 0
-                        pbar.set_postfix({
-                            'rate': f'{rate:.1f}/s',
-                            'eta': f'{eta:.0f}s'
-                        }, refresh=False)
-        
+                        pbar.set_postfix(
+                            {"rate": f"{rate:.1f}/s", "eta": f"{eta:.0f}s"},
+                            refresh=False,
+                        )
+
         total_time = time.time() - time_start
         logger.info(f"Simple calculation complete in {total_time:.2f}s")
         return self.affinity_matrix
-
