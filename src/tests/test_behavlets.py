@@ -164,6 +164,34 @@ class TestBehavlets:
             f"Found {len(empty_rows)} rows with NaN values:\n{empty_rows}"
         )
 
+        # Caution 1 - Times Trapped by Ghosts
+
+        assert (
+            Beh_encodings.summary_results[
+                Beh_encodings.summary_results["Caution1_value"] > 0
+            ].shape[0]
+            >= 0
+        )
+        assert (
+            Beh_encodings.instance_details[
+                Beh_encodings.instance_details["behavlet_name"] == "Caution1"
+            ].shape[0]
+            >= 0
+        )
+
+        
+        Aggression6_instance_subset = Beh_encodings.instance_details.loc[
+                Beh_encodings.instance_details["behavlet_name"] == "Caution1",
+                Common_attributes + ["value_per_instance", "died"],
+            ]
+
+        empty_rows = Aggression6_instance_subset[
+            Aggression6_instance_subset.isna().any(axis=1)
+        ]
+        assert empty_rows.empty, (
+            f"Found {len(empty_rows)} rows with NaN values:\n{empty_rows}"
+        )
+
     def test_Aggression1(self, reader):
         Beh = Behavlets(name="Aggression1")
         gamestates = reader._filter_gamestate_data(level_id=603)[0]
@@ -323,3 +351,22 @@ class TestBehavlets:
         assert results_context_norm.instances == 2
         assert results_context_norm.value == results.value
         assert results_context_norm.original_gamesteps == results.gamesteps
+
+    def test_Caution1(self, reader):
+
+        Beh = Behavlets(name="Caution1")
+
+        gamestates = reader._filter_gamestate_data(level_id=464)[0] # Game with merged instances
+
+        results = Beh.calculate(
+            gamestates=gamestates,
+        )
+
+        assert results.value == results.instances
+        assert results.value == 1
+        assert results.value_per_instance == [6]
+
+        assert results.died == [True]
+        assert results.gamesteps == [(309885, 309905)]
+
+

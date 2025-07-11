@@ -800,7 +800,7 @@ class Behavlets:
             # if on final state, return. If behavlet flag active, terminate and append endstep.
             if i == final_state:
                 if not flag:
-                    return
+                    continue
                 elif flag:
                     instance_gamestep, instance_timestep = self._end_instance(
                         state,
