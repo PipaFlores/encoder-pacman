@@ -291,6 +291,19 @@ class BehavletsEncoding:
             summary_data[f"{behavlet.name}_value"] = behavlet.value
             summary_data[f"{behavlet.name}_instances"] = behavlet.instances
 
+            # # For inspection: get the gamesteps distance between behavlets
+            # # Calculate the number of gamesteps between consecutive instances for all behavlets in this level
+            # # (Note that this might return negative values for behavlets that are calculated per powerpill/quadrants)
+            # gamesteps = summary_data.get(f"{behavlet.name}_gamesteps", [])
+            # distances = []
+            # if gamesteps and isinstance(gamesteps, list) and len(gamesteps) > 1:
+            #     for i in range(len(gamesteps) - 1):
+            #         current_end = gamesteps[i][1]
+            #         next_start = gamesteps[i+1][0]
+            #         if current_end is not None and next_start is not None:
+            #             distances.append(next_start - current_end)
+            # summary_data[f"{behavlet.name}_steps_between_instances"] = str(distances) if distances else None
+
             # Add behavlet-specific attributes based on output_attributes
             for attr in behavlet.output_attributes:
                 if attr not in ["value", "instances"]:
@@ -387,10 +400,25 @@ class BehavletsEncoding:
         # Return the filtered DataFrame with only value columns
         return all_rows[value_columns]
 
-    def get_trajectories(self, behavlet_name: str, level_id: int | None = None):
+    def get_trajectories(self, behavlet_name: str, level_id: int | None = None, extra_context: int | None = None):
         """
-        Get trajectories for a behavlet type, from the instance_details.
-        If level_id is provided, only trajectories for that level are returned.
+        Retrieve trajectories for a specified behavlet type.
+
+        Parameters
+        ----------
+        behavlet_name : str
+            The name of the behavlet type for which to retrieve trajectories.
+        level_id : int or None, optional
+            If provided, only trajectories corresponding to this level are returned.
+        extra_context : int or None, optional
+            If provided, extends the start and end gamesteps of each trajectory by this value
+            in both directions, within the bounds of the level's available gamesteps.
+
+        Returns
+        -------
+        list or Trajectory
+            A list of trajectory objects (or a single trajectory if only one is found),
+            each annotated with relevant behavlet metadata.
         """
 
         # Filter instance_details for the given behavlet_name and (optionally) level_id
@@ -407,6 +435,15 @@ class BehavletsEncoding:
             end_gamestep = row.get("end_gamestep")
             if start_gamestep is None or end_gamestep is None:
                 continue
+
+            if extra_context:
+                gamestates = self.reader.gamestate_df.loc[self.reader.gamestate_df["level_id"] == row.get("level_id")]
+                first_state , last_state = gamestates.iloc[0].name, gamestates.iloc[-1].name
+
+                start_gamestep = max(first_state, start_gamestep - extra_context)
+                end_gamestep = min(last_state, end_gamestep + extra_context)
+                
+
             gamesteps = (start_gamestep, end_gamestep)
             trajectory = self.reader.get_trajectory(
                 game_states=gamesteps, get_timevalues=True
@@ -516,3 +553,4 @@ class BehavletsEncoding:
         )
 
         return
+
