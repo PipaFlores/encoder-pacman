@@ -14,6 +14,7 @@ setup(
         "scikit-learn",
         "hdbscan",
         "bokeh",
+        "aeon",
     ],
     python_requires=">=3.11",
 )

@@ -94,7 +94,7 @@ def train(model, train_loader, num_epochs=10, learning_rate=1e-3):
 
     # Add learning rate scheduler
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="min", factor=0.5, patience=3, verbose=True
+        optimizer, mode="min", factor=0.5, patience=3
     )
 
     # For tracking training progress
@@ -192,7 +192,7 @@ def visualize_reconstructions(model, test_loader, num_images=10):
     plt.show()
 
 
-def visualize_latent_space(model, test_loader, n_samples=2000):
+def visualize_latent_space(model, test_loader, n_samples=8000):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
     model.eval()
@@ -233,6 +233,7 @@ def visualize_latent_space(model, test_loader, n_samples=2000):
             reduced_latent_representations[indices, 1],
             label=str(i),
             alpha=0.5,
+            s = 0.2,
         )
     plt.legend(title="Digit")
     plt.title("Latent Space Visualization with UMAP")
