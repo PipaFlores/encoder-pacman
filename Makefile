@@ -1,10 +1,10 @@
 all: format lint test
 
 format:
-	ruff format --exclude notebook,playground
+	ruff format --exclude "*.ipynb"
 
 lint:
-	ruff check --fix-only --exclude notebook,playground
+	ruff check --fix-only --exclude "*.ipynb"
 
 test:
 	pytest -v
