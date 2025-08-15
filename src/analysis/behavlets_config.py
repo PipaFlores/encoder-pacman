@@ -75,6 +75,26 @@ class Caution1Config:
     )
 
 
+@dataclass
+class Caution2Config:
+    """
+    Average distance to Ghosts
+    """
+
+    DISTANCE_METHOD: str = "centroid"  # Distance to centroid. Other option is "average"
+
+
+@dataclass
+class Caution3Config:
+    """
+    Close Calls
+    """
+
+    CONTEXT_LENGTH: int = None
+    CLOSE_DISTANCE: int = 1
+    SEARCH_WINDOW: int = 5
+
+
 class BehavletsConfig:
     """Configuration class for all behavlets parameters"""
 
@@ -84,6 +104,8 @@ class BehavletsConfig:
         self.aggression4 = Aggression4Config()
         self.aggression6 = Aggression6Config()
         self.caution1 = Caution1Config()
+        self.caution2 = Caution2Config()
+        self.caution3 = Caution3Config()
 
     def get_config(self, behavlet_name: str) -> Dict[str, Any]:
         """Get configuration for a specific behavlet"""
@@ -93,5 +115,8 @@ class BehavletsConfig:
             "Aggression4": self.aggression4.__dict__,
             "Aggression6": self.aggression6.__dict__,
             "Caution1": self.caution1.__dict__,
+            "Caution2a": self.caution2.__dict__,
+            "Caution2b": self.caution2.__dict__,
+            "Caution3": self.caution3.__dict__,
         }
         return config_map.get(behavlet_name, {})
