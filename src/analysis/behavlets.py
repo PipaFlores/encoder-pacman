@@ -12,7 +12,30 @@ logger = setup_logger(__name__)
 
 
 class Behavlets:
-    NAMES = ["Aggression1", "Aggression3", "Aggression4", "Aggression6", "Caution1"]
+    """
+    Implementation of the rule-based pattern mining behavlets
+    [Cowley & Charles, 2016](https://psycnet.apa.org/doi/10.1007/s11257-016-9170-1)
+
+    Original algorithms were done in C++ for an alternative Pacman DirectX implementation.
+    Here, the code is adapted to python and our Unity implementation of the experimental
+    Pacman environment.
+
+    Main differences are that Unity works in a continuous space, instead of the grid-based
+    environments of the DirectX implementation. Additionally, our code aims to capture the
+    gamesteps of the behavlets instances for deeper behavioral analysis.
+
+    """
+
+    NAMES = [
+        "Aggression1",
+        "Aggression3",
+        "Aggression4",
+        "Aggression6",
+        "Caution1",
+        "Caution2a",
+        "Caution2b",
+        "Caution3",
+    ]
 
     @property
     def ENCODING_FUNCTIONS(self) -> dict[str, Callable]:
@@ -23,6 +46,9 @@ class Behavlets:
             "Aggression4": self._Aggression4,
             "Aggression6": self._Aggression6,
             "Caution1": self._Caution1,
+            "Caution2a": self._Caution2a,
+            "Caution2b": self._Caution2b,
+            "Caution3": self._Caution3,
         }
 
     def __init__(self, name: str, verbose: bool = False, debug: bool = False, **kwargs):
@@ -774,7 +800,7 @@ class Behavlets:
 
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
         # SEARCH_WINDOW = kwargs.get("SEARCH_WINDOW", 10)
-        GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 5)
+        GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 10)
         OPPOSITE_POSITIONS = {
             0: (12.5, -9.5),
             1: (-12.5, -9.5),
@@ -1075,11 +1101,185 @@ class Behavlets:
         self.measurement_type = "interval"
         self.output_attributes = ["value"]
 
-        final_state = len(gamestates) - 1
-        self.died = []
-        self.value_per_instance = []
-        died = False
+        DISTANCE_METHOD = kwargs.get("DISTANCE_METHOD", "centroid")
+
+        distance_to_ghosts = []
+
+        for state in gamestates.itertuples():
+            if state.pacman_attack == 1:  # Skip powerpilled states
+                continue
+            pacman_pos = (state.Pacman_X, state.Pacman_Y)
+            ghosts_positions = self._get_ghost_pos(state, only_alive=True)
+            filtered_ghosts_positions = [
+                pos for pos in ghosts_positions if pos is not None
+            ]
+            if len(filtered_ghosts_positions) >= 1:
+                if DISTANCE_METHOD == "centroid":
+                    ghosts_array = np.array(filtered_ghosts_positions)
+                    centroid = tuple(np.mean(ghosts_array, axis=0))
+                    distance_to_ghosts.append(
+                        sum(
+                            [
+                                abs(pacman_pos[0] - centroid[0]),
+                                abs(pacman_pos[1] - centroid[1]),
+                            ]
+                        )
+                    )
+                elif DISTANCE_METHOD == "average":
+                    ghosts_distances = self._get_distance_to_ghosts(
+                        pacman_pos, ghosts_positions
+                    )
+                    filtered_ghosts_distances = [
+                        distance
+                        for distance in ghosts_distances
+                        if distance is not math.inf
+                    ]
+                    distance_to_ghosts.append(
+                        sum(filtered_ghosts_distances) / len(filtered_ghosts_distances)
+                    )
+            else:
+                continue
+
+        self.value = sum(distance_to_ghosts) / len(distance_to_ghosts)
+
+        return
+
+    def _Caution2b(self, gamestates: pd.DataFrame, **kwargs):
+        """
+        Average distance to ghosts - on powerpill
+
+        Average distance the player keeps from ghosts, when on a powerpill
+
+        """
+        self.full_name = "Caution 2b - Average distance to ghosts - on powerpill"
+        self.measurement_type = "interval"
+        self.output_attributes = ["value"]
+
+        DISTANCE_METHOD = kwargs.get("DISTANCE_METHOD", "centroid")
+
+        distance_to_ghosts = []
+
+        for state in gamestates.itertuples():
+            if state.pacman_attack == 0:  # Skip non-powerpilled states
+                continue
+            pacman_pos = (state.Pacman_X, state.Pacman_Y)
+            ghosts_positions = self._get_ghost_pos(state, only_alive=True)
+            filtered_ghosts_positions = [
+                pos for pos in ghosts_positions if pos is not None
+            ]
+            if len(filtered_ghosts_positions) >= 1:
+                if DISTANCE_METHOD == "centroid":
+                    ghosts_array = np.array(filtered_ghosts_positions)
+                    centroid = tuple(np.mean(ghosts_array, axis=0))
+                    distance_to_ghosts.append(
+                        sum(
+                            [
+                                abs(pacman_pos[0] - centroid[0]),
+                                abs(pacman_pos[1] - centroid[1]),
+                            ]
+                        )
+                    )
+                elif DISTANCE_METHOD == "average":
+                    ghosts_distances = self._get_distance_to_ghosts(
+                        pacman_pos, ghosts_positions
+                    )
+                    filtered_ghosts_distances = [
+                        distance
+                        for distance in ghosts_distances
+                        if distance is not math.inf
+                    ]
+                    distance_to_ghosts.append(
+                        sum(filtered_ghosts_distances) / len(filtered_ghosts_distances)
+                    )
+            else:
+                continue
+
+        if distance_to_ghosts:
+            self.value = sum(distance_to_ghosts) / len(distance_to_ghosts)
+        else:
+            self.value = 0
+
+        return
+
+    def _Caution3(self, gamestates: pd.DataFrame, **kwargs):
+        ## TODO : FINNISH/VERIFY THIS. core algorithm done, only need finetuning and testing.
+        """
+        Close Calls
+
+        How often player comes very close to a ghost, when not on a pill, and does not die afterwards.
+        """
+
+        self.full_name = "Caution 3 - Close Calls"
+        self.measurement_type = "interval"
+        self.output_attributes = ["value", "instances", "gamesteps", "timesteps"]
+
+        CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
+        CLOSE_DISTANCE = kwargs.get("CLOSE_DISTANCE", 1)
+        SEARCH_WINDOW = kwargs.get("SEARCH_WINDOW", 5)
+
+        final_state_idx = len(gamestates) - 1
+
         flag = False
+
+        for i, state in enumerate(gamestates.itertuples()):
+            if i == final_state_idx:
+                if flag:
+                    instance_gamesteps, instance_timesteps = self._end_instance(
+                        state,
+                        gamestates,
+                        start_gamestep,
+                        start_timestep,
+                        CONTEXT_LENGTH,
+                    )
+
+                    self.gamesteps.append(instance_gamesteps)
+                    self.timesteps.append(instance_timesteps)   
+                    flag = False
+
+            elif state.pacman_attack == 1:
+                if flag:
+                    instance_gamesteps, instance_timesteps = self._end_instance(
+                        state,
+                        gamestates,
+                        start_gamestep,
+                        start_timestep,
+                        CONTEXT_LENGTH,
+                    )
+
+                    self.gamesteps.append(instance_gamesteps)
+                    self.timesteps.append(instance_timesteps)
+                    flag = False
+                else:
+                    continue
+
+            elif flag and not (
+                any([distance < CLOSE_DISTANCE for distance in ghosts_distances])
+                and i + SEARCH_WINDOW < final_state_idx
+                and gamestates.iloc[i + SEARCH_WINDOW]["lives"] >= state.lives
+            ):
+                instance_gamesteps, instance_timesteps = self._end_instance(
+                    state, gamestates, start_gamestep, start_timestep, CONTEXT_LENGTH
+                )
+                self.gamesteps.append(instance_gamesteps)
+                self.timesteps.append(instance_timesteps)
+                flag = False
+
+            elif state.pacman_attack == 0 and not flag:
+                pacman_position = (state.Pacman_X, state.Pacman_Y)
+                ghosts_positions = self._get_ghost_pos(state, only_alive=True)
+                ghosts_distances = self._get_distance_to_ghosts(
+                    pacman_position, ghosts_positions
+                )
+
+                if (
+                    any([distance < CLOSE_DISTANCE for distance in ghosts_distances])
+                    and i + SEARCH_WINDOW < final_state_idx
+                    and gamestates.iloc[i + SEARCH_WINDOW]["lives"] >= state.lives
+                ):
+                    flag = True
+                    start_gamestep = state.Index
+                    start_timestep = state.time_elapsed
+                    self.value += 1
 
         return
 

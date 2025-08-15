@@ -179,11 +179,10 @@ class TestBehavlets:
             >= 0
         )
 
-        
         Aggression6_instance_subset = Beh_encodings.instance_details.loc[
-                Beh_encodings.instance_details["behavlet_name"] == "Caution1",
-                Common_attributes + ["value_per_instance", "died"],
-            ]
+            Beh_encodings.instance_details["behavlet_name"] == "Caution1",
+            Common_attributes + ["value_per_instance", "died"],
+        ]
 
         empty_rows = Aggression6_instance_subset[
             Aggression6_instance_subset.isna().any(axis=1)
@@ -353,10 +352,11 @@ class TestBehavlets:
         assert results_context_norm.original_gamesteps == results.gamesteps
 
     def test_Caution1(self, reader):
-
         Beh = Behavlets(name="Caution1")
 
-        gamestates = reader._filter_gamestate_data(level_id=464)[0] # Game with merged instances
+        gamestates = reader._filter_gamestate_data(level_id=464)[
+            0
+        ]  # Game with merged instances
 
         results = Beh.calculate(
             gamestates=gamestates,
@@ -368,5 +368,3 @@ class TestBehavlets:
 
         assert results.died == [True]
         assert results.gamesteps == [(309885, 309905)]
-
-

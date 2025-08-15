@@ -305,6 +305,7 @@ class ClusterVisualizer(BaseVisualizer):
             bokeh.plotting.figure: A Bokeh figure containing the interactive trajectory visualization
         """
         # TODO include trajectory metadata in tooltips
+        # https://docs.bokeh.org/en/latest/docs/user_guide/interaction/tools.html#custom-tooltip
         source = ColumnDataSource(
             data=dict(
                 x=traj_centroids[:, 0],
