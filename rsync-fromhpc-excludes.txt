@@ -24,4 +24,3 @@ playground/AllTheStuff.ipynb
 temp/
 playground/*
 
-trained_models/*

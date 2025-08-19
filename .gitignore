@@ -30,3 +30,4 @@ src/tests/visualization/result_images/*
 src/tests/analysis/geom_clustering/diff_images/*
 src/tests/analysis/geom_clustering/result_images/*
 playground/*
+trained_models/
