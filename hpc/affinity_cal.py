@@ -4,8 +4,6 @@ import time
 import os
 import multiprocessing
 
-#### Pairwise Distance matrix calculation between trajectories of a certain behavlet type
-
 
 def affinity_calculation(BEHAV_TYPE):
     time_start = time.time()

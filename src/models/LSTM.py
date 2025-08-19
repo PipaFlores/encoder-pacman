@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from typing import Callable
 ## LSTM - AutoEncoder
 class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size, dropout = 0, seq_length=None):
@@ -57,6 +58,23 @@ class Decoder(nn.Module):
 
 class AELSTM(nn.Module):
     def __init__(self, input_size, hidden_size, dropout= 0,last_act = None ,seq_length=None, forced_teacher = False):
+        """
+        FIXME : Implement forced_teacher
+        LSTM Autoencoder (AELSTM) module.
+
+        Args:
+            input_size (int): Number of features (channels) in the input time series.
+            hidden_size (int): Number of hidden units in the LSTM encoder/decoder.
+            dropout (float, optional): Dropout rate for LSTM layers. Default is 0.
+            last_act (callable, optional): Activation function to apply to the decoder output. Default is None.
+            seq_length (int, optional): Length of the input sequences. Default is None.
+            forced_teacher (bool, optional): If True, use teacher forcing in the decoder (feed ground truth as input). Default is False.
+
+        The AELSTM consists of an LSTM encoder and an LSTM decoder. The encoder compresses the input sequence into a latent representation.
+        The decoder reconstructs the input sequence from the latent representation. If `forced_teacher` is True, the decoder receives the original
+        input at each time step (teacher forcing); otherwise, it receives the repeated encoded vector.
+
+        """
         super(AELSTM, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -92,6 +110,9 @@ class AELSTM(nn.Module):
         return reconstruction
     
     def configure_optimizers(self):
+        """
+        Optimization Algorithm.
+        """
         return torch.optim.Adam(self.parameters(), lr= 0.001)
     
     def loss(self, x_h, x):
@@ -103,7 +124,13 @@ class AELSTM(nn.Module):
 class UCR_Dataset(torch.utils.data.Dataset):
 
     def __init__(self, ucr_dataset):
-        self.time_series = torch.Tensor(ucr_dataset[0]).transpose(1,2) # [N, channels, seq_length] -> [N, seq_length, channels]
+        """
+        Utility class to train PyTorch models.
+        Input a UCR classification dataset obtained with aeon.datasets.load_classification()
+        The class will transpose the data from [N, channels, seq_length] -> [N, seq_length, channels]
+        and store the data in batch["data"] and labels in batch["labels]
+        """
+        self.time_series = torch.Tensor(ucr_dataset[0]).transpose(1,2)
         self.labels = ucr_dataset[1]
 
     def __len__(self):
@@ -118,27 +145,60 @@ class UCR_Dataset(torch.utils.data.Dataset):
             "labels": self.labels[idx]
         }
 
-class Trainer():
-    def __init__(self, max_epochs= 50, batch_size= 32, val_set = True, gradient_clipping = None, verbose = True):
+class AE_Trainer():
+    def __init__(self, 
+                 max_epochs= 50, 
+                 batch_size= 32, 
+                 validation_split: float | None = 0.3, 
+                 gradient_clipping = None, 
+                 verbose = True,
+                 optim_algorithm: torch.optim.Optimizer | None = None):
+        """
+        Trainer class for handling the training loop of a PyTorch model Auto-Encoder (reconstruction target).
+
+        Args:
+            max_epochs (int): Maximum number of training epochs.
+            batch_size (int): Number of samples per batch.
+            validation_split (float): Fraction of data to use a validation set split.
+            gradient_clipping (float or None): Maximum norm for gradient clipping. If None, no clipping is applied.
+            verbose (bool): Whether to print training progress.
+            optim_algorithm (Callable or None): Optimization algorithm to be used. e.g., `nn.SGD | nn.Adam`
+        """
         self.max_epochs = max_epochs
         self.batch_size = batch_size
-        self.val_set = val_set
+        self.validation_split = validation_split
         self.gradient_clipping = gradient_clipping
         self.verbose = verbose
+        self.optim_algorithm = optim_algorithm
         
     def fit(self, model:nn.Module , data: torch.utils.data.Dataset):
+        """
+        Fits the given model to the provided dataset using the specified training configuration.
+
+        Args:
+            model (nn.Module): The PyTorch model to be trained. Must implement a forward method.
+            data (torch.utils.data.Dataset): The dataset to train on. Should return batches as dicts with "data" keys.
+            i.e., def __getitem__() returns {'data': data, ...} No labels are needed, as this is for Autoencoder training.
+
+        Returns:
+            None. Updates the model in-place and stores training/validation loss history in self.train_loss_list and self.val_loss_list.
+        """
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = model.to(self.device)
 
-        optimizer = (
-            self.model.configure_optimizer()
-            if hasattr(self.model, "configure_optimizer")
-            else torch.optim.Adam(self.model.parameters(), lr=0.001)
-        )
+        if not self.optim_algorithm:
+            optimizer = (
+                self.model.configure_optimizer()
+                if hasattr(self.model, "configure_optimizer")
+                else torch.optim.Adam(self.model.parameters(), lr=0.001)
+            )
+        else:
+            optimizer = self.optim_algorithm(params=self.model.parameters(), lr=0.001)
+        
         loss = self.model.loss if hasattr(self.model, "loss") and callable(self.model.loss) else lambda x_h, x: nn.MSELoss(reduction="sum")(x_h, x)
 
-        if self.val_set:
-            train_set, val_set = torch.utils.data.random_split(data, [0.7, 0.3])
+        if self.validation_split:
+            train_set, val_set = torch.utils.data.random_split(data, [1 - self.validation_split, self.validation_split])
             val_iter = torch.utils.data.DataLoader(val_set, batch_size=self.batch_size, shuffle=False)
         else:
             train_set = data
@@ -164,7 +224,7 @@ class Trainer():
                     torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
                 optimizer.step()
 
-            if self.val_set:
+            if self.validation_split:
                 self.model.eval()
                 val_loss_sum = 0 
 
@@ -179,17 +239,18 @@ class Trainer():
 
             epoch_train_loss = loss_sum / len(train_iter.dataset)
             self.train_loss_list.append(epoch_train_loss)
+            self.model.loss_history = self.train_loss_list
 
-            if self.val_set:
+            if self.validation_split:
                 epoch_val_loss = val_loss_sum / len(val_iter.dataset)
                 self.val_loss_list.append(epoch_val_loss)
+                self.model.val_loss_history = self.val_loss_list
 
             if self.verbose:
-                print(f"Epoch {epoch + 1}: Train loss={epoch_train_loss}, Val loss={epoch_val_loss if self.val_set else ''}")
+                print(f"Epoch {epoch + 1}: Train loss={epoch_train_loss}, Val loss={epoch_val_loss if self.validation_split else ''}")
 
-    def plot_loss(self):
+    def plot_loss(self, save_path: str | None = None):
         import matplotlib.pyplot as plt
-
         fig, ax = plt.subplots()
 
         ax.plot(range(len(self.train_loss_list)), self.train_loss_list, label="Train Loss")
@@ -199,4 +260,9 @@ class Trainer():
         ax.set_ylabel("Loss")
         ax.set_title("Training and Validation Loss")
         ax.legend()
+
+        if save_path:
+            fig.savefig(save_path, format="png")
+        else:
+            plt.show()
                 
