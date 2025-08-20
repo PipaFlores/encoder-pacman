@@ -130,12 +130,13 @@ def init_models(
     DATASET = "UCR_PenDigits",
     input_size = 2, # Dimensions/Channels of the input data
     validation_split = 0.3,
-    _CLST = DummyClusterer(), # for aeon API purposes.
+    _CLST = DummyClusterer(), # for aeon API purposes. If None, aeon default is kmeans which makes everything insanely slower.
     VERBOSE = True):
   AutoEncoders = []
   AutoEncoders.append(AEAttentionBiGRUClusterer(estimator=_CLST, 
                                                 verbose = VERBOSE, 
                                                 n_epochs=N_EPOCHS , 
+                                                validation_split=validation_split,
                                                 latent_space_dim=LATENT_SPACE, 
                                                 save_best_model=True, 
                                                 best_file_name=f"trained_models/AEAttBiGRU_{DATASET}_{LATENT_SPACE}"
@@ -145,6 +146,7 @@ def init_models(
                                       verbose=VERBOSE,
                                       n_epochs=N_EPOCHS,
                                       latent_space_dim=LATENT_SPACE,
+                                      validation_split=validation_split,
                                       dilation_rate=None,
                                       save_best_model=True,
                                       best_file_name=f"trained_models/AEDCNN_{DATASET}_{LATENT_SPACE}"))
@@ -152,6 +154,7 @@ def init_models(
   AutoEncoders.append(AEDRNNClusterer(estimator= _CLST,
                                       verbose = VERBOSE,
                                       n_epochs= N_EPOCHS,
+                                      validation_split=validation_split,
                                       latent_space_dim = LATENT_SPACE,
                                       save_best_model=True,
                                       best_file_name=f"trained_models/AEDRNN_{DATASET}_{LATENT_SPACE}"))
@@ -160,6 +163,7 @@ def init_models(
                                         verbose=VERBOSE,
                                         # latent_space = LATENT_SPACE, # no latent space arg. fixed to 128 (?)
                                         n_epochs=N_EPOCHS,
+                                        validation_split=validation_split,
                                         save_best_model=True,
                                         best_file_name=f"trained_models/AEResNet_{DATASET}_128"))
   
@@ -170,7 +174,7 @@ def plot_loss_keras(model, save_path = None):
     loss_values = model.summary()["loss"]
     plt.figure(figsize=(8, 4))
     plt.plot(loss_values, label="Training Loss")
-    if hasattr(model.summary(), "val_loss"):
+    if "val_loss" in model.summary():
         val_values = model.summary()["val_loss"]  
         plt.plot(val_values, label = "Validation Loss")
     plt.xlabel("Epoch")
@@ -196,10 +200,12 @@ def parse_args():
 if __name__ == "__main__":
 
     args = parse_args()
-    print("Running comparative training script with arguments:", args)
     print_system_info()
     
-
+    print("="*80)
+    print("Running comparative training script with arguments:", args)
+    print("="*80)
+    
     if args.dataset == "UCR_PenDigits":
         data = load_classification(name="PenDigits")
         print(f"Loaded PenDigits data, shape {data[0].shape}")
@@ -244,6 +250,8 @@ if __name__ == "__main__":
             model_name= f"{autoencoder.__class__.__name__}")
 
 
+    print("="*80)
+    print("Run completed")
     for model, training_time in train_time_log.items():
         print(f"{model} model trained in {training_time}")
-
+    print("="*80)
