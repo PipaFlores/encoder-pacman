@@ -148,7 +148,7 @@ def init_models(
   AutoEncoders = []
   AutoEncoders.append(AEAttentionBiGRUClusterer(estimator=_CLST, 
                                                 verbose = VERBOSE, 
-                                                n_epochs=N_EPOCHS , 
+                                                n_epochs=N_EPOCHS, 
                                                 latent_space_dim=LATENT_SPACE, 
                                                 save_best_model=True, 
                                                 best_file_name=f"trained_models/AEAttBiGRU_{DATASET}_{LATENT_SPACE}"

@@ -155,10 +155,12 @@ def parse_args():
 if __name__ == "__main__":
 
     args = parse_args()
-    print("Running comparative training script with arguments:", args)
     print_system_info()
     
-
+    print("="*80)
+    print("Running comparative training script with arguments:", args)
+    print("="*80)
+    
     if args.dataset == "UCR_PenDigits":
         data = load_classification(name="PenDigits")
         data_tensor = UCR_Dataset(data)
@@ -204,7 +206,9 @@ if __name__ == "__main__":
             labels=data[1], save_path=f"trained_models/embeddings/{autoencoder.__class__.__name__}_{args.dataset}_{args.latent_space}.png", 
             model_name= f"{autoencoder.__class__.__name__}")
 
-
+    print("="*80)
+    print("Run completed")
     for model, training_time in train_time_log.items():
         print(f"{model} model trained in {training_time}")
+    print("="*80)
 
