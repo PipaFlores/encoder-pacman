@@ -137,13 +137,13 @@ def init_models(
                              hidden_size=LATENT_SPACE,
                              ))
   
-  Trainer = AE_Trainer(max_epochs= N_EPOCHS, verbose = VERBOSE, validation_split=validation_split) #trainer for pytorch models
+  Trainer = AE_Trainer(max_epochs= N_EPOCHS * 3, verbose = VERBOSE, validation_split=validation_split) #trainer for pytorch models
   return AutoEncoders, Trainer
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Initialize autoencoder models with specified parameters.")
-    parser.add_argument('--n_epochs', type=int, default=2, help='Number of epochs for training')
+    parser.add_argument('--n-epochs', type=int, default=2, help='Number of epochs for training')
     parser.add_argument('--latent-space', type=int, default=256, help='Latent space dimension')
     parser.add_argument('--dataset', type=str, default="UCR_PenDigits", help='Dataset name')
     parser.add_argument('--validation-split', type=float, default=0.3, help="Fraction of data to be used as validation set")
@@ -192,8 +192,8 @@ if __name__ == "__main__":
  
 
         trainer.fit(autoencoder, data_tensor)
-        trainer.plot_loss(save_path=f"trained_models/loss_plots/{autoencoder.__class__.__name__}_{args.dataset}_{args.latent_space}.png")
-        torch.save(autoencoder.state_dict(), f"trained_models/{autoencoder.__class__.__name__}_{args.dataset}_{args.latent_space}.pth")
+        trainer.plot_loss(save_path=f"trained_models/loss_plots/{autoencoder.__class__.__name__}_{args.dataset}_h{args.latent_space}_e{args.n_epochs}.png")
+        torch.save(autoencoder.state_dict(), f"trained_models/{autoencoder.__class__.__name__}_{args.dataset}_h{args.latent_space}_e{args.n_epochs}.pth")
 
         _ , embeddings = autoencoder(data_tensor[:]["data"].to(trainer.device), return_encoding = True)
         embeddings = embeddings.detach().cpu().numpy()
@@ -203,12 +203,14 @@ if __name__ == "__main__":
         reduced_embeddings = reducer.fit_transform(embeddings)
         plot_reduced_embeddings(
             reduced_embeddings, 
-            labels=data[1], save_path=f"trained_models/embeddings/{autoencoder.__class__.__name__}_{args.dataset}_{args.latent_space}.png", 
+            labels=data[1], save_path=f"trained_models/embeddings/{autoencoder.__class__.__name__}_h{args.latent_space}_e{args.n_epochs}.png", 
             model_name= f"{autoencoder.__class__.__name__}")
 
     print("="*80)
     print("Run completed")
-    for model, training_time in train_time_log.items():
-        print(f"{model} model trained in {training_time}")
+    for idx, (model, training_time) in enumerate(train_time_log.items()):
+        print(f"{model} model trained in {training_time}.\
+              Starting loss={AutoEncoders[idx].val_loss_history[0]}.\
+                Final Loss={AutoEncoders[idx].val_loss_history[-1]}")
     print("="*80)
 

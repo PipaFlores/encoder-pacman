@@ -23,4 +23,4 @@ src/tests/analysis/geom_clustering/result_images/
 playground/AllTheStuff.ipynb
 temp/
 playground/*
-
+slurm*

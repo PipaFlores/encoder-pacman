@@ -606,6 +606,7 @@ class PacmanDataReader:
         Args:
             level_id: List of game ids to filter the data by.
             user_id: List of user ids to filter the data by.
+            game_states: Tuple of game_states to slice the data by. Must be states from the same level_id
             include_metadata: Boolean indicating whether to include metadata in the filtered dataframe.
         Returns:
             filtered_df: tuple[pd.DataFrame, dict]: A tuple containing:
@@ -774,8 +775,8 @@ class PacmanDataReader:
     def get_partial_trajectory(
         self,
         level_id: int | list[int] | None = None,
-        start_timestep: int = 0,
-        end_timestep: int = -1,
+        start_step: int = 0,
+        end_step: int = -1,
         get_timevalues: bool = False,
     ) -> Trajectory:
         """
@@ -783,8 +784,8 @@ class PacmanDataReader:
         Args:
             level_id: List of game ids to filter the data by.
             user_id: List of user ids to filter the data by.
-            start_timestep: Start timestep of the trajectory.
-            end_timestep: End timestep of the trajectory.
+            start_step: Start step (index) of the trajectory.
+            end_step: End step (index) of the trajectory.
         Returns:
             trajectory: `Trajectory` object containing Pacman trajectory data (x,y) coordinates.
         """
@@ -792,7 +793,7 @@ class PacmanDataReader:
             level_id=level_id, get_timevalues=get_timevalues
         )
 
-        partial_trajectory = trajectory.get_segment(start_timestep, end_timestep)
+        partial_trajectory = trajectory.get_segment(start_step, end_step)
 
         return partial_trajectory
 

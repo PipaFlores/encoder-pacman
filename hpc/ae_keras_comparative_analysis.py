@@ -139,17 +139,17 @@ def init_models(
                                                 validation_split=validation_split,
                                                 latent_space_dim=LATENT_SPACE, 
                                                 save_best_model=True, 
-                                                best_file_name=f"trained_models/AEAttBiGRU_{DATASET}_{LATENT_SPACE}"
+                                                best_file_name=f"trained_models/AEAttBiGRU_{DATASET}_h{LATENT_SPACE}_e{N_EPOCHS}"
                                               )
             )
   AutoEncoders.append(AEDCNNClusterer(estimator= _CLST,
                                       verbose=VERBOSE,
-                                      n_epochs=N_EPOCHS,
+                                      n_epochs=N_EPOCHS * 3,
                                       latent_space_dim=LATENT_SPACE,
                                       validation_split=validation_split,
                                       dilation_rate=None,
                                       save_best_model=True,
-                                      best_file_name=f"trained_models/AEDCNN_{DATASET}_{LATENT_SPACE}"))
+                                      best_file_name=f"trained_models/AEDCNN_{DATASET}_h{LATENT_SPACE}_e{N_EPOCHS}"))
 
   AutoEncoders.append(AEDRNNClusterer(estimator= _CLST,
                                       verbose = VERBOSE,
@@ -157,7 +157,7 @@ def init_models(
                                       validation_split=validation_split,
                                       latent_space_dim = LATENT_SPACE,
                                       save_best_model=True,
-                                      best_file_name=f"trained_models/AEDRNN_{DATASET}_{LATENT_SPACE}"))
+                                      best_file_name=f"trained_models/AEDRNN_{DATASET}_h{LATENT_SPACE}_e{N_EPOCHS}"))
 
   AutoEncoders.append(AEResNetClusterer(estimator=_CLST,
                                         verbose=VERBOSE,
@@ -165,7 +165,7 @@ def init_models(
                                         n_epochs=N_EPOCHS,
                                         validation_split=validation_split,
                                         save_best_model=True,
-                                        best_file_name=f"trained_models/AEResNet_{DATASET}_128"))
+                                        best_file_name=f"trained_models/AEResNet_{DATASET}_h128_e{N_EPOCHS}"))
   
   return AutoEncoders
 
@@ -237,7 +237,7 @@ if __name__ == "__main__":
         if isinstance(autoencoder,BaseDeepClusterer): 
             autoencoder.fit(data[0])
             print(f"{autoencoder.__class__.__name__}{autoencoder.model_.layers}")
-            plot_loss_keras(autoencoder, save_path=f"trained_models/loss_plots/{autoencoder.__class__.__name__}_{args.dataset}_{args.latent_space}.png")
+            plot_loss_keras(autoencoder, save_path=f"trained_models/loss_plots/{autoencoder.__class__.__name__}_{args.dataset}_h{args.latent_space}_e{args.n_epochs}.png")
 
             embeddings = autoencoder.model_.layers[1].predict(data[0].transpose(0,2,1))
         
@@ -246,12 +246,15 @@ if __name__ == "__main__":
         reduced_embeddings = reducer.fit_transform(embeddings)
         plot_reduced_embeddings(
             reduced_embeddings, 
-            labels=data[1], save_path=f"trained_models/embeddings/{autoencoder.__class__.__name__}_{args.dataset}_{args.latent_space}.png", 
+            labels=data[1], save_path=f"trained_models/embeddings/{autoencoder.__class__.__name__}_{args.dataset}_h{args.latent_space}_e{args.n_epochs}.png", 
             model_name= f"{autoencoder.__class__.__name__}")
 
 
     print("="*80)
     print("Run completed")
-    for model, training_time in train_time_log.items():
-        print(f"{model} model trained in {training_time}")
+    for idx, (model, training_time) in enumerate(train_time_log.items()):
+        if args.validation_split > 0:
+            print(f"{model} model trained in {training_time}. \
+                Start loss={AutoEncoders[idx].summary()['val_loss'][0]}. Final loss={AutoEncoders[idx].summary()['val_loss'][-1]}")
+            
     print("="*80)
