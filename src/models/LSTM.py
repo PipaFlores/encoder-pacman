@@ -1,6 +1,9 @@
 import torch
 import torch.nn as nn
+import math
+import os
 from typing import Callable
+
 ## LSTM - AutoEncoder
 class Encoder(nn.Module):
     def __init__(self, input_size, hidden_size, dropout = 0, seq_length=None):
@@ -115,11 +118,23 @@ class AELSTM(nn.Module):
         """
         return torch.optim.Adam(self.parameters(), lr= 0.001)
     
-    def loss(self, x_h, x):
+    def loss(self, 
+             x_h: torch.Tensor,
+             x: torch.Tensor, 
+             mask: torch.Tensor | None = None):
         """
         Reconstruction MSE loss
         """
-        return nn.functional.mse_loss(x_h, x, reduction="sum")
+
+        loss = nn.functional.mse_loss(x_h, x, reduction="none")
+
+        if mask is not None:
+            mask = mask.unsqueeze(-1) # from [batch, seq_length] -> [batch, seq_length, 1]
+            loss = (loss * mask).sum() / (mask.sum() + 1e-8)
+        else:
+            loss = loss.mean()
+
+        return loss
 
 class UCR_Dataset(torch.utils.data.Dataset):
 
@@ -152,7 +167,10 @@ class AE_Trainer():
                  validation_split: float | None = 0.3, 
                  gradient_clipping = None, 
                  verbose = True,
-                 optim_algorithm: torch.optim.Optimizer | None = None):
+                 optim_algorithm: torch.optim.Optimizer | None = None,
+                 save_model = False,
+                 best_path = None,
+                 last_path = None):
         """
         Trainer class for handling the training loop of a PyTorch model Auto-Encoder (reconstruction target).
 
@@ -163,6 +181,7 @@ class AE_Trainer():
             gradient_clipping (float or None): Maximum norm for gradient clipping. If None, no clipping is applied.
             verbose (bool): Whether to print training progress.
             optim_algorithm (Callable or None): Optimization algorithm to be used. e.g., `nn.SGD | nn.Adam`
+            
         """
         self.max_epochs = max_epochs
         self.batch_size = batch_size
@@ -170,6 +189,9 @@ class AE_Trainer():
         self.gradient_clipping = gradient_clipping
         self.verbose = verbose
         self.optim_algorithm = optim_algorithm
+        self.save_model = save_model
+        self.best_path = best_path
+        self.last_path = last_path
         
     def fit(self, model:nn.Module , data: torch.utils.data.Dataset):
         """
@@ -205,6 +227,7 @@ class AE_Trainer():
         train_iter = torch.utils.data.DataLoader(train_set, batch_size=self.batch_size, shuffle=False)
 
         self.train_loss_list, self.val_loss_list = [], []
+        best_loss = math.inf
 
         for epoch in range(self.max_epochs):
             self.model.train()
@@ -213,9 +236,12 @@ class AE_Trainer():
             for batch in train_iter:
                 x = batch["data"].to(self.device)
                 x_h = self.model(x)
+                mask = batch.get("mask", None)
+                if mask is not None: # masked loss for variable seq_lengths
+                    mask = batch["mask"].to(self.device)
 
                 optimizer.zero_grad()
-                batch_loss = loss(x_h, x)
+                batch_loss = loss(x_h, x, mask)
                 loss_sum += batch_loss.item()
                 
                 batch_loss.backward()
@@ -232,19 +258,38 @@ class AE_Trainer():
                     with torch.no_grad():
                         x = batch["data"].to(self.device)
                         x_h = self.model(x)
+                        mask = batch.get("mask", None)
+                        if mask is not None:
+                            mask = batch["mask"].to(self.device)
 
-                        batch_loss = loss(x_h, x)
+                        batch_loss = loss(x_h, x, mask)
                         val_loss_sum += batch_loss.item()
 
 
-            epoch_train_loss = loss_sum / len(train_iter.dataset)
+            epoch_train_loss = loss_sum / len(train_iter)
             self.train_loss_list.append(epoch_train_loss)
             self.model.loss_history = self.train_loss_list
 
             if self.validation_split:
-                epoch_val_loss = val_loss_sum / len(val_iter.dataset)
+                epoch_val_loss = val_loss_sum / len(val_iter)
                 self.val_loss_list.append(epoch_val_loss)
                 self.model.val_loss_history = self.val_loss_list
+
+            if self.save_model:
+                if self.best_path is None or self.last_path is None:
+                    raise ValueError("save_model=True but best_path or last_path not provided")
+                # Create directories if they don't exist
+                os.makedirs(os.path.dirname(self.best_path), exist_ok=True)
+                os.makedirs(os.path.dirname(self.last_path), exist_ok=True)
+                
+                if self.validation_split and epoch_val_loss < best_loss:
+                    best_loss = epoch_val_loss
+                    torch.save(model.state_dict(), self.best_path)
+                elif epoch_train_loss < best_loss: # else use train loss for best model
+                    best_loss = epoch_train_loss
+                    torch.save(model.state_dict(), self.best_path)
+
+                torch.save(model.state_dict(), self.last_path)
 
             if self.verbose:
                 print(f"Epoch {epoch + 1}: Train loss={epoch_train_loss}, Val loss={epoch_val_loss if self.validation_split else ''}")

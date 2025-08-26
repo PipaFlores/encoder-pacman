@@ -2,16 +2,20 @@ import pytorch_lightning as pl
 from torch.utils.data import DataLoader, Dataset, random_split
 import torch
 import pandas as pd
+import numpy as np
 from typing import Optional, List
 import sys
 
 sys.path.append("..")
 from .pacman_data_reader import PacmanDataReader
 
-
-class TrajectoryDataset(Dataset):
+class PacmanDataset(Dataset):
     def __init__(
-        self, trajectories: torch.Tensor, masks: torch.Tensor, game_ids: torch.Tensor
+        self, 
+        gamestates: torch.Tensor | np.ndarray, 
+        padding_value=-999,
+        # game_ids: torch.Tensor,
+        # masks: torch.Tensor| None = None, 
     ):
         """
         Args:
@@ -19,149 +23,26 @@ class TrajectoryDataset(Dataset):
             masks: tensor of shape (n_trajectories, sequence_length) indicating valid timesteps
             game_ids: tensor of shape (n_trajectories) containing the game ids
         """
-        self.trajectories = trajectories
-        self.masks = masks
-        self.game_ids = game_ids
+        if isinstance(gamestates, torch.Tensor):
+            self.gamestates = gamestates
+        else:
+            self.gamestates = torch.Tensor(gamestates)
+
+        self.masks = (self.gamestates != padding_value).float()
+        self.masks = self.masks.any(dim=-1).float()
+        # self.masks = masks
+        # self.game_ids = game_ids
 
     def __len__(self):
-        return len(self.trajectories)
+        return len(self.gamestates)
 
     def __getitem__(self, idx):
         return {
-            "trajectory": self.trajectories[idx],
+            "data": self.gamestates[idx],
             "mask": self.masks[idx],
-            "level_id": self.game_ids[idx],
+            # "level_id": self.game_ids[idx],
         }
-
-
-class TrajectoryDataModule(pl.LightningDataModule):
-    """
-    TrajectoryDataModule is a PyTorch Lightning DataModule for handling trajectory data.
-
-    Args:
-        data_folder (str): Path to the CSV file containing the raw game data.
-        batch_size (int): Number of samples per batch to load. Default is 32.
-        train_val_test_split (tuple): Proportions for splitting the data into training, validation, and test sets. Default is (0.7, 0.15, 0.15).
-        num_workers (int): Number of subprocesses to use for data loading. Default is 4.
-        max_sequence_length (Optional[int]): Maximum sequence length for padding/truncating sequences. If None, use the longest sequence. Default is None.
-        series_type (List[str]): List of series types to include in the preprocessing (e.g., ['position', 'movements', 'input']). Default is ['position'].
-        include_game_state_vars (bool): Whether to include game state variables (score, powerPellets) in the features. Default is False.
-        include_timesteps (bool): Whether to include time elapsed in the features. Default is True.
-
-    Methods:
-        setup(stage: str = None): Reads and converts the processed data to tensors and splits it into training, validation, and test sets.
-        train_dataloader(): Returns the DataLoader for the training set.
-        val_dataloader(): Returns the DataLoader for the validation set.
-        test_dataloader(): Returns the DataLoader for the test set.
-
-    ```python
-    Example usage:
-        data_module = TrajectoryDataModule(
-            data_folder='path/to/your/data.csv',
-            batch_size=32,
-            max_sequence_length=100,
-            series_type=['position', 'movements'],
-            include_game_state_vars=True,
-            include_timesteps=True
-        )
-        data_module.setup()
-        train_loader = data_module.train_dataloader()
-        batch = next(iter(train_loader))
-        print(batch['trajectory'].shape)
-        print(batch['mask'].shape)
-        print(batch['level_id'].shape)
-    ```
-    """
-
-    def __init__(
-        self,
-        data_folder: str,
-        batch_size: int = 32,
-        train_val_test_split: tuple = (0.7, 0.15, 0.15),
-        num_workers: int = 4,
-        max_sequence_length: Optional[int] = None,
-        series_type: List[str] = ["position"],
-        include_game_state_vars: bool = False,
-        include_timesteps: bool = True,
-    ):
-        super().__init__()
-        self.data_folder = data_folder
-        self.batch_size = batch_size
-        self.train_val_test_split = train_val_test_split
-        self.num_workers = num_workers
-
-        # Data processing parameters
-        self.max_sequence_length = max_sequence_length
-        self.series_type = series_type
-        self.include_game_state_vars = include_game_state_vars
-        self.include_timesteps = include_timesteps
-
-    def setup(self, stage: str = None):
-        # Read data and Convert processed data to tensor
-
-        datareader = PacmanDataReader(self.data_folder, read_games_only=True)
-
-        trajectories_df = datareader.get_trajectory_dataframe(
-            series_type=self.series_type,
-            include_game_state_vars=self.include_game_state_vars,
-            include_timesteps=self.include_timesteps,
-        )
-
-        trajectories, masks, game_ids = self._create_game_trajectory_tensor(
-            trajectories_df, max_sequence_length=self.max_sequence_length
-        )
-
-        # Create dataset with trajectories, masks, and game_ids
-        dataset = TrajectoryDataset(trajectories, masks, game_ids)
-
-        # Calculate split sizes
-        total_size = len(dataset)
-        train_size = int(self.train_val_test_split[0] * total_size)
-        val_size = int(self.train_val_test_split[1] * total_size)
-        test_size = total_size - train_size - val_size
-
-        # Split dataset
-        self.train_dataset, self.val_dataset, self.test_dataset = random_split(
-            dataset, [train_size, val_size, test_size]
-        )
-
-        # Store feature dimension for model initialization
-        self.feature_dim = trajectories.shape[-1]
-        self.seq_length = trajectories.shape[1]
-
-    @property
-    def feature_dimension(self):
-        """Return the number of features in the data"""
-        return self.feature_dim
-
-    @property
-    def sequence_length(self):
-        """Return the sequence length of the trajectories"""
-        return self.seq_length
-
-    def train_dataloader(self):
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-        )
-
-    def val_dataloader(self):
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-        )
-
-    def test_dataloader(self):
-        return DataLoader(
-            self.test_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-        )
+    
 
     def _create_game_trajectory_tensor(
         self, trajectories_df: pd.DataFrame, max_sequence_length: Optional[int] = None

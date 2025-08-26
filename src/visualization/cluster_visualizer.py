@@ -275,7 +275,7 @@ class ClusterVisualizer(BaseVisualizer):
             ax.set_ylim(self.MAZE_Y_MIN, self.MAZE_Y_MAX)
             ax.set_xlim(self.MAZE_X_MIN, self.MAZE_X_MAX)
         # Create a custom colormap that maps -1 to gray
-        cmap = plt.cm.viridis
+        cmap = plt.cm.tab10
         cmap.set_under("gray")
         scatter = ax.scatter(
             traj_embeddings[:, 0],
@@ -283,6 +283,7 @@ class ClusterVisualizer(BaseVisualizer):
             c=self.labels,
             cmap=cmap,
             vmin=0,
+            s=3,
         )
         ax.legend(*scatter.legend_elements(), title="Clusters", loc="upper right")
         ax.set_title("Trajectory Clusters")
