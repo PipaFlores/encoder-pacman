@@ -24,3 +24,4 @@ playground/AllTheStuff.ipynb
 temp/
 playground/*
 slurm*
+*.py
