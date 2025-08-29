@@ -10,8 +10,22 @@
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-module load pytorch
 
-srun python pytorch_pacman.py --sequence-type 'first_5_seconds'
-srun python pytorch_pacman.py --sequence-type 'last_5_seconds'
-srun python pytorch_pacman.py --sequence-type 'whole_level'
+### PYTORCH MODELS
+# module load pytorch
+
+# srun python pytorch_pacman.py --sequence-type 'first_5_seconds' --n-epochs 1000
+# srun python pytorch_pacman.py --sequence-type 'last_5_seconds' --n-epochs 1000
+# srun python pytorch_pacman.py --sequence-type 'whole_level' --n-epochs 1000
+
+### AEON/KERAS MODELS
+module load tensorflow
+
+srun python keras_pacman.py --model 'DRNN' --sequence-type 'first_5_seconds' --n-epochs 500
+
+srun python keras_pacman.py --model 'ResNet' --sequence-type 'first_5_seconds' --n-epochs 500
+
+srun python keras_pacman.py --model 'DRNN' --sequence-type 'whole_level' --n-epochs 500
+
+srun python keras_pacman.py --model 'ResNet' --sequence-type 'whole_level' --n-epochs 500
+

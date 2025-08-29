@@ -3,16 +3,20 @@ import os
 import sys
 import numpy as np
 import pandas as pd
-import torch
+
 import argparse
 from umap import UMAP
 from sklearn.cluster import HDBSCAN
 import matplotlib.pyplot as plt
 
+
+import tensorflow as tf
+from aeon.clustering.deep_learning import BaseDeepClusterer, AEAttentionBiGRUClusterer, AEFCNClusterer, AEResNetClusterer, AEDCNNClusterer, AEDRNNClusterer
+from aeon.clustering import DummyClusterer
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from src.models import AE_Trainer, AELSTM
-from src.datahandlers import PacmanDataset, PacmanDataReader, Trajectory
+from src.datahandlers import PacmanDataReader, Trajectory
 
 def slice_seq_of_each_level(
         reader: PacmanDataReader,
@@ -73,11 +77,28 @@ def padding_sequences(sequence_list:list[np.ndarray],
 
     return X_padded
 
+def plot_loss_keras(model, save_path = None):
+    loss_values = model.summary()["loss"]
+    plt.figure(figsize=(8, 4))
+    plt.plot(loss_values, label="Training Loss")
+    if "val_loss" in model.summary():
+        val_values = model.summary()["val_loss"]  
+        plt.plot(val_values, label = "Validation Loss")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title(f"{model.__class__.__name__} training loss")
+    plt.legend()
+    if save_path is not None:
+        plt.savefig(save_path, format="png")
+    else:
+        plt.show()
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Initialize autoencoder models with specified parameters.")
-    parser.add_argument('--n-epochs', type=int, default=1000, help='Number of epochs for training')
+    parser.add_argument('--n-epochs', type=int, default=2, help='Number of epochs for training')
     parser.add_argument('--latent-space', type=int, default=256, help='Latent space dimension')
     parser.add_argument('--validation-split', type=float, default=0.3, help="Fraction of data to be used as validation set")
+    parser.add_argument('--model', type= str, default="DRNN", help="Model architechture to train")
     # parser.add_argument('--input_size', type=int, default=2, help='Input size (number of channels/dimensions)')
     parser.add_argument('--verbose', action='store_true', help='Verbosity flag')
     parser.add_argument('--sequence-type', type= str, default="", help= "On what type of sequences to train the model, see source code")
@@ -85,8 +106,6 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     ### SLICE DATA
     reader = PacmanDataReader(data_folder="../data", verbose=args.verbose)
@@ -125,52 +144,67 @@ if __name__ == "__main__":
 
     X_padded = padding_sequences(sequence_list=sequence_list)
 
-    data_tensor = PacmanDataset(X_padded)
-    data_tensor[:]["data"].to(device)
-
-    print(f"loaded data tensor of shape {data_tensor.gamestates.shape}")
+    data = X_padded
+    print(f"loaded data array of shape {data.shape}")
 
     ### TRAIN MODEL
-    best_save_path = f"trained_models/pacman_aelstm_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}_best.pth"
-    last_save_path = f"trained_models/pacman_aelstm_f{N_FEATURES}_h{args.latent_space}_e{args.n_epochs}_last.pth"
-    trainer = AE_Trainer(max_epochs=args.n_epochs, 
-                        batch_size=32, 
-                        validation_split=args.validation_split,
-                        save_model=True,
-                        best_path=best_save_path,
-                        last_path=last_save_path)
+    best_save_path = f"_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}_best.pth"
+    last_save_path = f"_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}_last.pth"
+    
+    if args.model == "DRNN":
+        autoencoder = AEDRNNClusterer(
+            estimator= DummyClusterer(),
+            verbose = args.verbose,
+            n_epochs= args.n_epochs,
+            validation_split=args.validation_split,
+            latent_space_dim = args.latent_space,
+            save_best_model=True,
+            best_file_name="trained_models/pacman_AEDRNN" + best_save_path,
+            save_last_model=True,
+            last_file_name="trained_models/pacman_AEDRNN" + last_save_path)
+        
+    elif args.model == "ResNet":
+        autoencoder = AEResNetClusterer(
+            estimator=DummyClusterer(),
+            verbose=args.verbose,
+            # latent_space = LATENT_SPACE, # no latent space arg. fixed to 128 (?)
+            n_epochs=args.n_epochs,
+            validation_split=args.validation_split,
+            save_best_model=True,
+            best_file_name="trained_models/pacman_AEResNet" + best_save_path,
+            save_last_model=True,
+            last_file_name="trained_models/pacman_AEResNet" + last_save_path)
 
-    autoencoder = AELSTM(input_size=data_tensor[0]["data"].shape[1], hidden_size=args.latent_space)
 
     os.makedirs("trained_models", exist_ok=True)
     os.makedirs("trained_models/loss_plots", exist_ok=True)
-    trainer.fit(autoencoder, data_tensor)
+
+    autoencoder.fit(data.transpose(0,2,1)) # aeon expects data as [samples, channels, seq_length]
+
     print(f"Best Model saved to {best_save_path}")
 
-    trainer.plot_loss(f"trained_models/loss_plots/pacman_aelstm_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
-    print(f"Loss plot saved in trained_models/loss_plots/pacman_aelstm_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
+    plot_loss_keras(autoencoder, f"trained_models/loss_plots/pacman_{autoencoder.__class__.__name__}_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
+    print(f"Loss plot saved in trained_models/loss_plots/pacman_{autoencoder.__class__.__name__}_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
 
 
-    ### Batch EMBEDD
+    ### Batch EMBEDD (Keras already does batch processing on .predict() but code here for reference)
 
-    BATCH_SIZE = 32  # Adjust based on your available memory
-    all_embeddings = [] # empty list to be filled during batch processing.
+    # BATCH_SIZE = 32  # Adjust based on your available memory
+    # all_embeddings = [] # empty list to be filled during batch processing.
 
-    autoencoder.eval()
-    with torch.no_grad():  # Important: disable gradients for inference
-        for i in range(0, len(data_tensor), BATCH_SIZE):
-            batch_data = data_tensor[i:i+BATCH_SIZE]["data"].to(device)
-            
-            # Get embeddings for this batch
-            _, batch_embeddings = autoencoder.forward(batch_data, return_encoding=True)
-            all_embeddings.append(batch_embeddings.cpu())  # Move to CPU to save GPU memory
 
-    # Concatenate all embeddings
-    embeddings = torch.cat(all_embeddings, dim=0)
+    # for i in range(0, len(data), BATCH_SIZE):
+    #     batch_data = data[i:i+BATCH_SIZE]
+    #     batch_data_transposed = batch_data
+    #     batch_embeddings = autoencoder.model_.layers[1].predict(batch_data_transposed)
+    #     all_embeddings.append(batch_embeddings)
 
+    # embeddings = np.concatenate(all_embeddings, axis=0)
+
+    embeddings = autoencoder.model_.layers[1].predict(data)
     ## reduce
     reducer = UMAP()
-    embeddings_2D = reducer.fit_transform(embeddings.detach().numpy())
+    embeddings_2D = reducer.fit_transform(embeddings)
 
 
     ### CLUSTER
@@ -198,7 +232,8 @@ if __name__ == "__main__":
         axs[i].scatter(embeddings_2D[:,0], embeddings_2D[:,1], s=2, cmap="tab10", c=predictions)
         axs[i].set_title(f"Deep Clustering with UMAP-{name} for LSTM", size=8)
 
-    fig.savefig(fname=f"trained_models/embeddings/DeepClusteringAELSTM_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
-
+    save_path = f"trained_models/embeddings/DeepClustering{autoencoder.__class__.__name__}_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png"
+    fig.savefig(fname=save_path)
+    print(f"Saved embedding plot in {save_path}")
 
 

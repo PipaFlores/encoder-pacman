@@ -1,4 +1,4 @@
-import pytorch_lightning as pl
+
 from torch.utils.data import DataLoader, Dataset, random_split
 import torch
 import pandas as pd
@@ -18,10 +18,16 @@ class PacmanDataset(Dataset):
         # masks: torch.Tensor| None = None, 
     ):
         """
+        PacmanDataset for handling padded game state sequences.
+
         Args:
-            trajectories: tensor of shape (n_trajectories, sequence_length, features)
-            masks: tensor of shape (n_trajectories, sequence_length) indicating valid timesteps
-            game_ids: tensor of shape (n_trajectories) containing the game ids
+            gamestates (torch.Tensor or np.ndarray): Tensor or array of shape (n_trajectories, sequence_length, features)
+                containing the padded game state sequences for each trajectory.
+            padding_value (float, optional): The value used for padding invalid timesteps in the sequences. Default is -999.
+
+        Attributes:
+            gamestates (torch.Tensor): Tensor of shape (n_trajectories, sequence_length, features) with game state data.
+            masks (torch.Tensor): Tensor of shape (n_trajectories, sequence_length) indicating valid (non-padding) timesteps.
         """
         if isinstance(gamestates, torch.Tensor):
             self.gamestates = gamestates

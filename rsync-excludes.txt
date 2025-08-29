@@ -25,3 +25,4 @@ temp/
 playground/*
 
 trained_models
+hpc/trained_models
