@@ -4,7 +4,7 @@
 #SBATCH --nodes=1            # replace <N> with the number of nodes to run on
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2  # Mahti has 128 CPU cores per node, Puhti has 40
-#SBATCH --mem-per-cpu=8000
+#SBATCH --mem-per-cpu=10000
 #SBATCH --gres=gpu:v100:1
 #SBATCH --time=05:00:00
 
@@ -25,7 +25,12 @@ srun python keras_pacman.py --model 'DRNN' --sequence-type 'first_5_seconds' --n
 
 srun python keras_pacman.py --model 'ResNet' --sequence-type 'first_5_seconds' --n-epochs 500
 
+srun python keras_pacman.py --model 'DRNN' --sequence-type 'last_5_seconds' --n-epochs 500
+
+srun python keras_pacman.py --model 'ResNet' --sequence-type 'last_5_seconds' --n-epochs 500
+
 srun python keras_pacman.py --model 'DRNN' --sequence-type 'whole_level' --n-epochs 500
 
 srun python keras_pacman.py --model 'ResNet' --sequence-type 'whole_level' --n-epochs 500
+
 

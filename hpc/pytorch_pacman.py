@@ -98,14 +98,14 @@ if __name__ == "__main__":
         # "pacman_attack",
         "Pacman_X",
         "Pacman_Y",
-        "Ghost1_X",
-        "Ghost1_Y",            
-        "Ghost2_X",
-        "Ghost2_Y",
-        "Ghost3_X",
-        "Ghost3_Y",
-        "Ghost4_X",
-        "Ghost4_Y",
+        # "Ghost1_X",
+        # "Ghost1_Y",            
+        # "Ghost2_X",
+        # "Ghost2_Y",
+        # "Ghost3_X",
+        # "Ghost3_Y",
+        # "Ghost4_X",
+        # "Ghost4_Y",
     ]
     N_FEATURES = len(FEATURES)
 
@@ -132,7 +132,7 @@ if __name__ == "__main__":
 
     ### TRAIN MODEL
     best_save_path = f"trained_models/pacman_aelstm_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}_best.pth"
-    last_save_path = f"trained_models/pacman_aelstm_f{N_FEATURES}_h{args.latent_space}_e{args.n_epochs}_last.pth"
+    last_save_path = f"trained_models/pacman_aelstm_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}_last.pth"
     trainer = AE_Trainer(max_epochs=args.n_epochs, 
                         batch_size=32, 
                         validation_split=args.validation_split,

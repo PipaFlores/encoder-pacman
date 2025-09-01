@@ -117,14 +117,14 @@ if __name__ == "__main__":
         # "pacman_attack",
         "Pacman_X",
         "Pacman_Y",
-        "Ghost1_X",
-        "Ghost1_Y",            
-        "Ghost2_X",
-        "Ghost2_Y",
-        "Ghost3_X",
-        "Ghost3_Y",
-        "Ghost4_X",
-        "Ghost4_Y",
+        # "Ghost1_X",
+        # "Ghost1_Y",            
+        # "Ghost2_X",
+        # "Ghost2_Y",
+        # "Ghost3_X",
+        # "Ghost3_Y",
+        # "Ghost4_X",
+        # "Ghost4_Y",
     ]
     N_FEATURES = len(FEATURES)
 
@@ -187,21 +187,22 @@ if __name__ == "__main__":
     print(f"Loss plot saved in trained_models/loss_plots/pacman_{autoencoder.__class__.__name__}_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
 
 
-    ### Batch EMBEDD (Keras already does batch processing on .predict() but code here for reference)
+    ### Batch EMBEDD
 
-    # BATCH_SIZE = 32  # Adjust based on your available memory
-    # all_embeddings = [] # empty list to be filled during batch processing.
+    BATCH_SIZE = 32  # Adjust based on your available memory
+    all_embeddings = [] # empty list to be filled during batch processing.
 
 
-    # for i in range(0, len(data), BATCH_SIZE):
-    #     batch_data = data[i:i+BATCH_SIZE]
-    #     batch_data_transposed = batch_data
-    #     batch_embeddings = autoencoder.model_.layers[1].predict(batch_data_transposed)
-    #     all_embeddings.append(batch_embeddings)
+    for i in range(0, len(data), BATCH_SIZE):
+        batch_data = data[i:i+BATCH_SIZE]
+        batch_data_transposed = batch_data
+        batch_embeddings = autoencoder.model_.layers[1].predict(batch_data_transposed)
+        all_embeddings.append(batch_embeddings)
 
-    # embeddings = np.concatenate(all_embeddings, axis=0)
+    embeddings = np.concatenate(all_embeddings, axis=0)
 
-    embeddings = autoencoder.model_.layers[1].predict(data)
+    ## No batch embed
+    # embeddings = autoencoder.model_.layers[1].predict(data)
     ## reduce
     reducer = UMAP()
     embeddings_2D = reducer.fit_transform(embeddings)
