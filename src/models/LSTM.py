@@ -282,12 +282,14 @@ class AE_Trainer():
                 os.makedirs(os.path.dirname(self.best_path), exist_ok=True)
                 os.makedirs(os.path.dirname(self.last_path), exist_ok=True)
                 
-                if self.validation_split and epoch_val_loss < best_loss:
-                    best_loss = epoch_val_loss
-                    torch.save(model.state_dict(), self.best_path)
-                elif epoch_train_loss < best_loss: # else use train loss for best model
-                    best_loss = epoch_train_loss
-                    torch.save(model.state_dict(), self.best_path)
+                if self.validation_split:
+                    if epoch_val_loss < best_loss:
+                        best_loss = epoch_val_loss
+                        torch.save(model.state_dict(), self.best_path)
+                else:
+                    if epoch_train_loss < best_loss:
+                        best_loss = epoch_train_loss
+                        torch.save(model.state_dict(), self.best_path)
 
                 torch.save(model.state_dict(), self.last_path)
 
