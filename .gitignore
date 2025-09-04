@@ -15,6 +15,7 @@ notebooks/profile.html
 notebooks/profile.json
 notebooks/_ipython-input-5-profile
 notebooks/_ipython-input-17-profile
+notebooks/subsequences/
 README_files/
 notebooks/test_partial_trajectories.json
 notebooks/test_partial_trajectories.npz
@@ -31,3 +32,5 @@ src/tests/analysis/geom_clustering/diff_images/*
 src/tests/analysis/geom_clustering/result_images/*
 playground/*
 trained_models/
+
+hpc/videos/
