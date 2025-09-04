@@ -22,7 +22,10 @@ src/tests/analysis/geom_clustering/diff_images/
 src/tests/analysis/geom_clustering/result_images/
 playground/AllTheStuff.ipynb
 temp/
-playground/*
 
 trained_models/
+notebooks/
+playground/
 hpc/trained_models/
+hpc/videos/
+hpc/affinity_matrices/
