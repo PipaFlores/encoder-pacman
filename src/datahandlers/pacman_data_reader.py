@@ -179,7 +179,7 @@ class PacmanDataReader:
             # Process psych data
             self.game_flow_df = self._process_flow()
             self.bisbas_df = self._process_bisbas()
-
+### PRE-PROCESSING METHODS
     def _process_pellet_positions(self):
         """
         Processes and reconstructs the available pellet positions for each game state in the Pacman game.
@@ -710,6 +710,7 @@ class PacmanDataReader:
 
         return filtered_df, metadata
 
+### TRAJECTORY METHODS
     def get_trajectory(
         self,
         level_id: int | None = None,
@@ -892,3 +893,105 @@ class PacmanDataReader:
                 processed_df[col] = processed_df[col].astype(float)
 
         return processed_df
+
+### Tensor pre-processing
+    def padding_sequences(self,
+                          sequence_list:list[np.ndarray], 
+                          padding_value = -999.0):
+
+        # Find the maximum sequence length
+        max_seq_length = max(x.shape[0] for x in sequence_list)
+        n = len(sequence_list)
+        n_features = sequence_list[0].shape[1]
+
+        # Pad sequences with np.nan (or 0, or any value) to max_seq_length
+        padded_sequence_list = np.full((n, max_seq_length, n_features), padding_value , dtype=np.float32)
+        for i, sequence in enumerate(sequence_list):
+            seq_len = sequence.shape[0]
+            padded_sequence_list[i, :seq_len, :] = sequence
+
+        return padded_sequence_list
+
+
+### SLICING METHODS. 
+# One method iterates all levels and returns slice type.
+# If interactive plotting, include gif_path
+# self.slicing_method(**slicing params, 
+#                       FEATURES, 
+#                       make_gif
+#                            ) -> [sequence_list,  // CORE -> This could be padded (maybe slicing parameter)
+#                                   metadata_list, 
+#                                   traj_list, 
+#                                   gif_path_list] // CORE-Optional
+    def slice_seq_of_each_level(
+            self,
+            start_step=0,
+            end_step=-1,
+            FEATURES= [
+                # "score", 
+                # "lives", 
+                # "pacman_attack",
+                "Pacman_X",
+                "Pacman_Y",
+                # "Ghost1_X",
+                # "Ghost1_Y",            
+                # "Ghost2_X",
+                # "Ghost2_Y",
+                # "Ghost3_X",
+                # "Ghost3_Y",
+                # "Ghost4_X",
+                # "Ghost4_Y",
+                ],
+                make_gif=False
+        )-> tuple[list[np.ndarray], list[Trajectory], list[str]]:
+        """
+        Extracts a slice (subsequence) of game states for each level, from `start_step` to `end_step`.
+
+        Args:
+            start_step (int, optional): The starting index (inclusive) of the slice for each level. Defaults to 0.
+            end_step (int, optional): The ending index (exclusive) of the slice for each level. If -1, includes all steps to the end. Defaults to -1.
+            FEATURES (list, optional): List of column names (features) to include in the output sequences. Defaults to ["Pacman_X", "Pacman_Y"].
+            make_gif (bool, optional): If True, generates a GIF for each level's subsequence and returns the file paths. Defaults to False.
+
+        Returns:
+            tuple:
+                - list[np.ndarray]: List of arrays, each containing the selected features for the sliced sequence of a level.
+                - list[Trajectory]: List of Trajectory objects for each sliced sequence.
+                - list[str]: List of GIF file paths (empty if make_gif is False).
+        """
+        sequence_list = []
+        traj_list = []
+        gif_path_list = []
+
+        if make_gif:
+            from src.visualization import GameReplayer ## FIXME Lazy import here?
+            replayer = GameReplayer()
+
+        for level_id in self.level_df["level_id"].unique():
+            gamestates, _ = self._filter_gamestate_data(level_id=level_id, include_metadata=False)
+            gamestates = gamestates[FEATURES]
+
+            start_step_ = max(0, start_step)
+            end_step_ = min(end_step, len(gamestates)) if end_step != -1 else -1
+
+            gamestates = gamestates.iloc[start_step_:end_step_]
+            traj = self.get_partial_trajectory(level_id=level_id, start_step=start_step_, end_step=end_step_)
+
+            sequence_list.append(gamestates.to_numpy())
+            traj_list.append(traj)
+
+            ## and create video_sequence
+            if make_gif:
+                gif_path = f"./subsequences/level_{level_id}_{start_step_:06d}_{end_step_:06d}.gif"
+                gif_path_list.append(gif_path)
+                if not os.path.exists(gif_path):
+                    replayer.extract_gamestate_subsequence_ffmpeg(video_path= f"../hpc/videos/{level_id}.mp4",
+                                                                start_gamestate=start_step_, 
+                                                                end_gamestate=end_step_,
+                                                                output_path=gif_path)
+                    
+                else:
+                    # print(f"sequence for level_id {level_id} already exists, skipping")
+                    pass
+
+        return sequence_list, traj_list, gif_path_list

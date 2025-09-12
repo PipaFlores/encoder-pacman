@@ -10,6 +10,7 @@ sys.path.append("..")
 from .pacman_data_reader import PacmanDataReader
 
 class PacmanDataset(Dataset):
+    ## TODO : this can be abstaracted as a "PaddedDataSet" or DataTensor. there is nothing specific to pacman
     def __init__(
         self, 
         gamestates: torch.Tensor | np.ndarray, 

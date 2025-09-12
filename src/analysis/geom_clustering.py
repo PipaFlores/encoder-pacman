@@ -61,6 +61,7 @@ def _compute_distance_chunk_with_progress(args):
 class GeomClustering:
     """
     A class for clustering and analyzing geometric trajectories.
+    FIXME : Move all analyzes and vis to pattern_analysis.py
 
     This class provides functionality to cluster trajectories based on their geometric similarity
     using either DBSCAN or HDBSCAN algorithms. It calculates affinity matrices between trajectories
@@ -307,6 +308,7 @@ class GeomClustering:
     ### Affinity Matrix Visualization
 
     def plot_affinity_matrix_overview(self, axs: np.ndarray[plt.Axes] | None = None):
+        ### FIXME: move to pattern_analysis
         """
         Plot a comprehensive overview of the affinity matrix.
 
@@ -346,6 +348,7 @@ class GeomClustering:
             plt.show()
 
     def plot_interactive_overview(self):
+        ### FIXME: move to pattern_analysis
         """
         Create an interactive visualization of the affinity matrix and trajectories embeddings.
 

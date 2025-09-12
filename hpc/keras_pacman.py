@@ -117,14 +117,14 @@ if __name__ == "__main__":
         # "pacman_attack",
         "Pacman_X",
         "Pacman_Y",
-        # "Ghost1_X",
-        # "Ghost1_Y",            
-        # "Ghost2_X",
-        # "Ghost2_Y",
-        # "Ghost3_X",
-        # "Ghost3_Y",
-        # "Ghost4_X",
-        # "Ghost4_Y",
+        "Ghost1_X",
+        "Ghost1_Y",            
+        "Ghost2_X",
+        "Ghost2_Y",
+        "Ghost3_X",
+        "Ghost3_Y",
+        "Ghost4_X",
+        "Ghost4_Y",
     ]
     N_FEATURES = len(FEATURES)
 
@@ -148,8 +148,11 @@ if __name__ == "__main__":
     print(f"loaded data array of shape {data.shape}")
 
     ### TRAIN MODEL
-    best_save_path = f"_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}_best.pth"
-    last_save_path = f"_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}_last.pth"
+    model_path = os.path.join(
+            "trained_models",
+            SEQUENCE_TYPE,
+            "f" + str(N_FEATURES)
+        )
     
     if args.model == "DRNN":
         autoencoder = AEDRNNClusterer(
@@ -159,9 +162,10 @@ if __name__ == "__main__":
             validation_split=args.validation_split,
             latent_space_dim = args.latent_space,
             save_best_model=True,
-            best_file_name="trained_models/pacman_AEDRNN" + best_save_path,
+            best_file_name=os.path.join(model_path, f"AEDRNN_h{args.latent_space}_e{args.n_epochs}_best"),
             save_last_model=True,
-            last_file_name="trained_models/pacman_AEDRNN" + last_save_path)
+            last_file_name=os.path.join(model_path, f"AEDRNN_h{args.latent_space}_e{args.n_epochs}_last")
+        )
         
     elif args.model == "ResNet":
         autoencoder = AEResNetClusterer(
@@ -171,21 +175,44 @@ if __name__ == "__main__":
             n_epochs=args.n_epochs,
             validation_split=args.validation_split,
             save_best_model=True,
-            best_file_name="trained_models/pacman_AEResNet" + best_save_path,
+            best_file_name=os.path.join(model_path, f"AEResNet_h{args.latent_space}_e{args.n_epochs}_best"),
             save_last_model=True,
-            last_file_name="trained_models/pacman_AEResNet" + last_save_path)
+            last_file_name=os.path.join(model_path, f"AEResNet_h{args.latent_space}_e{args.n_epochs}_last")
+            )
 
 
-    os.makedirs("trained_models", exist_ok=True)
-    os.makedirs("trained_models/loss_plots", exist_ok=True)
+    os.makedirs(model_path, exist_ok=True)
+    os.makedirs(
+        os.path.join(
+            "trained_models",
+            "latent_space_plots",
+            SEQUENCE_TYPE,
+            "f" + str(N_FEATURES)
+        ),
+        exist_ok=True)
+    os.makedirs(
+        os.path.join(
+            "trained_models",
+            "loss_plots",
+            SEQUENCE_TYPE,
+            "f" + str(N_FEATURES)
+        ), exist_ok=True)
+    
 
     autoencoder.fit(data.transpose(0,2,1)) # aeon expects data as [samples, channels, seq_length]
 
-    print(f"Best Model saved to {best_save_path}")
+    print(f"Best Model saved to {model_path}")
 
-    plot_loss_keras(autoencoder, f"trained_models/loss_plots/pacman_{autoencoder.__class__.__name__}_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
-    print(f"Loss plot saved in trained_models/loss_plots/pacman_{autoencoder.__class__.__name__}_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
-
+    plot_loss_keras(
+        autoencoder,
+        os.path.join(
+            "trained_models",
+            "loss_plots",
+            SEQUENCE_TYPE,
+            "f" + str(N_FEATURES),
+            f"{autoencoder.__class__.__name__}_h{args.latent_space}_e{args.n_epochs}.png"
+        )
+    )        
 
     ### Batch EMBEDD
 
@@ -195,8 +222,7 @@ if __name__ == "__main__":
 
     for i in range(0, len(data), BATCH_SIZE):
         batch_data = data[i:i+BATCH_SIZE]
-        batch_data_transposed = batch_data
-        batch_embeddings = autoencoder.model_.layers[1].predict(batch_data_transposed)
+        batch_embeddings = autoencoder.model_.layers[1].predict(batch_data)
         all_embeddings.append(batch_embeddings)
 
     embeddings = np.concatenate(all_embeddings, axis=0)
@@ -221,8 +247,6 @@ if __name__ == "__main__":
         labels[name] = clusterer.fit_predict(embeddings_2D)
 
     ## VISUALIZE
-
-    os.makedirs("trained_models/embeddings", exist_ok=True)
     fig, axs = plt.subplots(1, len(labels.values()), figsize=(6 * len(labels.values()), 6))
 
     # Ensure axs is always a list
@@ -233,7 +257,13 @@ if __name__ == "__main__":
         axs[i].scatter(embeddings_2D[:,0], embeddings_2D[:,1], s=2, cmap="tab10", c=predictions)
         axs[i].set_title(f"Deep Clustering with UMAP-{autoencoder.__class__.__name__}_f{FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}", size=8)
 
-    save_path = f"trained_models/embeddings/DeepClustering{autoencoder.__class__.__name__}_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png"
+    save_path = os.path.join(
+            "trained_models",
+            "latent_space_plots",
+            SEQUENCE_TYPE,
+            "f" + str(N_FEATURES),
+            f"{autoencoder.__class__.__name__}_h{args.latent_space}_e{args.n_epochs}.png"
+        )
     fig.savefig(fname=save_path)
     print(f"Saved embedding plot in {save_path}")
 
