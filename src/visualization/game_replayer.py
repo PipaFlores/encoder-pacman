@@ -13,6 +13,7 @@ import subprocess
 
 
 class GameReplayer:
+    ## TODO Include Cherry, and i think we have all the "visualized" features of the game.
     def __init__(
         self,
         data: pd.DataFrame = None,

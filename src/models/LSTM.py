@@ -112,6 +112,12 @@ class AELSTM(nn.Module):
             return reconstruction, x_encoding
         return reconstruction
     
+    def encode(self, X: torch.Tensor):
+        x_encoding, _, (__, ___)= self.encoder(X)
+
+        return x_encoding
+
+    
     def configure_optimizers(self):
         """
         Optimization Algorithm.
@@ -177,11 +183,23 @@ class AE_Trainer():
         Args:
             max_epochs (int): Maximum number of training epochs.
             batch_size (int): Number of samples per batch.
-            validation_split (float): Fraction of data to use a validation set split.
+            validation_split (float or None): Fraction of data to use as validation set split. If None, no validation is performed.
             gradient_clipping (float or None): Maximum norm for gradient clipping. If None, no clipping is applied.
             verbose (bool): Whether to print training progress.
-            optim_algorithm (Callable or None): Optimization algorithm to be used. e.g., `nn.SGD | nn.Adam`
+            optim_algorithm (torch.optim.Optimizer or None): Optimization algorithm to be used. If None, will use model's configure_optimizer() method or default to Adam.
+            save_model (bool): Whether to save the best and last model checkpoints during training.
+            best_path (str or None): File path to save the best model checkpoint, including .pth suffix. Required if save_model is True.
+            last_path (str or None): File path to save the last model checkpoint, including .pth suffix. Required if save_model is True.
             
+        Attributes:
+            train_loss_list (list): List storing training loss values for each epoch.
+            val_loss_list (list): List storing validation loss values for each epoch.
+            device (torch.device): Device (CPU/GPU) used for training.
+            model (nn.Module): The trained model instance.
+            
+        Methods:
+            fit(model, data): Trains the model on the provided dataset.
+            plot_loss(save_path): Plots and saves training/validation loss curves.
         """
         self.max_epochs = max_epochs
         self.batch_size = batch_size

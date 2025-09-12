@@ -102,7 +102,7 @@ class Trajectory:
     def get_segment(self, start_step: int = 0, end_step: int = -1) -> "Trajectory":
         """Get a segment of the trajectory"""
         if end_step >= len(self.coordinates):
-            logger.warning(
+            logger.info(
                 f"Trajectory for game {self.metadata['level_id'] if self.metadata else 'NA'} ends before the inputed end step ({len(self.coordinates)} < {end_step}). Returning segment until last observed position instead."
             )
             end_step = len(self.coordinates)

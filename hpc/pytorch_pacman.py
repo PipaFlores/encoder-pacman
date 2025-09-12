@@ -98,14 +98,14 @@ if __name__ == "__main__":
         # "pacman_attack",
         "Pacman_X",
         "Pacman_Y",
-        # "Ghost1_X",
-        # "Ghost1_Y",            
-        # "Ghost2_X",
-        # "Ghost2_Y",
-        # "Ghost3_X",
-        # "Ghost3_Y",
-        # "Ghost4_X",
-        # "Ghost4_Y",
+        "Ghost1_X",
+        "Ghost1_Y",            
+        "Ghost2_X",
+        "Ghost2_Y",
+        "Ghost3_X",
+        "Ghost3_Y",
+        "Ghost4_X",
+        "Ghost4_Y",
     ]
     N_FEATURES = len(FEATURES)
 
@@ -131,25 +131,54 @@ if __name__ == "__main__":
     print(f"loaded data tensor of shape {data_tensor.gamestates.shape}")
 
     ### TRAIN MODEL
-    best_save_path = f"trained_models/pacman_aelstm_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}_best.pth"
-    last_save_path = f"trained_models/pacman_aelstm_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}_last.pth"
+    model_path = os.path.join(
+        "trained_models",
+        SEQUENCE_TYPE,
+        "f" + str(N_FEATURES)
+    )
+
     trainer = AE_Trainer(max_epochs=args.n_epochs, 
                         batch_size=32, 
                         validation_split=args.validation_split,
                         save_model=True,
-                        best_path=best_save_path,
-                        last_path=last_save_path)
+                        best_path=os.path.join(model_path, f"AELSTM_h{args.latent_space}_e{args.n_epochs}_best.pth"),
+                        last_path=os.path.join(model_path, f"AELSTM_h{args.latent_space}_e{args.n_epochs}_last.pth"))
 
     autoencoder = AELSTM(input_size=data_tensor[0]["data"].shape[1], hidden_size=args.latent_space)
 
-    os.makedirs("trained_models", exist_ok=True)
-    os.makedirs("trained_models/loss_plots", exist_ok=True)
+    os.makedirs(model_path, exist_ok=True)
+    os.makedirs(
+        os.path.join(
+            "trained_models",
+            "loss_plots",
+            SEQUENCE_TYPE,
+            "f" + str(N_FEATURES)
+            ), 
+        exist_ok=True
+        )
+    os.makedirs(
+        os.path.join(
+            "trained_models",
+            "latent_space_plots",
+            SEQUENCE_TYPE,
+            "f" + str(N_FEATURES)
+            ), 
+        exist_ok=True
+        )
+
+
     trainer.fit(autoencoder, data_tensor)
-    print(f"Best Model saved to {best_save_path}")
+    print(f"Model saved to {model_path}")
 
-    trainer.plot_loss(f"trained_models/loss_plots/pacman_aelstm_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
-    print(f"Loss plot saved in trained_models/loss_plots/pacman_aelstm_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
-
+    trainer.plot_loss(
+        os.path.join(  
+            "trained_models",
+            "loss_plots",
+            SEQUENCE_TYPE,
+            "f" + str(N_FEATURES),
+            f"{autoencoder.__class__.__name__}_h{args.latent_space}_e{args.n_epochs}.png"
+            )
+        )
 
     ### Batch EMBEDD
 
@@ -186,8 +215,6 @@ if __name__ == "__main__":
         labels[name] = clusterer.fit_predict(embeddings_2D)
 
     ## VISUALIZE
-
-    os.makedirs("trained_models/embeddings", exist_ok=True)
     fig, axs = plt.subplots(1, len(labels.values()), figsize=(6 * len(labels.values()), 6))
 
     # Ensure axs is always a list
@@ -198,7 +225,14 @@ if __name__ == "__main__":
         axs[i].scatter(embeddings_2D[:,0], embeddings_2D[:,1], s=2, cmap="tab10", c=predictions)
         axs[i].set_title(f"Deep Clustering with UMAP-{name} for LSTM", size=8)
 
-    fig.savefig(fname=f"trained_models/embeddings/DeepClusteringAELSTM_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}.png")
-
+    save_path = os.path.join(
+            "trained_models",
+            "latent_space_plots",
+            SEQUENCE_TYPE,
+            "f" + str(N_FEATURES),
+            f"{autoencoder.__class__.__name__}_h{args.latent_space}_e{args.n_epochs}.png"
+        )
+    fig.savefig(fname=save_path)
+    print(f"saved embedding plot in {save_path}")
 
 

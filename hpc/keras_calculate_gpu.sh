@@ -4,7 +4,7 @@
 #SBATCH --nodes=1            # replace <N> with the number of nodes to run on
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2  # Mahti has 128 CPU cores per node, Puhti has 40
-#SBATCH --mem-per-cpu=10000
+#SBATCH --mem-per-cpu=16000
 #SBATCH --gres=gpu:v100:1
 #SBATCH --time=05:00:00
 
