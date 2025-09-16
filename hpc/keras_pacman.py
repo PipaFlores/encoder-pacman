@@ -255,7 +255,7 @@ if __name__ == "__main__":
 
     for i, (name, predictions) in enumerate(labels.items()):
         axs[i].scatter(embeddings_2D[:,0], embeddings_2D[:,1], s=2, cmap="tab10", c=predictions)
-        axs[i].set_title(f"Deep Clustering with UMAP-{autoencoder.__class__.__name__}_f{FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}", size=8)
+        axs[i].set_title(f"Deep Clustering with UMAP-{autoencoder.__class__.__name__}_f{N_FEATURES}_{SEQUENCE_TYPE}_h{args.latent_space}_e{args.n_epochs}", size=8)
 
     save_path = os.path.join(
             "trained_models",

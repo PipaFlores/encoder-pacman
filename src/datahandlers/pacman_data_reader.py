@@ -943,7 +943,7 @@ class PacmanDataReader:
                 # "Ghost4_Y",
                 ],
                 make_gif=False
-        )-> tuple[list[np.ndarray], list[Trajectory], list[str]]:
+        )-> tuple[list[pd.DataFrame], list[np.ndarray], list[Trajectory], list[str]]:
         """
         Extracts a slice (subsequence) of game states for each level, from `start_step` to `end_step`.
 
@@ -955,10 +955,12 @@ class PacmanDataReader:
 
         Returns:
             tuple:
-                - list[np.ndarray]: List of arrays, each containing the selected features for the sliced sequence of a level.
-                - list[Trajectory]: List of Trajectory objects for each sliced sequence.
-                - list[str]: List of GIF file paths (empty if make_gif is False).
+                list[np.ndarray]: List of arrays, each containing the selected features for the sliced sequence of a level.
+                list[Trajectory]: List of Trajectory objects for each sliced sequence.
+                list[]
+                list[str]: List of GIF file paths (empty if make_gif is False).
         """
+        raw_data = []
         sequence_list = []
         traj_list = []
         gif_path_list = []
@@ -977,6 +979,7 @@ class PacmanDataReader:
             gamestates = gamestates.iloc[start_step_:end_step_]
             traj = self.get_partial_trajectory(level_id=level_id, start_step=start_step_, end_step=end_step_)
 
+            raw_data.append(gamestates)
             sequence_list.append(gamestates.to_numpy())
             traj_list.append(traj)
 
@@ -994,4 +997,4 @@ class PacmanDataReader:
                     # print(f"sequence for level_id {level_id} already exists, skipping")
                     pass
 
-        return sequence_list, traj_list, gif_path_list
+        return raw_data, sequence_list, traj_list, gif_path_list

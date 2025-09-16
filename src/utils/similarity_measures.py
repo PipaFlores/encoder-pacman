@@ -73,7 +73,13 @@ class SimilarityMeasures:
         """
         x1, y1 = trajectory1[:, 0], trajectory1[:, 1]
         x2, y2 = trajectory2[:, 0], trajectory2[:, 1]
-        return np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2).sum()
+        try:
+            euclid_distance = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2).sum()
+        except ValueError as e:
+            raise ValueError(
+                f"Euclidean similarity measures requires all trajectories to be of equal length, try DTW for variable length trajectories ({e})")
+
+        return euclid_distance
 
     def calculate_manhattan_distance(
         self, trajectory1: np.ndarray, trajectory2: np.ndarray
