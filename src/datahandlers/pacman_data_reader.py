@@ -955,10 +955,10 @@ class PacmanDataReader:
 
         Returns:
             tuple:
-                list[np.ndarray]: List of arrays, each containing the selected features for the sliced sequence of a level.
-                list[Trajectory]: List of Trajectory objects for each sliced sequence.
-                list[]
-                list[str]: List of GIF file paths (empty if make_gif is False).
+                raw data : list[pd.DataFrame] List of DataFrames, each containing the selected features for the sliced sequence of a level, with their named columns (useful for behavlets calculations)
+                sequence list: list[np.ndarray] List of arrays, each containing the selected features for the sliced sequence of a level.
+                trajectory list: list[Trajectory] List of Trajectory objects for each sliced sequence.
+                gif path list: list[str] List of GIF file paths (empty if make_gif is False).
         """
         raw_data = []
         sequence_list = []
@@ -973,8 +973,15 @@ class PacmanDataReader:
             gamestates, _ = self._filter_gamestate_data(level_id=level_id, include_metadata=False)
             gamestates = gamestates[FEATURES]
 
-            start_step_ = max(0, start_step)
-            end_step_ = min(end_step, len(gamestates)) if end_step != -1 else -1
+            start_step_ = start_step
+            end_step_ = end_step
+
+            end_step_ = min(end_step, len(gamestates) - 1) if end_step != -1 else -1 ## upper bound
+
+            if start_step < 0:
+                start_step_ = len(gamestates) + start_step
+            if end_step < 0:
+                end_step_ = len(gamestates) + end_step
 
             gamestates = gamestates.iloc[start_step_:end_step_]
             traj = self.get_partial_trajectory(level_id=level_id, start_step=start_step_, end_step=end_step_)
