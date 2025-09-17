@@ -136,11 +136,8 @@ class GeomClustering:
         logger.info(f"Clustering complete. Found {len(set(self.labels)) - 1} clusters")
 
         self.cluster_vis = ClusterVisualizer(
-            self.affinity_matrix,
-            self.labels,
-            self.trajectories,
-            self.similarity_measures.measure_type,
         )  # Init visualizer
+
         return self.labels
 
     def calculate_affinity_matrix(
@@ -212,11 +209,8 @@ class GeomClustering:
         return cluster_elements
 
 
-    ### Affinity Matrix Visualization
-     # TODO refactor somewhere else (PatternAnalysis, or clustervisualization)
-
     def plot_affinity_matrix_overview(self, axs: np.ndarray[plt.Axes] | None = None):
-        ### FIXME: move to pattern_analysis
+
         """
         Plot a comprehensive overview of the affinity matrix.
 
@@ -236,13 +230,13 @@ class GeomClustering:
         else:
             show_plot = False
 
-        self.plot_affinity_matrix(ax=axs[0])
+        self.cluster_vis.plot_affinity_matrix(self.affinity_matrix,measure_type=self.similarity_measures.measure_type,ax=axs[0])
         axs[0].set_title("a) " + axs[0].get_title())
-        self.plot_distance_matrix_histogram(ax=axs[1])
+        self.cluster_vis.plot_distance_matrix_histogram(self.affinity_matrix,ax=axs[1])
         axs[1].set_title("b) " + axs[1].get_title())
-        self.plot_non_repetitive_distances_values_barchart(ax=axs[2])
+        self.cluster_vis.plot_non_repetitive_distances_values_barchart(self.affinity_matrix,ax=axs[2])
         axs[2].set_title("c) " + axs[2].get_title())
-        self.plot_average_column_value(ax=axs[3])
+        self.cluster_vis.plot_average_column_value(self.affinity_matrix,ax=axs[3])
         axs[3].set_title("d) " + axs[3].get_title())
 
         # Add title to the figure
@@ -256,7 +250,7 @@ class GeomClustering:
             plt.show()
 
     def plot_interactive_overview(self):
-        ### FIXME: move to pattern_analysis
+
         """
         Create an interactive visualization of the affinity matrix and trajectories embeddings.
 
@@ -266,107 +260,83 @@ class GeomClustering:
 
         The plots are displayed side by side in a row.
         """
-        p1 = self.cluster_vis.plot_affinity_matrix_bokeh()
+        p1 = self.cluster_vis.plot_affinity_matrix_bokeh(
+            affinity_matrix=self.affinity_matrix, 
+            measure_type=self.similarity_measures.measure_type)
 
         if self.trajectories_centroids.size > 0:
             p2 = self.cluster_vis.plot_trajectories_embedding_bokeh(
-                traj_centroids=self.trajectories_centroids
+                traj_centroids=self.trajectories_centroids,
+                labels=self.labels
             )
         else:
             self.trajectories_centroids = self._calculate_trajectory_centroids()
             p2 = self.cluster_vis.plot_trajectories_embedding_bokeh(
-                traj_centroids=self.trajectories_centroids
+                traj_centroids=self.trajectories_centroids,
+                labels=self.labels
             )
 
         show(row(p1, p2))
 
-    def plot_affinity_matrix(self, ax: plt.Axes | None = None):
+    def plot_latent_space_overview(self,
+                                   axs: np.ndarray[plt.Axes] | None = None,
+                                   frame_to_maze: bool = False):
+
         """
-        Plot the affinity matrix as a heatmap.
+        Plot an overview of the latent space, including trajectory embeddings and cluster centroids.
+
+        This function creates a two-panel matplotlib figure:
+        - The first panel shows the 2D embedding of all trajectory centroids, colored by cluster label.
+        - The second panel shows the centroids of each cluster, with marker size proportional to the number of trajectories in the cluster.
 
         Args:
-            ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
-            Defaults to None.
-        """
-        self.cluster_vis.plot_affinity_matrix(ax=ax)
+            axs (np.ndarray[plt.Axes] | None, optional): Array of two matplotlib axes to plot on. If None, creates a new figure and axes.
+            frame_to_maze (bool, optional): Whether to set axis limits to the maze boundaries. Defaults to False.
 
-    def plot_distance_matrix_histogram(self, ax: plt.Axes | None = None, **kwargs):
+        Returns:
+            None. Displays the plot or adds to the provided axes.
         """
-        Plot a histogram of distances from the affinity matrix.
 
-        Args:
-            ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
-            Defaults to None.
-            **kwargs: Additional arguments to pass to the histogram plotting function.
-        """
-        self.cluster_vis.plot_distance_matrix_histogram(ax=ax, **kwargs)
+        if axs is None:
+            fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+            show_plot = True
+        else:
+            show_plot = False
 
-    def plot_non_repetitive_distances_values_barchart(
-        self, ax: plt.Axes | None = None, **kwargs
-    ):
-        """
-        Plot a bar chart of unique distance values from the affinity matrix.
 
-        Args:
-            ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
-            Defaults to None.
-            **kwargs: Additional arguments to pass to the bar chart plotting function.
-        """
-        self.cluster_vis.plot_non_repetitive_distances_values_barchart(ax=ax, **kwargs)
-
-    def plot_average_column_value(self, ax: plt.Axes | None = None):
-        """
-        Plot the average value for each column in the affinity matrix.
-
-        Args:
-            ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
-            Defaults to None.
-        """
-        self.cluster_vis.plot_average_column_value(ax=ax)
-
-    ### Clustering Results Visualization
-    # TODO refactor to clustervis (or PatternAnalysis)
-
-    def plot_trajectories_embedding(
-        self, ax: plt.Axes | None = None, frame_to_maze: bool = True
-    ):
-        """
-        Plot all trajectories 2D embedding with their cluster assignments. (Currently based on geometrical centroid)
-
-        Args:
-            ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
-            Defaults to None.
-            frame_to_maze (bool, optional): Whether to transform coordinates to maze frame.
-            Defaults to True.
-        """
         if self.trajectories_centroids.size == 0:
             self.trajectories_centroids = self._calculate_trajectory_centroids()
-        self.cluster_vis.plot_trajectories_embedding(
-            self.trajectories_centroids, ax=ax, frame_to_maze=frame_to_maze
-        )
 
-    def plot_clustering_centroids(
-        self, ax: plt.Axes | None = None, frame_to_maze: bool = True
-    ):
-        """
-        Plot the centroids of each cluster.
-
-        Args:
-            ax (plt.Axes | None, optional): Axes to plot on. If None, a new figure and axes are created.
-            Defaults to None.
-            frame_to_maze (bool, optional): Whether to transform coordinates to maze frame.
-            Defaults to True.
-        """
         if self.cluster_centroids.size == 0:
             self.cluster_centroids, self.cluster_sizes = (
                 self._calculate_cluster_centroids()
             )
+
+        self.cluster_vis.plot_trajectories_embedding(
+            self.trajectories_centroids, 
+            self.labels,
+            ax=axs[0], 
+            frame_to_maze=frame_to_maze
+        )
+        axs[0].set_title("a) " + axs[0].get_title())
+
         self.cluster_vis.plot_clusters_centroids(
             self.cluster_centroids,
             self.cluster_sizes,
-            ax=ax,
+            self.labels,
+            ax=axs[1],
             frame_to_maze=frame_to_maze,
         )
+        axs[1].set_title("b) " + axs[0].get_title())
+
+        if axs is None:
+            fig.suptitle(
+                f"Latent Space Overview"
+            )
+            fig.tight_layout()
+
+        if show_plot:
+            plt.show()
 
     def plot_cluster_overview(
         self,
