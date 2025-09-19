@@ -266,13 +266,13 @@ class GeomClustering:
 
         if self.trajectories_centroids.size > 0:
             p2 = self.cluster_vis.plot_trajectories_embedding_bokeh(
-                traj_centroids=self.trajectories_centroids,
+                traj_embeddings=self.trajectories_centroids,
                 labels=self.labels
             )
         else:
             self.trajectories_centroids = self._calculate_trajectory_centroids()
             p2 = self.cluster_vis.plot_trajectories_embedding_bokeh(
-                traj_centroids=self.trajectories_centroids,
+                traj_embeddings=self.trajectories_centroids,
                 labels=self.labels
             )
 

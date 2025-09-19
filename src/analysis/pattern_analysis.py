@@ -2,6 +2,7 @@ import os
 
 import numpy as np
 import pandas as pd
+import random
 import matplotlib.pyplot as plt
 import time
 from src.utils import setup_logger
@@ -29,7 +30,11 @@ except ImportError:
 
 ## Reducing
 from umap import UMAP
-from pacmap import PaCMAP
+try:
+    from pacmap import PaCMAP
+except ImportError:
+    PACMAP_AVAILABLE = False
+
 from sklearn.decomposition import PCA
 
 ## Clustering
@@ -65,7 +70,7 @@ class PatternAnalysis:
             data_folder: str = "../data",
             hpc_folder: str = "../hpc",
             embedder: str | None = "LSTM",
-            reducer: UMAP | PaCMAP | PCA | None = None,
+            reducer: UMAP | PCA | None = None,
             clusterer: HDBSCAN | KMeans | GeomClustering = None,
             sequence_type: str = "first_5_seconds",
             validation: str = "Behavlets",
@@ -105,20 +110,34 @@ class PatternAnalysis:
 
         # Core components
         self.reader = reader if reader is not None else PacmanDataReader(data_folder)
-        self.embedder = self._initialize_deep_embedder(embedder) if embedder is not None else None
-        self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="euclidean")
-        self.clusterer = clusterer if clusterer is not None else HDBSCAN(min_cluster_size=20, min_samples=None)
+        if isinstance(clusterer, GeomClustering): # Only clusterer.
+            self.embedder = None
+            self.reducer = None
+            self.clusterer = clusterer
+        else: # Neural-Network embedding -> Reducer -> clusterer
+            self.embedder = self._initialize_deep_embedder(embedder) if embedder is not None else None
+            self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="euclidean")
+            self.clusterer = clusterer if clusterer is not None else HDBSCAN(min_cluster_size=20, min_samples=None)
+
+
         
         
         # Visualization components
         self.gamevisualizer = GameVisualizer(data_folder)
-        self.clustervisualizer = None  # Will be initialized after clustering
+        self.clustervisualizer = ClusterVisualizer()
         
         # Pipeline state
         self.raw_data = None
         self.sequence_data = None
+        self.padded_sequence_data = None
+        self.trajectory_list = None
+        self.gif_path_list = None
         self.embeddings = None
         self.reduced_embeddings = None
+        self.affinity_matrix = None
+        self.measure_type = "euclidean"
+        # or cosine TODO implement this, affinity matrix on latent space should be calculated with euclidean, but make it an attribute.
+        # It should be overriden if clusterer is geomclustering.
         self.labels = None
         self.validation_labels = None
         self.metadata = None
@@ -178,8 +197,11 @@ class PatternAnalysis:
         logger.info("Starting PatternAnalysis pipeline...")
         
         # Step 1: Load data if not provided
+        # TODO maybe remove this step and get the data from reader class.
+        # It might greatly improve performance for comparative analysis since each
+        # class is loading the data again. Or just leave it to the hpc supremacy.
         
-        self.raw_data, self.sequence_data, self.padded_sequence_data, self.trajectory_list = self.load_and_slice_data(
+        self.raw_data, self.sequence_data, self.padded_sequence_data, self.trajectory_list, self.gif_path_list = self.load_and_slice_data(
             sequence_type=self.sequence_type, make_gif=self.augmented_visualization)
 
         # Step 2a: load or train embedding model
@@ -227,10 +249,6 @@ class PatternAnalysis:
         self.trajectory_centroids = None  
 
         self.clustervisualizer = ClusterVisualizer(
-            affinity_matrix = None, # FIXME, how to do it when no affinity is calculated / make it optional
-            labels = self.labels,
-            trajectories = self.trajectory_list,
-            measure_type = None # FIXME // make optional
         )
 
         
@@ -239,9 +257,11 @@ class PatternAnalysis:
         #     self.validation_labels = self.validate(self.raw_data)
         
         # Step 5: Visualization and Collection of Results
-        # self.clustervisualizer = ClusterVisualizer()
+        
         
         # self.summarize()
+
+        # self.plot_results()
         
         print("Pipeline completed successfully!")
         return self
@@ -249,21 +269,34 @@ class PatternAnalysis:
     ### DATA SLICING
     def load_and_slice_data(self, 
                            sequence_type:str = "first_5_seconds",
-                           make_gif: bool = False) -> PacmanDataset:
+                           make_gif: bool = False
+                           ) -> tuple[pd.DataFrame ,list[np.ndarray], np.ndarray, list[Trajectory]] | tuple[pd.DataFrame ,list[np.ndarray], np.ndarray, list[Trajectory], list[str]]:
         """
         Load and slice data based on the specified sequence type.
 
-        Args:
-            sequence_type (str): Type of sequence to extract ("first_5_seconds", "whole_level", or "last_5_seconds").
-            make_gif (bool): Whether to generate GIFs for the sequences.
+        Parameters
+        ----------
+        sequence_type : str
+            Type of sequence to extract. Options are:
+                - "first_5_seconds"
+                - "whole_level"
+                - "last_5_seconds"
+                - "first_50_steps" (for debugging)
+        make_gif : bool, optional
+            Whether to generate GIFs for the sequences.
 
-        Outcome:
-            Sets the following attributes:
-                self.sequence_data: List of game sequences of the chosen type and features.
-                self.padded_sequence_data: Fixed-length `np.ndarray` of shape `[n_samples, max_seq_length, n_features]`,
-                    containing padded sequences for deep learning models.
-                self.trajectory_list: List of `Trajectory` objects for each sequence, containing metadata for
-                    `GameVisualization` plotting methods.
+        Returns
+        -------
+        raw_data : pd.DataFrame
+            Raw data for the selected sequences.
+        sequence_data : list[np.ndarray]
+            List of game sequences of the chosen type and features.
+        padded_sequence_data : np.ndarray
+            Fixed-length array of shape [n_samples, max_seq_length, n_features], containing padded sequences for deep learning models.
+        trajectory_list : list[Trajectory]
+            List of `Trajectory` objects for each sequence, containing metadata for visualization.
+        gif_path_list: list[str]
+            If `make_gif = True`, returns a list of paths to each sequence's rendered .gif animation, for augmented visualization.
         """
         logger.info(f"Loading and slicing data for {self.sequence_type}...")
 
@@ -271,19 +304,19 @@ class PatternAnalysis:
         
         # Determine slicing parameters based on sequence type
         if sequence_type == "first_5_seconds":
-            raw_data, sequence_data, traj_list, make_gif = self.reader.slice_seq_of_each_level(
+            raw_data, sequence_data, traj_list, gif_paths = self.reader.slice_seq_of_each_level(
                 start_step=0, end_step=100, FEATURES=self.features_columns, make_gif=make_gif
             )
         elif sequence_type == "whole_level":
-            raw_data, sequence_data, traj_list, make_gif = self.reader.slice_seq_of_each_level(
+            raw_data, sequence_data, traj_list, gif_paths = self.reader.slice_seq_of_each_level(
                 start_step=0, end_step=-1, FEATURES=self.features_columns, make_gif=make_gif
             )
         elif sequence_type == "last_5_seconds":
-            raw_data, sequence_data, traj_list, make_gif = self.reader.slice_seq_of_each_level(
+            raw_data, sequence_data, traj_list, gif_paths = self.reader.slice_seq_of_each_level(
                 start_step=-100, end_step=-1, FEATURES=self.features_columns, make_gif=make_gif
             )
         elif sequence_type == "first_50_steps": # For GeomClustering debugging
-            raw_data, sequence_data, traj_list, make_gif = self.reader.slice_seq_of_each_level(
+            raw_data, sequence_data, traj_list, gif_paths = self.reader.slice_seq_of_each_level(
                 start_step=0, end_step=50, FEATURES=self.features_columns, make_gif=make_gif
             )
             
@@ -292,7 +325,7 @@ class PatternAnalysis:
         
 
         #= Create dataset
-        # [n_samples, max_length, features] Equal length tensor, padded, for DL models.
+        # np.ndarray.shape = [n_samples, max_length, features]. Equal length tensor, padded, for DL models.
         padded_sequence_data = self.reader.padding_sequences(sequence_list=sequence_data)
         
         # list[np.ndarray]
@@ -303,7 +336,8 @@ class PatternAnalysis:
         
         logger.info(f"Data loaded: {len(sequence_data)} sequences with {padded_sequence_data.shape[2]} features")
 
-        return raw_data, sequence_data, padded_sequence_data, trajectory_list
+        return raw_data, sequence_data, padded_sequence_data, trajectory_list, gif_paths
+        
 
     ### EMBEDDING
 
@@ -339,8 +373,7 @@ class PatternAnalysis:
             self.embedder.eval()
 
         elif self.using_keras:
-            model_path += ".keras"
-            self.embedder.load_model(model_path)
+            self.embedder.load_model(model_path, estimator=None)
 
         return
 
@@ -500,11 +533,21 @@ class PatternAnalysis:
                 self.sequence_type,
                 f"{self.clusterer.similarity_measures.measure_type}_affinity_matrix.csv"
                 )
+        
         if os.path.exists(affinity_matrix_path):
+            
             logger.info(f"Using existing affinity matrix ({affinity_matrix_path})")
             self.affinity_matrix = np.loadtxt(affinity_matrix_path, delimiter=',')
-        ## Else, calculate affinity matrix
+
+            if self.affinity_matrix.shape[0] != len(self.sequence_data):
+                is_affinity_ok = False
+            else:
+                is_affinity_ok = True
         else:
+            is_affinity_ok = False
+            
+        ## Else, calculate affinity matrix
+        if is_affinity_ok:
             os.makedirs(
                     os.path.join(
                         self.hpc_folder,
@@ -569,7 +612,6 @@ class PatternAnalysis:
 
         logger.debug(f"Remapped {len(cluster_sizes)} clusters")
         return new_labels
-    
     
     def validate(self, gamestates: list[np.ndarray]) -> dict[str,]:
         """
@@ -645,92 +687,429 @@ class PatternAnalysis:
                 cluster_name = f"Cluster {label}" if label >= 0 else "Noise"
                 print(f"  {cluster_name}: {size} samples")
 
-    def plot_results(self, save_path: str = None, figsize: tuple[int, int] = (10, 8)):
+
+    def plot_results(self, 
+                     all_clusters: bool = False,
+                     save_path: str = None):
         """
         Plot clustering results.
         
         Args:
+            all_clusters: Wether to plot cluster overview for all cluster, or only the first 8 (including noise cluster).
             save_path: Path to save the plot
-            figsize: Figure size
         """
-        if self.reduced_embeddings is None or self.labels is None:
-            print("No results to plot. Run fit() first.")
-            return
-        
-        plt.figure(figsize=figsize)
-        
-        # Create scatter plot
-        scatter = plt.scatter(
-            self.reduced_embeddings[:, 0], 
-            self.reduced_embeddings[:, 1],
-            c=self.labels, 
-            cmap='tab10', 
-            s=30,
-            alpha=0.7
-        )
-        
-        plt.colorbar(scatter)
-        plt.title(f'Pattern Analysis Results - {self.sequence_type}')
-        plt.xlabel('Component 1')
-        plt.ylabel('Component 2')
-        
-        # Add cluster statistics as text
-        if 'n_clusters' in self.results:
-            stats_text = f"Clusters: {self.results['n_clusters']}\n"
-            stats_text += f"Noise points: {self.results['n_noise_points']}"
-            plt.text(0.02, 0.98, stats_text, transform=plt.gca().transAxes, 
-                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-        
-        if save_path:
-            plt.savefig(save_path, dpi=150, bbox_inches='tight')
-            print(f"Plot saved to {save_path}")
-        
-        plt.show()
+        # Affinity matrix
 
-    def get_cluster_samples(self, cluster_id: int, n_samples: int = 5) -> list[int]:
-        """
-        Get sample indices from a specific cluster.
+        return
+
+        self.plot_affinity_matrix_overview()
+
+        # Latent space
+        self.plot_latent_space_overview()
+
+        # Cluster
+        for cluster in self.labels.unique():
+            self.plot_cluster_overview()
         
+    def plot_affinity_matrix_overview(self,
+                                      axs: list[plt.Axes] | None = None):
+        """
+        Plot a comprehensive overview of the affinity matrix.
+
+        Creates a figure with 4 subplots showing different aspects of the affinity matrix:
+        a) The affinity matrix heatmap
+        b) Histogram of distances in the matrix
+        c) Bar chart of non-repetitive distance values
+        d) Average column values
+
         Args:
-            cluster_id: ID of the cluster
-            n_samples: Number of samples to return
+            axs (list[plt.Axes] | None, optional): Array of 4 axes objects to plot on.
+                If None, a new figure and axes are created. Defaults to None.
+        """
+        if axs is None:
+            fig, axs = plt.subplots(1, 4, figsize=(24, 6))
+            show_plot = True
+        else:
+            fig = None
+            show_plot = False
+        
+        if not isinstance(self.clusterer, GeomClustering):
+            if self.affinity_matrix is None:
+                self.affinity_matrix = self._calculate_affinity_matrix()
+            measure_type = "cosine similarity"
+            suptitle = f"Embeddings Affinity Matrix Overview - cosine similarity in {self.embedder.__class__.__name__}_{self.reducer.__class__.__name__} latent space"
+        else:
+            measure_type = self.clusterer.similarity_measures.measure_type
+            suptitle = f"Trajectory Affinity Matrix Overview - {measure_type} trajectory similarity measure"
+
+        self.clustervisualizer.plot_affinity_matrix(self.affinity_matrix,
+                                              measure_type=measure_type,
+                                              ax=axs[0])
+        axs[0].set_title("a) " + axs[0].get_title())
+        self.clustervisualizer.plot_distance_matrix_histogram(self.affinity_matrix,
+                                                        ax=axs[1])
+        axs[1].set_title("b) " + axs[1].get_title())
+        self.clustervisualizer.plot_non_repetitive_distances_values_barchart(self.affinity_matrix,
+                                                                       ax=axs[2])
+        axs[2].set_title("c) " + axs[2].get_title())
+        self.clustervisualizer.plot_average_column_value(self.affinity_matrix,
+                                                   ax=axs[3])
+        axs[3].set_title("d) " + axs[3].get_title())
+
+        # Add title to the figure
+        if fig is not None:
+            fig.suptitle(
+                suptitle
+            )
+            fig.tight_layout()
+
+        if show_plot:
+            plt.show()
+
+    def plot_interactive_overview(self, 
+                                  plot_only_latent_space: bool = False,
+                                  save_path: str = None):
+        """
+        Create an interactive visualization of the affinity matrix and trajectories embeddings.
+
+        Uses Bokeh to create an interactive plot with:
+        - Affinity matrix heatmap
+        - Trajectory 2D-embeddings visualization
+
+        The plots are displayed side by side in a row.
+        """
+        from bokeh.plotting import show, row
+
+        if isinstance(self.clusterer, GeomClustering):
+            # Plot trajectory centroids, as there are no embeddings.
+            p1 = self.clustervisualizer.plot_affinity_matrix_bokeh(
+                affinity_matrix=self.affinity_matrix, 
+                measure_type=self.clusterer.similarity_measures.measure_type)
+
+            self.trajectory_centroids = self._calculate_trajectory_centroids()
             
-        Returns:
-            List of sample indices
-        """
-        if self.labels is None:
-            return []
-        
-        cluster_indices = np.where(self.labels == cluster_id)[0]
-        n_samples = min(n_samples, len(cluster_indices))
-        
-        return np.random.choice(cluster_indices, n_samples, replace=False).tolist()
+            if self.augmented_visualization:
+                p2 = self.clustervisualizer.plot_augmented_trajectories_embedding_bokeh(
+                    traj_embeddings=self.trajectory_centroids,
+                    gif_path_list=self.gif_path_list,
+                    labels=self.labels,
+                    metadata=None # TODO this? maybe add an argument
+                )
+            else:
+                p2 = self.clustervisualizer.plot_trajectories_embedding_bokeh(
+                        traj_embeddings=self.trajectory_centroids,
+                        labels=self.labels
+                    )
+            
+        else:
+            # Calculate cosine-similarity affinity_matrix and plot reduced embeddings
+            self.affinity_matrix = self._calculate_affinity_matrix()
 
-    def export_results(self, export_path: str):
+            p1 = self.clustervisualizer.plot_affinity_matrix_bokeh(
+                affinity_matrix=self.affinity_matrix, 
+                measure_type="cosine_similarity")
+
+            if self.augmented_visualization:
+                logger.info("plotting augmented")
+                p2 = self.clustervisualizer.plot_augmented_trajectories_embedding_bokeh(
+                    traj_embeddings=self.reduced_embeddings,
+                    gif_path_list=self.gif_path_list,
+                    labels=self.labels,
+                    metadata=None
+                )
+            else:
+                p2 = self.clustervisualizer.plot_trajectories_embedding_bokeh(
+                        traj_embeddings=self.reduced_embeddings,
+                        labels=self.labels
+                    )
+            
+            p2.xaxis.axis_label = "Reduced Dim. 1"
+            p2.yaxis.axis_label = "Reduced Dim. 2"
+
+        if plot_only_latent_space:
+            show(p2)
+        else:
+            show(row(p1, p2))
+
+        return
+    
+    def plot_latent_space_overview(self, 
+                                   axs: list[plt.Axes] | None = None ,
+                                   save_path:str = None):
         """
-        Export analysis results to file.
+        Plot the trajectory embeddings (or geometrical centroids) colored by their cluster assignments.
         
+        This method visualizes the spatial distribution of trajectory centroids,
+        with each point colored according to its cluster membership.
+
+        If using embeddings, the centroids plot will only use the first two dimensions.
+        """
+        if axs is None:
+            fig, axs = plt.subplots(1, 2, 
+                                    figsize=(12, 6))
+            show_plot = True
+        else:
+            show_plot = False
+        
+        if isinstance(self.clusterer, GeomClustering):
+            self.trajectory_centroids = self._calculate_trajectory_centroids()
+            self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
+            self.clustervisualizer.plot_trajectories_embedding(traj_embeddings = self.trajectory_centroids,
+                                                               labels = self.labels,
+                                                               ax=axs[0],
+                                                               frame_to_maze = True)
+            axs[0].set_title("a) " + axs[0].get_title())
+            
+            self.clustervisualizer.plot_clusters_centroids(cluster_centroids=self.cluster_centroids,
+                                                           cluster_sizes=self.cluster_sizes,
+                                                           labels=self.labels,
+                                                           ax=axs[1],
+                                                           frame_to_maze=True)
+            axs[1].set_title("b) " + axs[0].get_title())
+        else:
+            self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
+            self.clustervisualizer.plot_trajectories_embedding(traj_embeddings = self.reduced_embeddings,
+                                                               labels= self.labels,
+                                                               ax=axs[0],
+                                                               frame_to_maze = False)
+            axs[0].set_title("a) " + axs[0].get_title())
+            
+            self.clustervisualizer.plot_clusters_centroids(cluster_centroids=self.cluster_centroids,
+                                                           cluster_sizes=self.cluster_sizes,
+                                                           labels=self.labels,
+                                                           ax=axs[1],
+                                                           frame_to_maze=False)
+            axs[1].set_title("b) " + axs[0].get_title())
+
+        if axs is None:
+            fig.suptitle(
+                f"Latent Space Overview"
+            )
+            fig.tight_layout()
+
+        if show_plot:
+            plt.show()
+
+    def plot_interactive_latent_space(self, 
+                                      save_path:str = None):
+        """
+        Plot interactive latent space using bokeh library.
+
         Args:
-            export_path: Path to save results
+            save_path: Path to save the plot
+        
         """
-        import pickle
+
+        if isinstance(self.clusterer, GeomClustering):
+            pass
+        else:
+            self.clustervisualizer.plot_augmented_trajectories_embedding_bokeh
+            pass
+
+        return
+
+    def plot_cluster_overview(self, 
+                              cluster_id: int, 
+                              figsize: tuple[int, int] = (18, 6),
+                              darkmode: bool = True,
+                              save_path: str = None):
+
+        """
+        Plot an overview of a specific cluster showing velocity grid, heatmap and sample trajectories.
+
+        This method creates a figure with 6 subplots arranged in a 2x4 grid:
+        - Left column (2 rows): Velocity grid and heatmap of the entire cluster
+        - Right column (4 rows): 4 randomly selected sample trajectories from the cluster
+
+        Args:
+            cluster_id (int): ID of the cluster to visualize
+            figsize (tuple[int, int], optional): Figure size as (width, height). Defaults to (18, 6).
+            seed (int): seed for randomly selecting cluster trajectories
+        """
+        cluster_trajectories = [
+            traj for traj, l in zip(self.trajectory_list, self.labels) if l == cluster_id
+        ]
+        # Create a local random number generator with a fixed seed for reproducibility
+        rng = random.Random(42)
+        cluster_size = len(cluster_trajectories)
+        subset = rng.sample(cluster_trajectories, min(4, cluster_size))
+
+        from matplotlib.gridspec import GridSpec
+
+        self.gamevisualizer = GameVisualizer(darkmode=darkmode)
+        fig = plt.figure(figsize=figsize)
+        G = GridSpec(2, 4, width_ratios=[2, 2, 1, 1], height_ratios=[1, 1])
+        ax1 = fig.add_subplot(G[:, 0])
+        ax2 = fig.add_subplot(G[:, 1])
+        ax3 = fig.add_subplot(G[0, 2])
+        ax4 = fig.add_subplot(G[0, 3])
+        ax5 = fig.add_subplot(G[1, 2])
+        ax6 = fig.add_subplot(G[1, 3])
+
+        self.gamevisualizer.plot_velocity_grid(
+            trajectory=cluster_trajectories,
+            normalize=True,
+            ax=ax1,
+            title_id=f"Cluster {cluster_id} (n = {cluster_size})",
+        )
+        self.gamevisualizer.plot_heatmap(
+            trajectory=cluster_trajectories,
+            normalize=True,
+            ax=ax2,
+            title_id=f"Cluster {cluster_id}",
+        )
+        self.gamevisualizer.plot_multiple_trajectories(
+            trajectories=subset,
+            plot_type="line",
+            axs=[ax3, ax4, ax5, ax6],
+            show_maze=False,
+            metadata_label="level_id",
+        )
+
+        return
+
+    def _calculate_affinity_matrix(self):
+        """
+        Calculate affinity matrix of DNN-based embeddings,
+        as such, it uses cosine similarity to calculate pair-wise distances.
+        The similarity is calculated on the reduced latent space used for clustering
+        (usually with 2 dimensions).
+        The affinity matrix is a symmetric matrix where each element (i,j) represents
+        the cosine similarity between embedding i and embedding j
+
+        While similar, is not the one used in `GeomClustering`, which uses
+        trajectory similarity measures (euclidean, DTW, etc.).
+
+        Returns:
+            np.ndarray: Affinity matrix of shape (n, n)
+        """
+        logger.info("Calculating affinity matrix")
+        time_start = time.time()
+        num_elements = len(self.reduced_embeddings)
+        affinity_matrix = np.zeros((num_elements, num_elements))
+
+        for i in range(num_elements): # TODO add euclidean metric for low-dimensionality embedding space.
+            for j in range(i + 1, num_elements):
+                v1 = self.reduced_embeddings[i]
+                v2 = self.reduced_embeddings[j]
+                norm1 = np.linalg.norm(v1)
+                norm2 = np.linalg.norm(v2)
+                if norm1 == 0 or norm2 == 0:
+                    similarity = 0.0
+                else:
+                    similarity = np.dot(v1, v2) / (norm1 * norm2)
+                affinity_matrix[i, j] = similarity
+                
+                affinity_matrix[j, i] = affinity_matrix[i, j]
+                
+
+        logger.info(
+            f"Affinity matrix calculation complete in {round(time.time() - time_start, 2)} seconds"
+        )
+        return affinity_matrix
+
+
+    def _calculate_cluster_centroids(self) -> np.ndarray:
+        """
+        Calculate the centroids of all clusters. If using GeomClustering, it calculates them
+        from trajectories (reducing each to their geom. center), if not, from the reduced embeddings.
+
+        Returns:
+            np.ndarray: Array of centroids for each cluster, shape (n_clusters, 2)
+            np.ndarray: Array of sizes for each cluster, shape (n_clusters,)
+        """
+        logger.debug("Calculating cluster centroids")
+        cluster_centroids = []
+        cluster_sizes = []
+        for label in np.unique(self.labels):
+            if label != -1:  # Skip noise points
+                # Get all trajectories in this cluster
+                if isinstance(self.clusterer, GeomClustering):
+                    cluster_elements = [
+                        traj
+                        for traj, l in zip(self.trajectory_list, self.labels)
+                        if l == label
+                    ]
+                    # Calculate mean for each trajectory first [seq_length, 2] -> [,2]
+                    cluster_elements = np.array([np.mean(traj,axis=0) for traj in cluster_elements])
+
+                else:
+                    cluster_elements = np.array([
+                        embedding
+                        for embedding, l in zip(self.reduced_embeddings, self.labels)
+                        if l == label
+                    ])
+
+                cluster_sizes.append(len(cluster_elements))
+                
+                # Then calculate the mean of all trajectory means
+                cluster_centroid = np.mean(cluster_elements, axis=0)
+                cluster_centroids.append(cluster_centroid)
+
+        logger.debug("Cluster centroids calculated")
+        return np.array(cluster_centroids), np.array(cluster_sizes)
+
+    def _calculate_trajectory_centroids(self) -> list[np.ndarray]:
+        """
+        Calculate the geometrical centroids of all trajectories for dimensionality reduction and plotting.
+
+        Returns:
+            List[np.ndarray]: List of centroids for each trajectory
+        """
+        logger.debug("Calculating trajectory centroids")
+        centroids = [np.mean(trajectory, axis=0) for trajectory in self.trajectory_list]
+        centroids_array = np.array(centroids)
+        if centroids_array.ndim == 1:
+            centroids_array = centroids_array.reshape(
+                -1, 2
+            )  # Reshape to (n_trajectories, 2)
+        logger.debug("Trajectory centroids calculated")
+        return centroids_array
+    
+    # def get_cluster_samples(self, cluster_id: int, n_samples: int = 5) -> list[int]:
+    #     """
+    #     Get sample indices from a specific cluster.
         
-        export_data = {
-            'results': self.results,
-            'labels': self.labels,
-            'embeddings': self.embeddings,
-            'reduced_embeddings': self.reduced_embeddings,
-            'metadata': self.metadata,
-            'configuration': {
-                'sequence_type': self.sequence_type,
-                'features_columns': self.features_columns,
-                'validation_method': self.validation_method,
-                'deep_embedding': self.deep_embedding
-            }
-        }
+    #     Args:
+    #         cluster_id: ID of the cluster
+    #         n_samples: Number of samples to return
+            
+    #     Returns:
+    #         List of sample indices
+    #     """
+    #     if self.labels is None:
+    #         return []
         
-        with open(f"{export_path}.pkl", 'wb') as f:
-            pickle.dump(export_data, f)
+    #     cluster_indices = np.where(self.labels == cluster_id)[0]
+    #     n_samples = min(n_samples, len(cluster_indices))
         
-        print(f"Results exported to {export_path}.pkl")
+    #     return np.random.choice(cluster_indices, n_samples, replace=False).tolist()
+
+    # def export_results(self, export_path: str):
+    #     """
+    #     Export analysis results to file.
+        
+    #     Args:
+    #         export_path: Path to save results
+    #     """
+    #     import pickle
+        
+    #     export_data = {
+    #         'results': self.results,
+    #         'labels': self.labels,
+    #         'embeddings': self.embeddings,
+    #         'reduced_embeddings': self.reduced_embeddings,
+    #         'metadata': self.metadata,
+    #         'configuration': {
+    #             'sequence_type': self.sequence_type,
+    #             'features_columns': self.features_columns,
+    #             'validation_method': self.validation_method,
+    #             'deep_embedding': self.deep_embedding
+    #         }
+    #     }
+        
+    #     with open(f"{export_path}.pkl", 'wb') as f:
+    #         pickle.dump(export_data, f)
+        
+    #     print(f"Results exported to {export_path}.pkl")
 

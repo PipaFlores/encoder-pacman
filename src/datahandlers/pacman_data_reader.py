@@ -172,7 +172,7 @@ class PacmanDataReader:
             )
             self.psychometrics_df = pd.read_csv(
                 os.path.join(
-                    self.data_folder, r"psych\AiPerCogPacman_DATA_2025-06-03_1037.csv"
+                    self.data_folder, r"psych\AiPerCogPacman_DATA_2025-09-19_1324.csv"
                 )
             )
 
