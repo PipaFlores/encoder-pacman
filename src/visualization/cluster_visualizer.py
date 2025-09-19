@@ -25,13 +25,8 @@ class ClusterVisualizer(BaseVisualizer):
     - Affinity matrix showing pairwise distances between trajectories
     - Distance matrix histograms and barcharts
     - Clustering results including trajectories and centroids
+    - Cluster overview using aggregated data heatmaps and velocity grids
     - Interactive visualizations using Bokeh
-
-    The visualizer is initialized with:
-    - An affinity matrix containing pairwise distances between trajectories
-    - Cluster labels for each trajectory
-    - The original trajectories
-    - The type of similarity measure used
 
     Methods are provided for both static matplotlib plots and interactive Bokeh visualizations.
     """
@@ -51,6 +46,7 @@ class ClusterVisualizer(BaseVisualizer):
         """
         super().__init__()
         self.cmap = cmap
+
     def plot_affinity_matrix(self, 
                              affinity_matrix: np.ndarray,
                              measure_type:str = "",
@@ -110,7 +106,6 @@ class ClusterVisualizer(BaseVisualizer):
         row_indices, col_indices = np.meshgrid(
             np.arange(shape[0]), np.arange(shape[1]), indexing="ij"
         )
-        # TODO include trajectory metadata in tooltips
 
         source = ColumnDataSource(
             data=dict(
@@ -264,7 +259,7 @@ class ClusterVisualizer(BaseVisualizer):
         traj_embeddings: np.ndarray,
         labels: np.ndarray | None = None,
         ax: plt.Axes | None = None,
-        frame_to_maze: bool = True,
+        frame_to_maze: bool = False,
     ):
         """
         Plot the trajectory embeddings (or geometrical centroids) colored by their cluster assignments.
@@ -338,25 +333,25 @@ class ClusterVisualizer(BaseVisualizer):
             plt.show()
 
     def plot_trajectories_embedding_bokeh(self, 
-                                          traj_centroids: np.ndarray,
+                                          traj_embeddings: np.ndarray,
                                           labels: np.ndarray | None = None):
         """
-        Create an interactive Bokeh plot of trajectory centroids.
+        Create an interactive Bokeh plot of trajectory embeddings.
 
-        This method provides an interactive visualization of trajectory centroids,
+        This method provides an interactive visualization of trajectory embeddings,
         with tooltips showing trajectory index and cluster assignment.
 
         Args:
-            traj_centroids (np.ndarray): Array of trajectory centroid coordinates
+            traj_embeddings (np.ndarray): Array of trajectory embeddings, or centroid coordinates (2 dimensional)
             labels (np.ndarray): Array of trajectory labels
 
         Returns:
             bokeh.plotting.figure: A Bokeh figure containing the interactive trajectory visualization
         """
         data=dict(
-            x=traj_centroids[:, 0],
-            y=traj_centroids[:, 1],
-            traj_idx=np.arange(len(traj_centroids[:, 0])),
+            x=traj_embeddings[:, 0],
+            y=traj_embeddings[:, 1],
+            traj_idx=np.arange(len(traj_embeddings[:, 0])),
         )
         if labels is not None:
             data["cluster"] = labels.astype(str)
@@ -413,12 +408,118 @@ class ClusterVisualizer(BaseVisualizer):
 
         return p
 
+    def plot_augmented_trajectories_embedding_bokeh(self, 
+                                          traj_embeddings: np.ndarray,
+                                          gif_path_list: list[str],
+                                          labels: np.ndarray | None = None,
+                                          title: str | None = "",
+                                          metadata: dict[str, np.ndarray] | None = None):
+        """
+        Create an interactive Bokeh plot of trajectory embeddings.
+
+        This method provides an interactive visualization of trajectory embeddings,
+        with tooltips showing trajectory index and cluster assignment.
+
+        Args:
+            traj_embeddings (np.ndarray): Array of trajectory embeddings, or centroid coordinates (2 dimensional)
+            labels (np.ndarray): Array of trajectory labels
+            metadata (dict[dict: np.ndarray]) : dict of metadata arrays to be included in the hovertool. All arrays
+            must be same size and aligned with traj_embeddings and labels
+
+        Returns:
+            bokeh.plotting.figure: A Bokeh figure containing the interactive trajectory visualization
+        """
+
+        labels_str = [str(l) for l in labels]
+        
+        data = dict(
+        x=traj_embeddings[:, 0],
+        y=traj_embeddings[:, 1],
+        cluster=labels_str,
+        gif_path= gif_path_list,
+    )
+        ## Add metadata arrays
+        if metadata is not None:
+            for key in metadata:
+                data[str(key)] = metadata[key]
+
+        source = ColumnDataSource(
+            data=data
+        )
+
+        # TODO figure out what to do with this
+        MEDIUM = {
+            "fig_size" : (1080, 720),
+            "tooltips_size" : (200,200),
+        } ## Good for notebook / smaller display
+        LARGE = {
+            "fig_size" : (1920, 980),
+            "tooltips_size" : (400,400),
+        } ## Good for the big display
+
+        SIZE = MEDIUM
+
+
+        TOOLTIPS = f"""
+            <div>
+                <div>
+                    <img
+                        src="@gif_path" height="{SIZE["tooltips_size"][1]}" alt="@gif_path" width="{SIZE["tooltips_size"][0]}"
+                        style="float: left; margin: 0px 15px 15px 0px;"
+                        border="2"
+                    ></img>
+                </div>
+            </div>
+        """
+
+
+        p = figure(
+            title=title,
+            # tooltips=[("level_id", "@level_id"), ("cluster", "@cluster")],
+            tooltips=TOOLTIPS,
+            width= SIZE["fig_size"][0],
+            height= SIZE["fig_size"][1]
+        )
+
+        # Create color mapper for clusters
+        unique_labels = np.sort(np.unique(labels))
+        unique_labels_str = [str(label) for label in unique_labels]
+        n_clusters = len(unique_labels)
+
+        # If we have noise points (-1), we need a special color for them
+        if -1 in unique_labels:
+            step = max(1, 256 // (n_clusters - 1)) if (n_clusters - 1) > 0 else 1
+            colors = ["gray"] + list(Viridis256[::step][: n_clusters - 1])
+        else:
+            step = max(1, 256 // n_clusters)
+            colors = list(Viridis256[::step][:n_clusters])
+
+        color_mapper = CategoricalColorMapper(factors=unique_labels_str, palette=colors)
+
+        # Add scatter plot with color mapping
+        scatter = p.scatter(
+            x="x",
+            y="y",
+            source=source,
+            color={"field": "cluster", "transform": color_mapper},
+            legend_field="cluster",
+        )
+
+        # Fix legend: Bokeh auto-creates legend items for legend_field
+        p.legend.title = "Clusters"
+        p.legend.location = "top_right"
+        p.legend.label_text_font_size = "8pt"
+
+        return p
+
+
+
     def plot_clusters_centroids(
         self,
         cluster_centroids: np.ndarray,
         cluster_sizes: np.ndarray,
         labels: np.ndarray | None = None,
-        frame_to_maze: bool = True,
+        frame_to_maze: bool = False,
         ax: plt.Axes | None = None,
     ):
         """
