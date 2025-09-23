@@ -107,6 +107,9 @@ class ClusterVisualizer(BaseVisualizer):
             np.arange(shape[0]), np.arange(shape[1]), indexing="ij"
         )
 
+        ## TODO: include augmented hover tool, if self.augmented_visualization
+
+
         source = ColumnDataSource(
             data=dict(
                 image=[affinity_matrix],
@@ -258,6 +261,7 @@ class ClusterVisualizer(BaseVisualizer):
         self,
         traj_embeddings: np.ndarray,
         labels: np.ndarray | None = None,
+        all_labels_in_legend: bool = False,
         ax: plt.Axes | None = None,
         frame_to_maze: bool = False,
     ):
@@ -294,7 +298,7 @@ class ClusterVisualizer(BaseVisualizer):
             traj_embeddings[:, 1],
             c=labels,
             cmap=cmap,
-            vmin=0,
+            vmin=-0.5,
             s=3,
         )
 
@@ -302,27 +306,34 @@ class ClusterVisualizer(BaseVisualizer):
         # Instead of using matplotlib's automatic size legend
         # Create a legend mapping cluster label to color (colored 'o' marker next to the cluster number)
         import matplotlib.lines as mlines
+        from matplotlib.colors import Normalize
 
         # Get unique cluster labels (excluding noise if present)
         if labels is not None:
-            unique_labels = np.unique(labels)[:8]
+            if all_labels_in_legend:
+                unique_labels = np.unique(labels)
+            else:
+                unique_labels = np.unique(labels)[:8]
         else:
             unique_labels = np.array([0])
+
+        norm = Normalize(vmin=-0.5, vmax=max(unique_labels[unique_labels >= 0]) if len(unique_labels[unique_labels >= 0]) > 0 else 1)
 
         legend_handles = []
         for i, label in enumerate(unique_labels):
             if label == -1:
-                # Noise points, use gray
                 color = "gray"
             else:
-                color = cmap(label)
+                color = cmap(norm(label))
+            
             handle = mlines.Line2D(
                 [0], [0], marker='o', color='w', markerfacecolor=color, 
                 markeredgecolor=color, markersize=8, linestyle='None', label=str(label)
             )
             legend_handles.append(handle)
 
-        ax.legend(handles=legend_handles, title="Cluster (first 8)", loc="upper left", frameon=True)
+        title = "Cluster" if all_labels_in_legend else "Cluster (first 8)"
+        ax.legend(handles=legend_handles, title=title, loc="upper left", frameon=True)
 
 
 
@@ -438,10 +449,11 @@ class ClusterVisualizer(BaseVisualizer):
         cluster=labels_str,
         gif_path= gif_path_list,
     )
-        ## Add metadata arrays
+        ## Add metadata arrays # TODO implement this
         if metadata is not None:
             for key in metadata:
                 data[str(key)] = metadata[key]
+            raise NotImplementedError
 
         source = ColumnDataSource(
             data=data

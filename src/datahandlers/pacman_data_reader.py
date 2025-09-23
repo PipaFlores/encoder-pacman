@@ -151,6 +151,16 @@ class PacmanDataReader:
         ## Refactor game_df for analysis consistency.
         self.game_df, self.level_df, self.gamestate_df = self._restructure_game_data()
 
+
+        # Check that for each level_id in gamestate_df there is an analogue in level_df. Otherwise raise error
+        missing_level_ids = set(self.gamestate_df["level_id"].unique()) - set(self.level_df["level_id"].unique())
+        if missing_level_ids:
+            print(
+                f"ERROR: The following level_id(s) in gamestate_df are missing from level_df: {missing_level_ids}. Please check that 'game.csv' and 'gamestate.csv' are aligned and collected at the same time."
+            )
+            del self
+            return
+
         ## If pellet positions have not been processed (using the .csv)
         if "available_pellets" not in self.gamestate_df.columns or force_preprocess:
             logger.warning(
@@ -971,7 +981,6 @@ class PacmanDataReader:
 
         for level_id in self.level_df["level_id"].unique():
             gamestates, _ = self._filter_gamestate_data(level_id=level_id, include_metadata=False)
-            gamestates = gamestates[FEATURES]
 
             start_step_ = start_step
             end_step_ = end_step
@@ -987,7 +996,8 @@ class PacmanDataReader:
             traj = self.get_partial_trajectory(level_id=level_id, start_step=start_step_, end_step=end_step_)
 
             raw_data.append(gamestates)
-            sequence_list.append(gamestates.to_numpy())
+            filtered_sequence = gamestates[FEATURES]
+            sequence_list.append(filtered_sequence.to_numpy())
             traj_list.append(traj)
 
             ## and create video_sequence

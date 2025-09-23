@@ -20,7 +20,7 @@ def behavlet_affinity_calculation(BEHAV_TYPE):
         f"Calculating behavlets for all levels (n = {len(Beh_encodings.reader.level_df)})"
     )
     for level_id in Beh_encodings.reader.level_df["level_id"]:
-        Beh_encodings.calculate_behavlets(level_id=level_id, behavlet_type=BEHAV_TYPE)
+        Beh_encodings.calculate_behavlets_level(level_id=level_id, behavlet_type=BEHAV_TYPE)
 
     print(f"Number of CPU cores: {multiprocessing.cpu_count()}")
 
@@ -69,16 +69,16 @@ def calculate_beggining_of_games():
 
     traj_list = []
 
-    print(f"Collecting first 200 steps of all games (n = {len(reader.level_df['level_id'].unique())})")
+    print(f"Collecting first 100 steps of all games (n = {len(reader.level_df['level_id'].unique())})")
     collect_start = time.time()
     for level_id in reader.level_df["level_id"].unique():
         print(f"Getting partial trajectory for level_id: {level_id}")
-        traj = reader.get_partial_trajectory(level_id, end_step=200)
+        traj = reader.get_partial_trajectory(level_id, end_step=100)
         traj_list.append(traj)
     print(f"Collected {len(traj_list)} trajectories in {time.time() - collect_start:.2f} seconds")
 
     print(f"Number of trajectories collected: {len(traj_list)}")
-    print("Calculating affinity matrix for first 200 steps of all games")
+    print("Calculating affinity matrix for first 100 steps of all games")
     affinity_start = time.time()
     clustering.calculate_affinity_matrix_parallel_cpu(
         trajectories=traj_list, n_jobs=None, chunk_size_multiplier=1
@@ -86,10 +86,10 @@ def calculate_beggining_of_games():
     print(f"Affinity matrix calculated in {time.time() - affinity_start:.2f} seconds")
 
     os.makedirs("affinity_matrices", exist_ok=True)
-    print("Saving affinity matrix to affinity_matrices/first_200_steps_dtw_affinity_matrix.csv")
+    print("Saving affinity matrix to affinity_matrices/first_100_steps_dtw_affinity_matrix.csv")
     save_start = time.time()
     np.savetxt(
-        f"affinity_matrices/first_200_steps_dtw_affinity_matrix.csv",
+        f"affinity_matrices/first_100_steps_dtw_affinity_matrix.csv",
         clustering.affinity_matrix,
         delimiter=",",
     )

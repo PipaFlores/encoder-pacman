@@ -162,9 +162,9 @@ if __name__ == "__main__":
             validation_split=args.validation_split,
             latent_space_dim = args.latent_space,
             save_best_model=True,
-            best_file_name=os.path.join(model_path, f"AEDRNN_h{args.latent_space}_e{args.n_epochs}_best"),
+            best_file_name=os.path.join(model_path, f"AEDRNNClusterer_h{args.latent_space}_e{args.n_epochs}_best"),
             save_last_model=True,
-            last_file_name=os.path.join(model_path, f"AEDRNN_h{args.latent_space}_e{args.n_epochs}_last")
+            last_file_name=os.path.join(model_path, f"AEDRNNClusterer_h{args.latent_space}_e{args.n_epochs}_last")
         )
         
     elif args.model == "ResNet":
@@ -175,9 +175,9 @@ if __name__ == "__main__":
             n_epochs=args.n_epochs,
             validation_split=args.validation_split,
             save_best_model=True,
-            best_file_name=os.path.join(model_path, f"AEResNet_h{args.latent_space}_e{args.n_epochs}_best"),
+            best_file_name=os.path.join(model_path, f"AEResNetClusterer_h{args.latent_space}_e{args.n_epochs}_best"),
             save_last_model=True,
-            last_file_name=os.path.join(model_path, f"AEResNet_h{args.latent_space}_e{args.n_epochs}_last")
+            last_file_name=os.path.join(model_path, f"AEResNetClusterer_h{args.latent_space}_e{args.n_epochs}_last")
             )
 
 

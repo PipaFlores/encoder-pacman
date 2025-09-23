@@ -89,6 +89,7 @@ class Behavlets:
         else:
             logger.setLevel("WARNING")
 
+        ### Behavlets' parameters' configuration
         self.config = BehavletsConfig()
         self.kwargs = {
             **self.config.get_config(name),
@@ -163,6 +164,7 @@ class Behavlets:
         Calculates the behavlet using the specific algorithm, according to behavlet name
         (i.e., self.name = Aggression3 will map to self._Aggression3(data))
         Results are stores in the self.values, self.gamesteps, and self.timesteps attributes.
+        and others, specific to each behavlet.
         """
         if not isinstance(gamestates, pd.DataFrame):
             raise TypeError(

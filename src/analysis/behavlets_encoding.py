@@ -39,7 +39,7 @@ def _calculate_single_level(
         )
 
         # Calculate behavlets for this level
-        encoder.calculate_behavlets(level_id=level_id, behavlet_type=behavlet_types)
+        encoder.calculate_behavlets_level(level_id=level_id, behavlet_type=behavlet_types)
 
         # Return the results instead of storing in instance variables
         return {
@@ -86,23 +86,25 @@ class BehavletsEncoding:
             name: Behavlets(name=name, verbose=verbose, debug=debug)
             for name in Behavlets.NAMES
         }
-        logger.info(f"Behavlets initialized: {Behavlets.NAMES}")
+        logger.debug(f"Behavlets initialized: {Behavlets.NAMES}")
 
         self.summary_results = pd.DataFrame()
         self.instance_details = pd.DataFrame()
         self.special_attributes = pd.DataFrame()
 
-    def calculate_behavlets(
+    def calculate_behavlets_level(
         self,
         level_id: int,
+        return_instance_details: bool = False, 
         behavlet_type: str | list[str] = "all",
-    ) -> List[Behavlets]:
+    ):
         """
         Calculates behavlets for a level and updates the self.summary_results, self.instance_details and self.special_attributes.
 
         Args:
             level_id: The level id to calculate the behavlets for.
             behavlet_type: The type of behavlet to calculate. If "all", all behavlets are calculated.
+            return_instance_details : Wether to return the instance details for some behavlets (e.g., died, value_per_instance, etc)
 
         Returns:
             None
@@ -129,7 +131,43 @@ class BehavletsEncoding:
         else:
             raise ValueError(f"Invalid behavlet type: {behavlet_type}")
 
-        self._store_results(results, metadata)
+        summary_results, instance_details = self._store_results(results, metadata)
+
+        if return_instance_details:
+            return summary_results, instance_details
+        else:
+            return summary_results
+
+    def calculate_behavlets_gamestate_slice(self, 
+                                            gamestates: pd.DataFrame,
+                                            return_instance_details: bool = False, 
+                                            behavlet_type: str | list[str] = "all"):
+
+        results = []  # List of behavlet objects
+        metadata = None
+        ## FIXME Aggression 3 not working when using slices other than from the start of game, probably indexing issue.
+        if behavlet_type == "all":
+            for behavlet_name in self.behavlets.keys():
+                results.append(self.behavlets[behavlet_name].calculate(gamestates))
+        elif isinstance(behavlet_type, list):
+            for behavlet_name in behavlet_type:
+                if behavlet_name not in self.behavlets:
+                    raise ValueError(f"Invalid behavlet name: {behavlet_name}")
+                results.append(self.behavlets[behavlet_name].calculate(gamestates))
+        elif isinstance(behavlet_type, str):
+            if behavlet_type not in self.behavlets:
+                raise ValueError(f"Invalid behavlet name: {behavlet_type}")
+            results.append(self.behavlets[behavlet_type].calculate(gamestates))
+        else:
+            raise ValueError(f"Invalid behavlet type: {behavlet_type}")
+
+        summary_results, instance_details = self._store_results(results, metadata)
+
+        if return_instance_details:
+            return summary_results, instance_details
+        else:
+            return summary_results
+
 
     def calculate_behavlets_category(self, level_id, behavlet_category):
         """
@@ -285,13 +323,13 @@ class BehavletsEncoding:
                 debug=debug,
             )
 
-    def _store_results(self, results: list[Behavlets], metadata: pd.DataFrame):
-        """Store behavlet results of a single level in a structured format"""
+    def _store_results(self, results: list["Behavlets"], metadata: pd.DataFrame | None = None):
+        """Return behavlet results of a single level in a structured format as DataFrames (summary, instance details)"""
 
-        ## Store summary results (one row per level with all behavlets as columns)
+        # Prepare summary results (one row per level with all behavlets as columns)
         summary_data = {
-            "level_id": metadata["level_id"],
-            "user_id": metadata["user_id"],
+            "level_id": metadata["level_id"] if metadata is not None else "",
+            "user_id": metadata["user_id"] if metadata is not None else "",
         }
 
         # Add all behavlet metrics to a single row
@@ -319,23 +357,20 @@ class BehavletsEncoding:
                         behavlet, attr, None
                     )
 
-        # Create summary row and append to results
-        summary_row = pd.DataFrame([summary_data], index=[metadata["level_id"]])
-        self.summary_results = pd.concat(
-            [self.summary_results, summary_row], ignore_index=False
-        )
+        # Create summary row DataFrame
+        summary_row = pd.DataFrame([summary_data])
 
-        ## Store instance details (one row per behavlet instance)
+        # Prepare instance details (one row per behavlet instance)
+        instance_rows = []
         for behavlet in results:
-            # Handle multiple instances per behavlet
             if len(behavlet.gamesteps) > 0:
                 for i, (gamestep, timestep) in enumerate(
                     zip(behavlet.gamesteps, behavlet.timesteps)
                 ):
-                    if gamestep is not None:  # Skip None entries
+                    if gamestep is not None:
                         instance_data = {
-                            "level_id": metadata["level_id"],
-                            "user_id": metadata["user_id"],
+                            "level_id": metadata["level_id"] if metadata is not None else "",
+                            "user_id": metadata["user_id"] if metadata is not None else "",
                             "behavlet_name": behavlet.name,
                             "instance_idx": i,
                             "start_gamestep": gamestep[0]
@@ -389,13 +424,12 @@ class BehavletsEncoding:
                             k: v for k, v in instance_data.items() if v is not None
                         }
 
-                        if (
-                            filtered_instance_data
-                        ):  # Only create DataFrame if we have non-None data
-                            instance_row = pd.DataFrame([filtered_instance_data])
-                            self.instance_details = pd.concat(
-                                [self.instance_details, instance_row], ignore_index=True
-                            )
+                        if filtered_instance_data:
+                            instance_rows.append(filtered_instance_data)
+
+        instance_details_df = pd.DataFrame(instance_rows) if instance_rows else pd.DataFrame()
+
+        return summary_row, instance_details_df
 
     def get_vector_encodings(self) -> pd.DataFrame:
         """Get vector encodings from summary results, filtering for overall value columns."""
@@ -486,10 +520,6 @@ class BehavletsEncoding:
 
         return trajectories
 
-        return trajectories
-
-    def behavlet_path_geom_clustering(self, behavlets: list[Behavlets]):
-        raise NotImplementedError
 
     def create_replay(
         self,
