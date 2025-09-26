@@ -99,6 +99,7 @@ def parse_args():
     parser.add_argument('--latent-space', type=int, default=256, help='Latent space dimension')
     parser.add_argument('--validation-split', type=float, default=0.3, help="Fraction of data to be used as validation set")
     parser.add_argument('--model', type= str, default="DRNN", help="Model architechture to train")
+    parser.add_argument('--features', type=str, default= "Pacman", help="Which combination of features to use")
     # parser.add_argument('--input_size', type=int, default=2, help='Input size (number of channels/dimensions)')
     parser.add_argument('--verbose', action='store_true', help='Verbosity flag')
     parser.add_argument('--sequence-type', type= str, default="", help= "On what type of sequences to train the model, see source code")
@@ -111,21 +112,28 @@ if __name__ == "__main__":
     reader = PacmanDataReader(data_folder="../data", verbose=args.verbose)
     reader.gamestate_df.columns
 
-    FEATURES = [
-        # "score", 
-        # "lives", 
-        # "pacman_attack",
-        "Pacman_X",
-        "Pacman_Y",
-        "Ghost1_X",
-        "Ghost1_Y",            
-        "Ghost2_X",
-        "Ghost2_Y",
-        "Ghost3_X",
-        "Ghost3_Y",
-        "Ghost4_X",
-        "Ghost4_Y",
-    ]
+    # Check which features to use based on args.features
+    if args.features == "Pacman":
+        FEATURES = [
+            "Pacman_X",
+            "Pacman_Y",
+        ]
+    elif args.features == "Pacman_Ghosts":
+        FEATURES = [
+            "Pacman_X",
+            "Pacman_Y",
+            "Ghost1_X",
+            "Ghost1_Y",
+            "Ghost2_X",
+            "Ghost2_Y",
+            "Ghost3_X",
+            "Ghost3_Y",
+            "Ghost4_X",
+            "Ghost4_Y",
+        ]
+    else:
+        raise ValueError(f"Unknown features selection: {args.features}")
+
     N_FEATURES = len(FEATURES)
 
     SEQUENCE_TYPE = args.sequence_type
@@ -166,6 +174,18 @@ if __name__ == "__main__":
             save_last_model=True,
             last_file_name=os.path.join(model_path, f"AEDRNNClusterer_h{args.latent_space}_e{args.n_epochs}_last")
         )
+    elif args.model == "DCNN":
+        autoencoder = AEDCNNClusterer(
+            estimator= DummyClusterer(),
+            verbose = args.verbose,
+            n_epochs= args.n_epochs,
+            validation_split=args.validation_split,
+            latent_space_dim = args.latent_space,
+            save_best_model=True,
+            best_file_name=os.path.join(model_path, f"AEDCNNClusterer_h{args.latent_space}_e{args.n_epochs}_best"),
+            save_last_model=True,
+            last_file_name=os.path.join(model_path, f"AEDCNNClusterer_h{args.latent_space}_e{args.n_epochs}_last")
+        )
         
     elif args.model == "ResNet":
         autoencoder = AEResNetClusterer(
@@ -175,9 +195,9 @@ if __name__ == "__main__":
             n_epochs=args.n_epochs,
             validation_split=args.validation_split,
             save_best_model=True,
-            best_file_name=os.path.join(model_path, f"AEResNetClusterer_h{args.latent_space}_e{args.n_epochs}_best"),
+            best_file_name=os.path.join(model_path, f"AEResNetClusterer_h128_e{args.n_epochs}_best"),
             save_last_model=True,
-            last_file_name=os.path.join(model_path, f"AEResNetClusterer_h{args.latent_space}_e{args.n_epochs}_last")
+            last_file_name=os.path.join(model_path, f"AEResNetClusterer_h128_e{args.n_epochs}_last")
             )
 
 

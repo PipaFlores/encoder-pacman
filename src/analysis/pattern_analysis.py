@@ -23,7 +23,7 @@ except ImportError:
 try:
     import tensorflow # check backend
     KERAS_AVAILABLE = True
-    from aeon.clustering.deep_learning import AEResNetClusterer, AEDRNNClusterer, BaseDeepClusterer
+    from aeon.clustering.deep_learning import AEResNetClusterer, AEDRNNClusterer, AEDCNNClusterer, BaseDeepClusterer
     from aeon.clustering import DummyClusterer
 except ImportError:
     KERAS_AVAILABLE = False
@@ -74,8 +74,8 @@ class PatternAnalysis:
             clusterer: HDBSCAN | KMeans | GeomClustering = None,
             similarity_measure: str = "euclidean",
             sequence_type: str = "first_5_seconds",
-            validation: str = "Behavlets",
-            features_columns: list[str] = ["Pacman_X", "Pacman_Y"],
+            validation_method: str | None = "Behavlets",
+            features_columns: list[str] = ["Pacman_X", "Pacman_Y"], # Maybe use a different input logic (e.g., geometric_2, geometric_10, Astar, full_state,etc.)
             augmented_visualization: bool = False,
             batch_size: int = 32,
             max_epochs: int = 500,
@@ -92,7 +92,7 @@ class PatternAnalysis:
             reader (PacmanDataReader, optional): Data reader object for loading Pacman data. If None, a new reader is created.
             data_folder (str): Path to the data directory.
             hpc_folder (str): Path to the HPC directory for videos, affinity matrices, and trained models.
-            embedder (str | None): Type of embedder to use ("LSTM", "CNN", etc.) or None to skip embedding.
+            embedder (str | None): Type of embedder to use "LSTM", "DRNN", "DCNN", "ResNet" or None to skip embedding.
             reducer (UMAP | PCA | None): Dimensionality reduction method. If None, defaults to UMAP.
             clusterer (HDBSCAN | KMeans | GeomClustering): Clustering algorithm to use.
             similarity_measure (str): Similarity metric for affinity matrix calculation (euclidean or cosine). Not the one
@@ -119,7 +119,7 @@ class PatternAnalysis:
         
         # Configuration
         self.sequence_type = sequence_type
-        self.validation_method = validation ## What kind of method used to assess cluster validity
+        self.validation_method = validation_method ## What kind of method used to assess cluster validity
         self.augmented_visualization = augmented_visualization
         self.hpc_folder = hpc_folder ## for videos and trained models lookups (wherever videos/ affinity_matrices/ and trained_models/ are)
         self.using_hpc = using_hpc ## For parallel computing of affinity matrix
@@ -129,10 +129,6 @@ class PatternAnalysis:
             random.seed(random_seed)
             np.random.seed(random_seed)
 
-        # Default features if none provided
-        self.features_columns = features_columns if features_columns is not None else [
-            "Pacman_X", "Pacman_Y"
-        ]
             # for deep neural networks
         self.batch_size = batch_size
         self.max_epochs = max_epochs
@@ -145,11 +141,15 @@ class PatternAnalysis:
         # Core components
         self.reader = reader if reader is not None else PacmanDataReader(data_folder)
         if isinstance(clusterer, GeomClustering): # Only clusterer.
+            
+            self.features_columns = ["Pacman_X", "Pacman_Y"] # Always these two features
+            logger.info(f"features columns set to Pacman's X,Y coordinates for GeomClustering")
             self.embedder = None
             self.reducer = None
             self.clusterer = clusterer
             self.similarity_measure = clusterer.similarity_measures.measure_type
         else: # Neural-Network embedding -> Reducer -> clusterer
+            self.features_columns = features_columns
             self.embedder = self._initialize_deep_embedder(embedder) if embedder is not None else None
             self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="euclidean", random_state=random_seed)
             self.clusterer = clusterer if clusterer is not None else HDBSCAN(min_cluster_size=20, min_samples=None)
@@ -172,14 +172,14 @@ class PatternAnalysis:
         self.reduced_embeddings = None
         self.affinity_matrix = None
         self.labels = None
-        self.validation_labels = None
         self.validation_encodings = None
+        self.validation_labels = None
         self.metadata = None
         self.results = {}
 
     def _initialize_deep_embedder(self, embedder:str):
 
-        supported = ["LSTM", "DRNN","ResNet"]
+        supported = ["LSTM", "DRNN", "DCNN", "ResNet"]
         if embedder not in supported:
             raise ValueError(f"Embedder {embedder} is not one of the supported embedding deep networks ({supported})")
         
@@ -223,8 +223,24 @@ class PatternAnalysis:
                 validation_split=self.validation_data_split,
                 verbose=self.verbose                
             )
+        
+        if embedder == "DCNN":
+            if not KERAS_AVAILABLE:
+                raise ModuleNotFoundError(f"using DCNN requires aeon/tensorflow/keras in the environment")
+            
+            self.using_torch = False
+            self.using_keras = True
 
-    def fit(self):
+            return AEDCNNClusterer(
+                estimator=DummyClusterer(),
+                latent_space_dim=self.latent_dimension,
+                n_epochs=self.max_epochs,
+                validation_split=self.validation_data_split,
+                verbose=self.verbose
+            )
+
+    def fit(self, 
+            test_dataset: bool = False):
         """
         Main fitting method that runs the complete pipeline.
         """
@@ -235,20 +251,29 @@ class PatternAnalysis:
         # It might greatly improve performance for comparative analysis since each
         # class is loading the data again. Or just leave it to the hpc supremacy.
         
-        self.raw_data, self.sequence_data, self.padded_sequence_data, self.trajectory_list, self.gif_path_list = self.load_and_slice_data(
-            sequence_type=self.sequence_type, make_gif=self.augmented_visualization)
+        if test_dataset == False:
+            self.raw_data, self.sequence_data, self.padded_sequence_data, self.trajectory_list, self.gif_path_list = self.load_and_slice_data(
+                sequence_type=self.sequence_type, make_gif=self.augmented_visualization)
+        else:
+            from aeon.datasets import load_classification
+            logger.info("Loading PenDigits test dataset (10k samples)")
+            self.sequence_data, self.validation_labels = load_classification("PenDigits")
+            self.sequence_data = self.sequence_data.transpose(0,2,1) # [N, seq_length, features]
+            self.padded_sequence_data = self.sequence_data # to accomodate the pipeline
 
         # Step 2a: load or train embedding model
         
         if self.embedder is not None:
-            is_model_trained_, model_path = self._check_model_training_status(return_path=True)
+            is_model_trained_, model_path = self._check_model_training_status(return_path=True, test_dataset=test_dataset)
  
             if is_model_trained_:
                 logger.info(f"found trained model at {model_path}, loading...")
                 self._load_model(model_path)
             else:
                 logger.info(f"no trained model found at {model_path}, training...")
-                self._train_model()
+                self._train_model(
+                    padded_sequence_data=self.padded_sequence_data,
+                    test_dataset=test_dataset)
                 logger.info(f"model trained and saved at {model_path}")
 
         # Step 2b: Generate embeddings 
@@ -282,11 +307,16 @@ class PatternAnalysis:
         self.clustervisualizer = ClusterVisualizer(
         )
 
-        
         # Step 4: Validation
-        # if self.validation_method and self.raw_data is not None:
-        #     self.validation_labels = self.validate(self.raw_data)
-        
+        if self.validation_method and self.raw_data is not None:
+            self.validation_encodings, self.validation_labels = self.calculate_validation_encodings(self.raw_data)
+        # Calculate clustering validation measures (ARI, AMI, NMI) for each validation label set
+            self.validation_measures =self.calculate_validation_measures(
+                labels = self.labels,
+                validation_labels= self.validation_labels
+                )
+            
+
         # Step 5: Visualization and Collection of Results
         
         
@@ -294,7 +324,7 @@ class PatternAnalysis:
 
         # self.plot_results()
         
-        print("Pipeline completed successfully!")
+        logger.info("Pipeline completed successfully!")
         return self
 
     ### DATA SLICING
@@ -372,7 +402,7 @@ class PatternAnalysis:
 
     ### EMBEDDING
 
-    def _check_model_training_status(self, return_path=False) -> bool | tuple[bool, str]:
+    def _check_model_training_status(self, return_path=False, test_dataset = False) -> bool | tuple[bool, str]:
         """
         Check if a trained model already exists for the current configuration.
         
@@ -384,7 +414,7 @@ class PatternAnalysis:
             "trained_models",
             self.sequence_type,
             "f" + str(len(self.features_columns)),
-            f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
+            "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}" 
         )
         
         if self.using_torch:
@@ -408,14 +438,26 @@ class PatternAnalysis:
 
         return
 
-    def _train_model(self):
+    def _train_model(self, 
+                     padded_sequence_data: np.ndarray,
+                     test_dataset: bool = False):
+        """
+        Train the embedding model (either PyTorch or Keras-based) on the provided padded sequence data.
+
+        Args:
+            padded_sequence_data (np.ndarray): The input data to train the embedding model, of shape [N, seq_length, features].
+            test_dataset (bool, optional): If True, indicates that the training is being performed on a test dataset. Defaults to False.
+
+        Returns:
+            None. The trained model is saved to disk at the specified model path.
+        """
 
         model_path = os.path.join(
             self.hpc_folder,
             "trained_models",
             self.sequence_type,
             "f" + str(len(self.features_columns)),
-            f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
+            "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
         )
     
         if self.using_torch:
@@ -428,7 +470,7 @@ class PatternAnalysis:
                 best_path=model_path + "_best.pth",
                 last_path=model_path + "_last.pth",
                 )
-            data_tensor = PacmanDataset(gamestates = self.padded_sequence_data)
+            data_tensor = PacmanDataset(gamestates = padded_sequence_data)
             trainer.fit(model= self.embedder, data=data_tensor)
             trainer.plot_loss(
                 save_path=os.path.join(
@@ -437,7 +479,7 @@ class PatternAnalysis:
                     "loss_plots",
                     self.sequence_type,
                     "f" + str(len(self.features_columns)),
-                    f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
+                    "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
                 )
             )
             
@@ -447,7 +489,7 @@ class PatternAnalysis:
             self.embedder.save_last_model = True
             self.embedder.last_file_name = model_path + "_last"
 
-            self.embedder.fit(self.padded_sequence_data.transpose(0,2,1)) # Transpose to match aeon input format of [n, channels, seq_length]
+            self.embedder.fit(padded_sequence_data.transpose(0,2,1)) # Transpose to match aeon input format of [n, channels, seq_length]
 
             self.embedder.plot_loss_keras(
                 os.path.join(
@@ -455,7 +497,7 @@ class PatternAnalysis:
                     "loss_plots",
                     self.sequence_type,
                     "f" + str(len(self.features_columns)),
-                    f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}.png"
+                    "test_data" if test_dataset else "" + "{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}.png"
                 )
             )       
             
@@ -538,13 +580,17 @@ class PatternAnalysis:
             embeddings = embeddings.detach().numpy()
 
         if isinstance(self.embedder, BaseDeepClusterer): ## aeon implementations
+            ## Batch form (Seems unnecessary for aeon modules, they have an internal batch logic)
+            # for i in range(0, len(padded_data), self.batch_size):
+            #     batch_data = padded_data[i:i+self.batch_size]
+            #     batch_embeddings = self.embedder.model_.layers[1].predict(batch_data)
+            #     all_embeddings.append(batch_embeddings)
+            # embeddings = np.concatenate(all_embeddings, axis=0)
 
-            for i in range(0, len(padded_data), self.batch_size):
-                batch_data = padded_data[i:i+self.batch_size]
-                batch_embeddings = self.embedder.model_.layers[1].predict(batch_data)
-                all_embeddings.append(batch_embeddings)
+            embeddings = self.embedder.model_.layers[1].predict(padded_data)
 
-            embeddings = np.concatenate(all_embeddings, axis=0)
+            
+
         
         
         return embeddings
@@ -604,6 +650,7 @@ class PatternAnalysis:
                     self.affinity_matrix,
                     delimiter=",",
                 )
+            logger.info(f"Calculated and saved affinity matrix in {affinity_matrix_path}")
     
         labels = self.clusterer.clusterer.fit_predict(self.affinity_matrix)
 
@@ -648,15 +695,16 @@ class PatternAnalysis:
         logger.debug(f"Remapped {len(cluster_sizes)} clusters")
         return new_labels
     
-    def validate(self) -> pd.DataFrame:
+    def calculate_validation_encodings(self, 
+                                       raw_data:list[pd.DataFrame]) -> pd.DataFrame:
         """
         Validate clustering results using behavioral patterns.
         
         Args:
-            gamestates: Raw gamestate sequences
+            
             
         Returns:
-            Validation results dictionary
+            
         """
         logger.info(f"Validating with {self.validation_method}...")
         
@@ -674,10 +722,10 @@ class PatternAnalysis:
                             ]  # Example behavlets
                         
             # Get behavlet encodings for validation
-            validation_results = pd.DataFrame()
+            validation_encodings = pd.DataFrame()
             # To ensure the order of results aligns with the raw_data list, collect results in a list and concatenate at the end
             validation_rows = []
-            for idx, gamestate in enumerate(self.raw_data):
+            for idx, gamestate in enumerate(raw_data):
                 try:
                     summary_row = behavlets_encoder.calculate_behavlets_gamestate_slice(
                         gamestates=gamestate, behavlet_type=behavlet_types
@@ -691,25 +739,72 @@ class PatternAnalysis:
                     continue  # Don't append empty DataFrame
 
             # Concatenate all rows in the same order as raw_data
-            validation_results = pd.concat(validation_rows, ignore_index=True)
+            validation_encodings = pd.concat(validation_rows, ignore_index=True)
 
             # Only keep columns ending with "_value" if they exist
-            value_cols = [col for col in validation_results.columns if col.endswith("_value")]
+            value_cols = [col for col in validation_encodings.columns if col.endswith("_value")]
             if value_cols:
-                validation_results = validation_results[value_cols]
+                validation_encodings = validation_encodings[value_cols]
+
+            # Binarize each column in validation_encodings: >0 -> 1, <=0 -> -1, unless all zeros (then None)
+            validation_labels = pd.DataFrame(index=validation_encodings.index)
+            for col in validation_encodings.columns:
+                col_values = validation_encodings[col].to_numpy()
+                if np.sum(col_values) == 0:
+                    validation_labels[col] = None
+                else:
+                    validation_labels[col] = np.where(col_values > 0, 1, -1)
 
 
-
-            return validation_results
+            return validation_encodings, validation_labels
         else:
             raise NotImplementedError(f"Validation method not supported ({self.validation_method})")
+        
+    
+    def calculate_validation_measures(
+            self,
+            labels : np.ndarray,
+            validation_labels : pd.DataFrame
+            ): 
+        
+        from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score, normalized_mutual_info_score
+        if validation_labels is not None:
+            validation_measures_rows = []
+            for col in validation_labels.columns:
+                val_labels = validation_labels[col].to_numpy()
+                # Only compute if val_labels is not all NaN and not all zeros
+                if np.all(pd.isnull(val_labels)) or (np.unique(val_labels).size == 1 and np.unique(val_labels)[0] in [None, np.nan, 0]):
+                    ari = np.nan
+                    ami = np.nan
+                    nmi = np.nan
+                else:
+                    # Some validation labels may have NaNs, mask those out for fair comparison
+                    mask = ~pd.isnull(val_labels)
+                    if np.sum(mask) == 0:
+                        ari = np.nan
+                        ami = np.nan
+                        nmi = np.nan
+                    else:
+                        ari = adjusted_rand_score(labels[mask], val_labels[mask])
+                        ami = adjusted_mutual_info_score(labels[mask], val_labels[mask])
+                        nmi = normalized_mutual_info_score(labels[mask], val_labels[mask])
+                validation_measures_rows.append({
+                    "validation_set": col,
+                    "ARI": ari,
+                    "AMI": ami,
+                    "NMI": nmi
+                })
+            
+            validation_measures = pd.DataFrame(validation_measures_rows).set_index("validation_set")
+
+            return validation_measures
         
 
     def summarize(self):
         """
         Generate summary statistics and results.
         """
-        print("Generating summary...")
+        ("Generating summary...")
 
         # Print out configuration of core modules in the pipeline
         print("\n--- MODULES CONFIGURATION ---")
@@ -846,9 +941,13 @@ class PatternAnalysis:
         
 
         if save_path is not None:
+            # If save_path is a filename without a directory, os.path.dirname(save_path) returns ''
+            # In that case, don't try to create a directory
             if not save_path.lower().endswith('.html'):
                 save_path += '.html'
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            dir_name = os.path.dirname(save_path)
+            if dir_name:
+                os.makedirs(dir_name, exist_ok=True)
             output_file(save_path)
 
         if isinstance(self.clusterer, GeomClustering):
@@ -908,9 +1007,8 @@ class PatternAnalysis:
         return
     
     def plot_latent_space_overview(self, 
-                                   axs: list[plt.Axes] | None = None,
                                    plot_cluster_centroids = False,
-                                   validation_set: str | None = None,
+                                   validation_set: str | list | None = None,
                                    all_labels_in_legend: bool = False,
                                    save_path:str = None):
         """
@@ -921,106 +1019,162 @@ class PatternAnalysis:
 
         If using embeddings, the centroids plot will only use the first two dimensions.
         """
-        if validation_set is not None:
-            labels = self.validation_encodings[validation_set].to_numpy()
-            if sum(labels) == 0:
-                labels = None
+
+        if not plot_cluster_centroids:
+
+            if isinstance(self.clusterer, GeomClustering):
+                self.trajectory_centroids = self._calculate_trajectory_centroids()  # Geometrical embedding (centroid)
+                traj_embeddings = self.trajectory_centroids
+                frame_to_maze = True
+                xlabel = "X coordinate"
+                ylabel = "Y coordinate"
             else:
-                labels = [1 if value > 0 else -1 for value in labels]
+                traj_embeddings = self.reduced_embeddings
+                frame_to_maze = False
+                xlabel = "Reduced Latent Dimension 1"
+                ylabel = "Reduced Latent Dimension 2"
+
                 
-        else:
-            labels = self.labels
-
-        if plot_cluster_centroids:
-            if axs is None:
-                fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-                show_plot = True
-            else:
-                show_plot = False
-
-            if isinstance(self.clusterer, GeomClustering):
-                self.trajectory_centroids = self._calculate_trajectory_centroids()
-                self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
-                self.clustervisualizer.plot_trajectories_embedding(
-                    traj_embeddings=self.trajectory_centroids,
-                    labels=labels,
-                    ax=axs[0],
-                    all_labels_in_legend=all_labels_in_legend,
-                    frame_to_maze=True
-                )
-                axs[0].set_title("a) " + axs[0].get_title())
-
-                self.clustervisualizer.plot_clusters_centroids(
-                    cluster_centroids=self.cluster_centroids,
-                    cluster_sizes=self.cluster_sizes,
-                    labels=labels,
-                    ax=axs[1],
-                    frame_to_maze=True
-                )
-                axs[1].set_title("b) " + axs[0].get_title())
-            else:
-                self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
-                self.clustervisualizer.plot_trajectories_embedding(
-                    traj_embeddings=self.reduced_embeddings,
-                    labels=labels,
-                    ax=axs[0],
-                    all_labels_in_legend=all_labels_in_legend,
-                    frame_to_maze=False
-                )
-                axs[0].set_title("a) " + axs[0].get_title())
-
-                self.clustervisualizer.plot_clusters_centroids(
-                    cluster_centroids=self.cluster_centroids,
-                    cluster_sizes=self.cluster_sizes,
-                    labels=labels,
-                    ax=axs[1],
-                    frame_to_maze=False
-                )
-                axs[1].set_title("b) " + axs[0].get_title())
-
-            if axs is None:
-                fig.suptitle(f"Latent Space Overview")
-                fig.tight_layout()
-
-            if show_plot:
-                plt.show()
-        else:
-            # Only plot the trajectory embeddings (no centroids)
-            if axs is None:
+            # Check if validation_set is None or a string (single validation set) One plot
+            if validation_set is None or isinstance(validation_set, str):
                 fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-                show_plot = True
-            else:
-                # If axs is provided, use the first axis
-                if isinstance(axs, (list, tuple, np.ndarray)):
-                    ax = axs[0]
-                else:
-                    ax = axs
-                show_plot = False
 
+                if validation_set is not None:
+                    # Get labels for the specified validation set
+                    try:
+                        labels = self.validation_labels[validation_set].to_numpy()
+                    except KeyError:
+                        raise KeyError(f"Could not find '{validation_set}'. "
+                            f"Possible validation sets are: {list(self.validation_labels.columns)}")
+                    # If all values are None, set labels to None
+                    if np.all(pd.isnull(labels)):
+                        labels = None
+                    elif np.sum(labels) == 0:
+                        labels = None
+
+                else:
+                    labels = self.labels
+
+                self.clustervisualizer.plot_trajectories_embedding(
+                    traj_embeddings=traj_embeddings,
+                    labels=labels,
+                    ax=ax,
+                    all_labels_in_legend=all_labels_in_legend,
+                    frame_to_maze=frame_to_maze
+                )
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel(ylabel)
+
+            elif isinstance(validation_set, (list, tuple)):
+                n_plots = len(validation_set)
+                fig, axs = plt.subplots(1, n_plots, figsize=(n_plots * 6, 6))
+                # Handle multiple validation sets - create subplots for each
+                for i, val_set in enumerate(validation_set):
+                    # Get labels for this validation set
+                    try:
+                        val_labels = self.validation_labels[val_set].to_numpy()
+                    except KeyError:
+                        raise KeyError(f"Could not find '{val_set}'. "
+                            f"Possible validation sets are: {list(self.validation_labels.columns)}")
+                    
+                    # If all values are None, set labels to None
+                    if np.all(pd.isnull(val_labels)):
+                        val_labels = None
+                    elif np.sum(val_labels) == 0:
+                        val_labels = None
+                    
+                    # Use the appropriate axis from the subplot array
+                    if isinstance(axs, (list, tuple, np.ndarray)):
+                        current_ax = axs[i] if len(axs) > i else axs[-1]
+                    else:
+                        current_ax = axs
+                    
+                    # Plot on the current axis
+                    self.clustervisualizer.plot_trajectories_embedding(
+                        traj_embeddings=traj_embeddings,
+                        labels=val_labels,
+                        ax=current_ax,
+                        all_labels_in_legend=all_labels_in_legend,
+                        frame_to_maze=frame_to_maze
+                    )
+                    
+                    # Set labels and title for this subplot
+                    current_ax.set_xlabel(xlabel)
+                    current_ax.set_ylabel(ylabel)
+                    current_ax.set_title(f"Validation: {val_set}")
+
+            
+            fig.suptitle(
+                f"{self.sequence_type}_"
+                f"f{len(self.features_columns)}"
+                f"{self.embedder.__class__.__name__}_"
+                f"{self.reducer.__class__.__name__}_"
+                f"{self.clusterer.__class__.__name__}"
+            )
+            fig.tight_layout()
+
+            
+            plt.show()
+        
+        elif plot_cluster_centroids: # Consider removing this, is almost useless and code is disgusting                        
+            
+            fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+            
+        
             if isinstance(self.clusterer, GeomClustering):
                 self.trajectory_centroids = self._calculate_trajectory_centroids()
+                self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
                 self.clustervisualizer.plot_trajectories_embedding(
                     traj_embeddings=self.trajectory_centroids,
                     labels=labels,
-                    ax=ax,
+                    ax=axs[0],
                     all_labels_in_legend=all_labels_in_legend,
                     frame_to_maze=True
                 )
+                axs[0].set_title("a) " + axs[0].get_title())
+                axs[0].set_xlabel("X Coordinate")
+                axs[0].set_ylabel("Y Coordinate")
+
+                self.clustervisualizer.plot_clusters_centroids(
+                    cluster_centroids=self.cluster_centroids,
+                    cluster_sizes=self.cluster_sizes,
+                    labels=labels,
+                    ax=axs[1],
+                    frame_to_maze=True
+                )
+                axs[1].set_title("b) " + axs[0].get_title())
+                axs[1].set_xlabel("X Coordinate")
+                axs[1].set_ylabel("Y Coordinate")
             else:
+                self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
                 self.clustervisualizer.plot_trajectories_embedding(
                     traj_embeddings=self.reduced_embeddings,
                     labels=labels,
-                    ax=ax,
+                    ax=axs[0],
                     all_labels_in_legend=all_labels_in_legend,
                     frame_to_maze=False
                 )
+                axs[0].set_title("a) " + axs[0].get_title())
+                axs[0].set_xlabel("Reduced Latent dimension 1")
+                axs[0].set_ylabel("Reduced Latent dimension 2")
 
-            if axs is None:
-                fig.suptitle(f"Latent Space Overview")
-                fig.tight_layout()
+                self.clustervisualizer.plot_clusters_centroids(
+                    cluster_centroids=self.cluster_centroids,
+                    cluster_sizes=self.cluster_sizes,
+                    labels=labels,
+                    ax=axs[1],
+                    frame_to_maze=False
+                )
+                axs[1].set_title("b) " + axs[0].get_title())
+                axs[1].set_xlabel("Reduced Latent dimension 1")
+                axs[1].set_ylabel("Reduced Latent dimension 2")
 
-            if show_plot:
-                plt.show()
+
+            fig.suptitle(f"Latent Space Overview")
+            fig.tight_layout()
+
+            
+            plt.show()
 
     def plot_cluster_overview(self, 
                               cluster_id: int, 

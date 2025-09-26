@@ -286,21 +286,40 @@ class ClusterVisualizer(BaseVisualizer):
         else:
             show_plot = False
 
+        # Check if we have exactly 2 labels: -1 and one other
+        if labels is not None:
+            non_noise_labels = np.unique(labels[labels >= 0])
+            has_noise = -1 in labels
+            use_red_for_single_cluster = has_noise and len(non_noise_labels) == 1
+        else:
+            use_red_for_single_cluster = False
+
         if frame_to_maze:
             ax.set_ylim(self.MAZE_Y_MIN, self.MAZE_Y_MAX)
             ax.set_xlim(self.MAZE_X_MIN, self.MAZE_X_MAX)
+        
         # Create a custom colormap that maps -1 to gray
         cmap = self.cmap
         cmap.set_under("gray")
 
-        scatter = ax.scatter(
-            traj_embeddings[:, 0],
-            traj_embeddings[:, 1],
-            c=labels,
-            cmap=cmap,
-            vmin=-0.5,
-            s=3,
-        )
+        if use_red_for_single_cluster:
+            # Create custom colors for the special case
+            colors = ['red' if label >= 0 else 'gray' for label in labels]
+            scatter = ax.scatter(
+                traj_embeddings[:, 0],
+                traj_embeddings[:, 1],
+                c=colors,
+                s=3,
+            )
+        else:
+            scatter = ax.scatter(
+                traj_embeddings[:, 0],
+                traj_embeddings[:, 1],
+                c=labels,
+                cmap=cmap,
+                vmin=-0.5,
+                s=3,
+            )
 
         # Create custom legend with cluster sizes
         # Instead of using matplotlib's automatic size legend
@@ -320,9 +339,17 @@ class ClusterVisualizer(BaseVisualizer):
         norm = Normalize(vmin=-0.5, vmax=max(unique_labels[unique_labels >= 0]) if len(unique_labels[unique_labels >= 0]) > 0 else 1)
 
         legend_handles = []
+        
+        # Check if we have exactly 2 labels: -1 and one other
+        non_noise_labels = unique_labels[unique_labels >= 0]
+        has_noise = -1 in unique_labels
+        use_red_for_single_cluster = has_noise and len(non_noise_labels) == 1
+        
         for i, label in enumerate(unique_labels):
             if label == -1:
                 color = "gray"
+            elif use_red_for_single_cluster:
+                color = "red"
             else:
                 color = cmap(norm(label))
             

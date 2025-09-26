@@ -10,27 +10,19 @@
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-
-### PYTORCH MODELS
-# module load pytorch
-
-# srun python pytorch_pacman.py --sequence-type 'first_5_seconds' --n-epochs 1000
-# srun python pytorch_pacman.py --sequence-type 'last_5_seconds' --n-epochs 1000
-# srun python pytorch_pacman.py --sequence-type 'whole_level' --n-epochs 1000
-
 ### AEON/KERAS MODELS
 module load tensorflow
 
-srun python keras_pacman.py --model 'DRNN' --sequence-type 'first_5_seconds' --n-epochs 500
+# Define arrays for different parameters
+MODELS=("DRNN" "ResNet" "DCNN")
+SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
+FEATURES_SETS=("Pacman" "Pacman_Ghosts")
 
-srun python keras_pacman.py --model 'ResNet' --sequence-type 'first_5_seconds' --n-epochs 500
-
-srun python keras_pacman.py --model 'DRNN' --sequence-type 'last_5_seconds' --n-epochs 500
-
-srun python keras_pacman.py --model 'ResNet' --sequence-type 'last_5_seconds' --n-epochs 500
-
-srun python keras_pacman.py --model 'DRNN' --sequence-type 'whole_level' --n-epochs 500
-
-srun python keras_pacman.py --model 'ResNet' --sequence-type 'whole_level' --n-epochs 500
-
-
+# Loop through models, sequence types, and feature sets
+for MODEL in "${MODELS[@]}"; do
+    for SEQ_TYPE in "${SEQUENCE_TYPES[@]}"; do
+        for FEATURES in "${FEATURES_SETS[@]}"; do
+            srun python keras_pacman.py --model "$MODEL" --sequence-type "$SEQ_TYPE" --n-epochs 500 --features "$FEATURES"
+        done
+    done
+done
