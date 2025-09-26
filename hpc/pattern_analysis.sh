@@ -5,7 +5,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=40  # Mahti has 128 CPU cores per node, Puhti has 40
 #SBATCH --time=2:00:00
+#SBATCH --mem-per-cpu=4000
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 module load pytorch
-srun python affinity_cal.py
+srun python pattern_analysis.py

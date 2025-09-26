@@ -75,9 +75,10 @@ def padding_sequences(sequence_list:list[np.ndarray],
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Initialize autoencoder models with specified parameters.")
-    parser.add_argument('--n-epochs', type=int, default=1000, help='Number of epochs for training')
+    parser.add_argument('--n-epochs', type=int, default=500, help='Number of epochs for training')
     parser.add_argument('--latent-space', type=int, default=256, help='Latent space dimension')
     parser.add_argument('--validation-split', type=float, default=0.3, help="Fraction of data to be used as validation set")
+    parser.add_argument('--features', type=str, default= "Pacman", help="Which combination of features to use")
     # parser.add_argument('--input_size', type=int, default=2, help='Input size (number of channels/dimensions)')
     parser.add_argument('--verbose', action='store_true', help='Verbosity flag')
     parser.add_argument('--sequence-type', type= str, default="", help= "On what type of sequences to train the model, see source code")
@@ -92,21 +93,28 @@ if __name__ == "__main__":
     reader = PacmanDataReader(data_folder="../data", verbose=args.verbose)
     reader.gamestate_df.columns
 
-    FEATURES = [
-        # "score", 
-        # "lives", 
-        # "pacman_attack",
-        "Pacman_X",
-        "Pacman_Y",
-        "Ghost1_X",
-        "Ghost1_Y",            
-        "Ghost2_X",
-        "Ghost2_Y",
-        "Ghost3_X",
-        "Ghost3_Y",
-        "Ghost4_X",
-        "Ghost4_Y",
-    ]
+    # Check which features to use based on args.features
+    if args.features == "Pacman":
+        FEATURES = [
+            "Pacman_X",
+            "Pacman_Y",
+        ]
+    elif args.features == "Pacman_Ghosts":
+        FEATURES = [
+            "Pacman_X",
+            "Pacman_Y",
+            "Ghost1_X",
+            "Ghost1_Y",
+            "Ghost2_X",
+            "Ghost2_Y",
+            "Ghost3_X",
+            "Ghost3_Y",
+            "Ghost4_X",
+            "Ghost4_Y",
+        ]
+    else:
+        raise ValueError(f"Unknown features selection: {args.features}")
+
     N_FEATURES = len(FEATURES)
 
     SEQUENCE_TYPE = args.sequence_type

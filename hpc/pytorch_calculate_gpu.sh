@@ -14,14 +14,12 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 ### PYTORCH MODELS
 module load pytorch
 
-srun python pytorch_pacman.py --sequence-type 'first_5_seconds' --n-epochs 500
-srun python pytorch_pacman.py --sequence-type 'last_5_seconds' --n-epochs 500
-srun python pytorch_pacman.py --sequence-type 'whole_level' --n-epochs 500
+FEATURE_SETS=("Pacman" "Pacman_Ghosts")
+SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
 
-# ### AEON/KERAS MODELS
-# module load tensorflow
-
-# srun python keras_pacman.py --model 'DRNN' --sequence-type 'last_5_seconds' --n-epochs 1000
-
-# srun python keras_pacman.py --model 'ResNet' --sequence-type 'last_5_seconds' --n-epochs 1000
+for FEATURES in "${FEATURE_SETS[@]}"; do
+    for SEQ_TYPE in "${SEQUENCE_TYPES[@]}"; do
+        srun python pytorch_pacman.py --sequence-type "$SEQ_TYPE" --n-epochs 500 --features "$FEATURES"
+    done
+done
 
