@@ -309,7 +309,7 @@ class PatternAnalysis:
 
         # Step 4: Validation
         if self.validation_method and self.raw_data is not None:
-            self.validation_encodings, self.validation_labels = self.calculate_validation_encodings(self.raw_data)
+            self.validation_encodings, self.validation_labels = self.calculate_validation_encodings(self.raw_data, self.validation_method)
         # Calculate clustering validation measures (ARI, AMI, NMI) for each validation label set
             self.validation_measures =self.calculate_validation_measures(
                 labels = self.labels,
@@ -696,30 +696,52 @@ class PatternAnalysis:
         return new_labels
     
     def calculate_validation_encodings(self, 
-                                       raw_data:list[pd.DataFrame]) -> pd.DataFrame:
+                                       raw_data:list[pd.DataFrame],
+                                       validation_method: str = "Behavlets") -> tuple[pd.DataFrame, pd.DataFrame]:
         """
-        Validate clustering results using behavioral patterns.
-        
-        Args:
-            
-            
-        Returns:
-            
+        Compute validation labels for clustering results using behavioral pattern encodings (Behavlets).
+
+        This method applies a set of predefined behavlet encodings to each sequence in the provided raw data,
+        and binarizes the results to facilitate cluster validation. Each behavlet is represented as a column,
+        and each row corresponds to a sequence.
+
+        Parameters
+        ----------
+        raw_data : list of pd.DataFrame
+            List of DataFrames, each containing the game state sequence for a single sample to be validated.
+        validation_method : str, optional
+            Validation method to use. Currently, only "Behavlets" is implemented.
+
+        Returns
+        -------
+        validation_encodings : pd.DataFrame
+            DataFrame of raw (non-binarized) behavlet values for each sequence and behavlet type.
+        validation_labels : pd.DataFrame
+            DataFrame of binarized validation labels for each sequence and behavlet type.
+            Each column corresponds to a behavlet (e.g., "Aggression1_value"). Values are:
+                1   if the behavlet is present in the sequence (>0)
+               -1   if the behavlet is absent in the sequence (<=0)
+               None if the behavlet is always zero across all sequences (i.e., not observed in any sample).
+        Returns
+        -------
+        tuple[pd.DataFrame, pd.DataFrame]
+            A tuple containing (validation_labels, validation_encodings).
         """
         logger.info(f"Validating with {self.validation_method}...")
         
-        if self.validation_method == "Behavlets":
+        if validation_method == "Behavlets":
             # Use BehavletsEncoding for validation
             behavlets_encoder = BehavletsEncoding(
                 data_folder=self.reader.data_folder,
                 verbose=self.verbose
             )
-            behavlet_types=["Aggression1", ## Hunt close to ghost house
-                            # "Aggression3", ## Ghost kills # FIXME
-                            "Aggression4", ## Hunt after pill finishes
-                            "Caution1", ## Times trapped by ghost
-                            "Caution3", ## Close calls
-                            ]  # Example behavlets
+            behavlet_types=[
+                "Aggression1", ## Hunt close to ghost house
+                "Aggression3", ## Ghost kills 
+                "Aggression4", ## Hunt after pill finishes
+                "Caution1", ## Times trapped by ghost
+                "Caution3", ## Close calls
+            ]  # Example behavlets
                         
             # Get behavlet encodings for validation
             validation_encodings = pd.DataFrame()
@@ -758,7 +780,7 @@ class PatternAnalysis:
 
             return validation_encodings, validation_labels
         else:
-            raise NotImplementedError(f"Validation method not supported ({self.validation_method})")
+            raise NotImplementedError(f"Validation method not supported ({validation_method})")
         
     
     def calculate_validation_measures(

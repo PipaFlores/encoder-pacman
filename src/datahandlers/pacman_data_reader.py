@@ -168,6 +168,9 @@ class PacmanDataReader:
             )
             self.gamestate_df = self._process_pellet_positions()
 
+            logger.warning("Processing final gamestates")
+            self.gamestate_df = self._process_final_gamestate()
+
             logger.warning("Processing logging bugs")
             self.gamestate_df = (
                 self._process_logging_bugs()
@@ -189,7 +192,27 @@ class PacmanDataReader:
             # Process psych data
             self.game_flow_df = self._process_flow()
             self.bisbas_df = self._process_bisbas()
-### PRE-PROCESSING METHODS
+    
+    ### PRE-PROCESSING METHODS
+    def _process_final_gamestate(self):
+        """
+        Ensures that for each level where the player loses (i.e., does not win), the final gamestate reflects that all lives have been lost (lives = 0).
+
+        This is necessary because, in some cases, the last recorded gamestate for a lost level may still show lives = 1, which can cause issues for downstream analysis (e.g., behavlets logic that expects a terminal state with lives = 0).
+
+        The method updates the final gamestate of each non-winning level to set lives = 0, ensuring consistency and correctness for further processing.
+        """
+        gamestate_df = self.gamestate_df.copy()
+
+        for level_id in gamestate_df["level_id"].unique():
+            if self.level_df.loc[level_id].win == 0:
+                gamestate = self.gamestate_df.loc[self.gamestate_df["level_id"] == level_id]
+                last_index = gamestate.iloc[-1].game_state_id
+                gamestate_df.at[last_index, "lives"] = 0
+        
+        return gamestate_df
+
+
     def _process_pellet_positions(self):
         """
         Processes and reconstructs the available pellet positions for each game state in the Pacman game.
@@ -346,7 +369,7 @@ class PacmanDataReader:
                 "game_in_session": "level_in_session",
                 "total_games_played": "total_levels_played",
             }
-        ).set_index(keys="level_id", drop=False)
+        ).set_index(keys="level_id", drop=False).sort_index()
 
         # Rename game_id to level_id in gamestate_df for consistency
         if "game_id" in self.gamestate_df.columns:
@@ -976,8 +999,9 @@ class PacmanDataReader:
         gif_path_list = []
 
         if make_gif:
-            from src.visualization import GameReplayer ## FIXME Lazy import here?
+            from src.visualization import GameReplayer
             replayer = GameReplayer()
+            logger.info("Using augmented visualization, checking for .gif or creating (can take long)")
 
         for level_id in self.level_df["level_id"].unique():
             gamestates, _ = self._filter_gamestate_data(level_id=level_id, include_metadata=False)
@@ -985,12 +1009,17 @@ class PacmanDataReader:
             start_step_ = start_step
             end_step_ = end_step
 
-            end_step_ = min(end_step, len(gamestates) - 1) if end_step != -1 else -1 ## upper bound
+            end_step_ = min(end_step, len(gamestates)) if end_step != -1 else len(gamestates)
 
+            # Handle negative indices first
             if start_step < 0:
                 start_step_ = len(gamestates) + start_step
-            if end_step < 0:
+            if end_step < 0 and end_step != -1:
                 end_step_ = len(gamestates) + end_step
+            elif end_step == -1:
+                end_step_ = len(gamestates)  # or just use None/default pandas behavior
+            else:
+                end_step_ = min(end_step, len(gamestates))  # Remove the -1
 
             gamestates = gamestates.iloc[start_step_:end_step_]
             traj = self.get_partial_trajectory(level_id=level_id, start_step=start_step_, end_step=end_step_)

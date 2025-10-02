@@ -91,8 +91,8 @@ class Caution3Config:
     """
 
     CONTEXT_LENGTH: int = None
-    CLOSE_DISTANCE: int = 1
-    SEARCH_WINDOW: int = 5
+    CLOSE_DISTANCE: int = 1.5
+    SEARCH_WINDOW: int = 20
 
 
 class BehavletsConfig:
