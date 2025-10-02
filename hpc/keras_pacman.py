@@ -110,7 +110,6 @@ if __name__ == "__main__":
 
     ### SLICE DATA
     reader = PacmanDataReader(data_folder="../data", verbose=args.verbose)
-    reader.gamestate_df.columns
 
     # Check which features to use based on args.features
     if args.features == "Pacman":
@@ -142,11 +141,17 @@ if __name__ == "__main__":
         SEQUENCE_TYPE = "first_5_seconds"
 
     if SEQUENCE_TYPE == "first_5_seconds":
-        sequence_list, meta, traj_list = slice_seq_of_each_level(reader, start_step=0, end_step=100, FEATURES=FEATURES)
+        _, sequence_list, _, _ = reader.slice_seq_of_each_level(
+            start_step=0, end_step=100, FEATURES=FEATURES, make_gif=False
+        )
     elif SEQUENCE_TYPE == "whole_level":
-        sequence_list, meta, traj_list = slice_seq_of_each_level(reader, start_step=0, end_step=-1, FEATURES=FEATURES)
+        _, sequence_list, _, _ = reader.slice_seq_of_each_level(
+            start_step=0, end_step=-1, FEATURES=FEATURES, make_gif=False
+        )
     elif SEQUENCE_TYPE == "last_5_seconds":
-        sequence_list, meta, traj_list = slice_seq_of_each_level(reader, start_step=-100, end_step=-1, FEATURES=FEATURES)
+        _, sequence_list, _, _ = reader.slice_seq_of_each_level(
+            start_step=-100, end_step=-1, FEATURES=FEATURES, make_gif=False
+        )
     else:
         raise ValueError(f"Sequence type ({SEQUENCE_TYPE}) not valid")
 

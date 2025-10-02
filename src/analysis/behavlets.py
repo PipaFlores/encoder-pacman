@@ -6,8 +6,6 @@ from src.utils import setup_logger, Astar, load_maze_data
 from src.analysis.behavlets_config import BehavletsConfig
 
 
-## TODO = Expand all behavlets to include simple features such as quadrant idx or geometrical space.
-
 logger = setup_logger(__name__)
 
 
@@ -557,7 +555,7 @@ class Behavlets:
                 prev_distance_to_ghosts = distance_to_ghosts.copy()
 
                 # Stop looking outside the search window, if player dies (Quite probable), or level end.
-                died = state.lives < lives_at_wear_off
+                died = state.lives < lives_at_wear_off 
                 level_end = i == len(gamestates) - 1
                 if (
                     state.Index - starting_gamestep == SEARCH_WINDOW
@@ -568,6 +566,7 @@ class Behavlets:
                         self.died[pellet_idx] = True
                     else:
                         self.died[pellet_idx] = False
+
                     if self.value_per_pill[pellet_idx] >= VALUE_THRESHOLD:
                         ending_gamestep = state.Index - 1
                         ending_timestep = float(
@@ -837,10 +836,8 @@ class Behavlets:
                         start_timestep=start_timestep,
                         CONTEXT_LENGTH=CONTEXT_LENGTH,
                     )
-                    if state.lives > 1:
-                        died = False
-                    elif state.lives == 1 and state.pellets >= 2:
-                        died = True
+
+                    died = state.lives == 0
 
                     self.gamesteps.append(instance_gamestep)
                     self.timesteps.append(instance_timestep)
@@ -1224,8 +1221,10 @@ class Behavlets:
         flag = False
 
         for i, state in enumerate(gamestates.itertuples()):
-            if i == final_state_idx:
+            if i == final_state_idx: 
+                # If reached final_state on flag, end instance (assumed not dead, or instance would have been closed step before)
                 if flag:
+                    self.value += 1
                     instance_gamesteps, instance_timesteps = self._end_instance(
                         state,
                         gamestates,
@@ -1238,50 +1237,50 @@ class Behavlets:
                     self.timesteps.append(instance_timesteps)   
                     flag = False
 
-            elif state.pacman_attack == 1:
-                if flag:
-                    instance_gamesteps, instance_timesteps = self._end_instance(
-                        state,
-                        gamestates,
-                        start_gamestep,
-                        start_timestep,
-                        CONTEXT_LENGTH,
-                    )
-
-                    self.gamesteps.append(instance_gamesteps)
-                    self.timesteps.append(instance_timesteps)
-                    flag = False
-                else:
-                    continue
-
-            elif flag and not (
-                any([distance < CLOSE_DISTANCE for distance in ghosts_distances])
-                and i + SEARCH_WINDOW < final_state_idx
-                and gamestates.iloc[i + SEARCH_WINDOW]["lives"] >= state.lives
-            ):
-                instance_gamesteps, instance_timesteps = self._end_instance(
-                    state, gamestates, start_gamestep, start_timestep, CONTEXT_LENGTH
-                )
-                self.gamesteps.append(instance_gamesteps)
-                self.timesteps.append(instance_timesteps)
-                flag = False
-
-            elif state.pacman_attack == 0 and not flag:
+            elif i <= final_state_idx - SEARCH_WINDOW:
                 pacman_position = (state.Pacman_X, state.Pacman_Y)
                 ghosts_positions = self._get_ghost_pos(state, only_alive=True)
                 ghosts_distances = self._get_distance_to_ghosts(
                     pacman_position, ghosts_positions
                 )
+                is_dead = gamestates.iloc[i + 1]["lives"] < state.lives
 
-                if (
-                    any([distance < CLOSE_DISTANCE for distance in ghosts_distances])
-                    and i + SEARCH_WINDOW < final_state_idx
-                    and gamestates.iloc[i + SEARCH_WINDOW]["lives"] >= state.lives
-                ):
+                ## Close call behavleet conditions
+                is_attacking = state.pacman_attack == 1
+                is_any_ghost_close = any([distance < CLOSE_DISTANCE for distance in ghosts_distances])
+                is_player_alive_after = gamestates.iloc[i + SEARCH_WINDOW]["lives"] >= state.lives
+
+                ## lookout window condition
+                within_lookup_range = i + SEARCH_WINDOW < final_state_idx
+
+                if not flag and (
+                    is_any_ghost_close
+                    and is_player_alive_after
+                    and not is_attacking
+                    and within_lookup_range
+                ): 
+                    ## This will trigger if player does not die within SEARCH_WINDOW, no matter
+                    ## wether the player gets away from ghosts, or not, after that.
+                    ## To capture full instance, I will end the instance as soon as the 
+                    ## player gets away successfuly (after + search_window steps). 
+                    ## If the player does not get away, then the
+                    ## instance will not be added
                     flag = True
                     start_gamestep = state.Index
                     start_timestep = state.time_elapsed
-                    self.value += 1
+
+                elif flag and state.Index >= (start_gamestep + SEARCH_WINDOW): # Here we dont use i because start_gamestep is "gamestate_id" index.
+                    if (is_attacking or not is_any_ghost_close): ## Close as soon as ghost get away
+                        self.value += 1
+                        instance_gamesteps, instance_timesteps = self._end_instance(
+                            state, gamestates, start_gamestep, start_timestep, CONTEXT_LENGTH
+                            )
+                        self.gamesteps.append(instance_gamesteps)
+                        self.timesteps.append(instance_timesteps)
+                        flag = False
+                    elif is_dead:
+                        flag = False
+                        
 
         return
 
@@ -1335,7 +1334,9 @@ class Behavlets:
         return positions
 
     def _get_distance_to_ghosts(
-        self, pacman_pos: np.ndarray, ghost_positions: list[np.ndarray | None]
+        self, 
+        pacman_pos: np.ndarray | tuple[float, float],
+        ghost_positions: list[np.ndarray | None]
     ) -> list[float]:
         """Get Manhattan distance to ghosts from pacman position.
         inputs a fixed-length list of ghost positions and returns a list of distances to ghosts.

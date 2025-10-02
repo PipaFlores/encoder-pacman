@@ -99,15 +99,21 @@ class BehavletsEncoding:
         behavlet_type: str | list[str] = "all",
     ):
         """
-        Calculates behavlets for a level and updates the self.summary_results, self.instance_details and self.special_attributes.
+        Calculate Behavlets features for a given level.
+
+        This method computes the specified Behavlets (or all, by default) for the provided level ID,
+        using the loaded Pacman data. It returns summary results and, optionally, per-instance details.
 
         Args:
-            level_id: The level id to calculate the behavlets for.
-            behavlet_type: The type of behavlet to calculate. If "all", all behavlets are calculated.
-            return_instance_details : Wether to return the instance details for some behavlets (e.g., died, value_per_instance, etc)
+            level_id (int): The level ID for which to calculate Behavlets features.
+            return_instance_details (bool, optional): If True, also return per-instance details for Behavlets
+                that provide them (e.g., 'died', 'value_per_instance'). Defaults to False.
+            behavlet_type (str or list of str, optional): The Behavlet(s) to calculate. If "all" (default),
+                all available Behavlets are calculated. Otherwise, specify a single Behavlet name or a list of names.
 
         Returns:
-            None
+            pd.DataFrame or tuple: If return_instance_details is False, returns a DataFrame of summary results.
+                If True, returns a tuple (summary_results, instance_details).
         """
 
         gamestates, metadata = self.reader._filter_gamestate_data(
@@ -145,7 +151,6 @@ class BehavletsEncoding:
 
         results = []  # List of behavlet objects
         metadata = None
-        ## FIXME Aggression 3 not working when using slices other than from the start of game, probably indexing issue.
         if behavlet_type == "all":
             for behavlet_name in self.behavlets.keys():
                 results.append(self.behavlets[behavlet_name].calculate(gamestates))
