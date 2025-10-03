@@ -122,21 +122,22 @@ if __name__ == "__main__":
         SEQUENCE_TYPE = "first_5_seconds"
 
     if SEQUENCE_TYPE == "first_5_seconds":
-        _, sequence_list, _, _ = reader.slice_seq_of_each_level(
-            start_step=0, end_step=100, FEATURES=FEATURES, make_gif=False
+        raw_sequence_list, _ = reader.slice_seq_of_each_level(
+            start_step=0, end_step=100, make_gif=False
         )
     elif SEQUENCE_TYPE == "whole_level":
-        _, sequence_list, _, _ = reader.slice_seq_of_each_level(
-            start_step=0, end_step=-1, FEATURES=FEATURES, make_gif=False
+        raw_sequence_list, _ = reader.slice_seq_of_each_level(
+            start_step=0, end_step=-1, make_gif=False
         )
     elif SEQUENCE_TYPE == "last_5_seconds":
-        _, sequence_list, _, _ = reader.slice_seq_of_each_level(
-            start_step=-100, end_step=-1, FEATURES=FEATURES, make_gif=False
+        raw_sequence_list, _ = reader.slice_seq_of_each_level(
+            start_step=-100, end_step=-1, make_gif=False
         )
     else:
         raise ValueError(f"Sequence type ({SEQUENCE_TYPE}) not valid")
 
-    X_padded = padding_sequences(sequence_list=sequence_list)
+    filtered_sequence_list = [sequence[FEATURES].to_numpy() for sequence in raw_sequence_list]
+    X_padded = padding_sequences(sequence_list=filtered_sequence_list)
 
     data_tensor = PacmanDataset(X_padded)
     data_tensor[:]["data"].to(device)

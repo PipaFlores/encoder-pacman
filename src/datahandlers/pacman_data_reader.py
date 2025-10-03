@@ -831,101 +831,6 @@ class PacmanDataReader:
 
         return partial_trajectory
 
-    def get_trajectory_dataframe(
-        self,
-        series_type=["position"],
-        include_game_state_vars=False,
-        include_timesteps=True,
-        include_game_id=True,
-        level_id: int | list[int] = None,
-        user_id: int | list[int] = None,
-    ) -> pd.DataFrame:
-        """
-        For use in `datamodule`.
-        Preprocess gamestates' data before converting to tensor for Autoencoder training.
-
-        Args:
-            gamestate_df: DataFrame containing raw game data
-            series_type: List of series types to include in the preprocessing (e.g., ['position', 'movement', 'input'])
-            include_game_state_vars: Boolean indicating whether to include game state variables (score, powerPellets)
-            include_timesteps: Boolean indicating whether to include time elapsed in the features
-            include_game_id: Boolean indicating whether to include game id in the features
-            level_id: List of game ids to filter the data by.
-            user_id: List of user ids to filter the data by.
-
-        Returns:
-            processed_df: DataFrame containing preprocessed game data with selected features
-
-        Note:
-            - `movement` is the direction Pacman is moving in the current timestep. Is an unitary vector, and should not
-            be confused with instant/average velocities (as calculated in `GridAnalyzer.py`).
-            - `input` is the direction Pacman is moving in the next timestep.
-
-        """
-        if user_id is not None:
-            dataframe, _ = self._filter_gamestate_data(user_id=user_id)
-        elif level_id is not None:
-            dataframe, _ = self._filter_gamestate_data(level_id=level_id)
-        else:
-            dataframe = self.gamestate_df
-
-        features = []
-
-        if include_game_id:
-            features.extend(["level_id"])
-
-        if include_game_state_vars:
-            features.extend(["score", "powerPellets"])
-
-        if include_timesteps:
-            features.extend(["time_elapsed"])
-
-        if "position" in series_type:
-            features.extend(
-                ["Pacman_X", "Pacman_Y"]
-            )  # No preprocessing here as it is done in the read_data() function
-
-        direction_mapping = {
-            "right": (1, 0),
-            "left": (-1, 0),
-            "up": (0, 1),
-            "down": (0, -1),
-            "none": (0, 0),
-            np.nan: (0, 0),
-            "w": (0, 1),
-            "a": (-1, 0),
-            "s": (0, -1),
-            "d": (1, 0),
-        }
-
-        if "movement" in series_type:
-            # Convert movement directions to dx, dy components
-            dataframe["movement_dx"] = dataframe["movement_direction"].map(
-                lambda d: direction_mapping[d][0]
-            )
-            dataframe["movement_dy"] = dataframe["movement_direction"].map(
-                lambda d: direction_mapping[d][1]
-            )
-            features.extend(["movement_dx", "movement_dy"])
-
-        if "input" in series_type:
-            # Similarly for input directions
-            dataframe["input_dx"] = dataframe["input_direction"].map(
-                lambda d: direction_mapping[d][0]
-            )
-            dataframe["input_dy"] = dataframe["input_direction"].map(
-                lambda d: direction_mapping[d][1]
-            )
-            features.extend(["input_dx", "input_dy"])
-
-        processed_df = dataframe[features].copy()
-
-        # Convert to float
-        for col in processed_df.columns:
-            if col != "level_id":  # Skip level_id conversion
-                processed_df[col] = processed_df[col].astype(float)
-
-        return processed_df
 
 ### Tensor pre-processing
     def padding_sequences(self,
@@ -956,46 +861,31 @@ class PacmanDataReader:
 #                                   metadata_list, 
 #                                   traj_list, 
 #                                   gif_path_list] // CORE-Optional
+
     def slice_seq_of_each_level(
             self,
             start_step=0,
             end_step=-1,
-            FEATURES= [
-                # "score", 
-                # "lives", 
-                # "pacman_attack",
-                "Pacman_X",
-                "Pacman_Y",
-                # "Ghost1_X",
-                # "Ghost1_Y",            
-                # "Ghost2_X",
-                # "Ghost2_Y",
-                # "Ghost3_X",
-                # "Ghost3_Y",
-                # "Ghost4_X",
-                # "Ghost4_Y",
-                ],
-                make_gif=False
-        )-> tuple[list[pd.DataFrame], list[np.ndarray], list[Trajectory], list[str]]:
+            make_gif=False,
+            videos_directory= "../hpc/videos/",
+            gifs_directory = "./subsequences/"
+        )-> tuple[list[pd.DataFrame], list[str]]:
         """
         Extracts a slice (subsequence) of game states for each level, from `start_step` to `end_step`.
+        These are iloc type of indices, not "game_state_id" indexs.
 
         Args:
             start_step (int, optional): The starting index (inclusive) of the slice for each level. Defaults to 0.
             end_step (int, optional): The ending index (exclusive) of the slice for each level. If -1, includes all steps to the end. Defaults to -1.
-            FEATURES (list, optional): List of column names (features) to include in the output sequences. Defaults to ["Pacman_X", "Pacman_Y"].
             make_gif (bool, optional): If True, generates a GIF for each level's subsequence and returns the file paths. Defaults to False.
-
+            videos_directory (str, optional): Directory containing the videos for each level. Defaults to "../hpc/videos/".
         Returns:
             tuple:
-                raw data : list[pd.DataFrame] List of DataFrames, each containing the selected features for the sliced sequence of a level, with their named columns (useful for behavlets calculations)
-                sequence list: list[np.ndarray] List of arrays, each containing the selected features for the sliced sequence of a level.
-                trajectory list: list[Trajectory] List of Trajectory objects for each sliced sequence.
-                gif path list: list[str] List of GIF file paths (empty if make_gif is False).
+                raw_sequences : list[pd.DataFrame] List of DataFrames, each containing all, unfiltered, features for the sliced sequence of a level, with their named columns (useful for behavlets calculations)
+                gif_path_list: list[str] List of GIF file paths (empty if make_gif is False).
         """
-        raw_data = []
-        sequence_list = []
-        traj_list = []
+        raw_sequences = []
+
         gif_path_list = []
 
         if make_gif:
@@ -1022,25 +912,23 @@ class PacmanDataReader:
                 end_step_ = min(end_step, len(gamestates))  # Remove the -1
 
             gamestates = gamestates.iloc[start_step_:end_step_]
-            traj = self.get_partial_trajectory(level_id=level_id, start_step=start_step_, end_step=end_step_)
 
-            raw_data.append(gamestates)
-            filtered_sequence = gamestates[FEATURES]
-            sequence_list.append(filtered_sequence.to_numpy())
-            traj_list.append(traj)
+            raw_sequences.append(gamestates)
+
 
             ## and create video_sequence
             if make_gif:
-                gif_path = f"./subsequences/level_{level_id}_{start_step_:06d}_{end_step_:06d}.gif"
+                gif_path = os.path.join(gifs_directory, f"level_{level_id}_{start_step_:06d}_{end_step_:06d}.gif")
                 gif_path_list.append(gif_path)
                 if not os.path.exists(gif_path):
-                    replayer.extract_gamestate_subsequence_ffmpeg(video_path= f"../hpc/videos/{level_id}.mp4",
-                                                                start_gamestate=start_step_, 
-                                                                end_gamestate=end_step_,
-                                                                output_path=gif_path)
+                    replayer.extract_gamestate_subsequence_ffmpeg(
+                        video_path=os.path.join(videos_directory, f"{level_id}.mp4"),
+                        start_gamestate=start_step_, 
+                        end_gamestate=end_step_,
+                        output_path=gif_path)
                     
                 else:
                     # print(f"sequence for level_id {level_id} already exists, skipping")
                     pass
 
-        return raw_data, sequence_list, traj_list, gif_path_list
+        return raw_sequences, gif_path_list

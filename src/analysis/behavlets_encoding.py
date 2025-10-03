@@ -79,7 +79,7 @@ class BehavletsEncoding:
         elif verbose:
             logger.setLevel("INFO")
 
-        logger.info("Initializing BehavletsEncoding")
+        # logger.info("Initializing BehavletsEncoding")
         self.data_folder = data_folder  # Store data_folder for parallel processing
         self.reader = PacmanDataReader(data_folder=data_folder)
         self.behavlets = {

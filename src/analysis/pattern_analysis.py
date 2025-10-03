@@ -163,8 +163,8 @@ class PatternAnalysis:
         self.clustervisualizer = ClusterVisualizer()
         
         # Pipeline state
-        self.raw_data = None
-        self.sequence_data = None
+        self.raw_sequence_data = None
+        self.filtered_sequence_data = None
         self.padded_sequence_data = None
         self.trajectory_list = None
         self.gif_path_list = None
@@ -239,27 +239,52 @@ class PatternAnalysis:
                 verbose=self.verbose
             )
 
-    def fit(self, 
+    def fit(self,
+            data_package: tuple[list[pd.DataFrame], list[str]] | None = None,
             test_dataset: bool = False):
         """
         Main fitting method that runs the complete pipeline.
+
+        This method orchestrates the full analysis workflow, including:
+            1. Loading and preparing the data (unless a data package is provided).
+            2. Loading or training the embedding model, if an embedder is specified.
+            3. Generating embeddings for the input data (unless using geometric clustering).
+            4. Reducing the dimensionality of embeddings if necessary.
+            5. Performing clustering on the reduced embeddings or trajectories.
+
+        Args:
+            data_package (tuple[list[pd.DataFrame], list[str]], optional):
+                Pre-loaded data to use instead of loading, for faster iterations. If None, data is loaded internally according to
+                the "self.sequence_type" attribute. Ensure that sequence_type matches the pre-loaded type, since it
+                is used to read available embedding models and to save any trained ones.
+            test_dataset (bool, optional): If True, uses a test dataset (e.g., PenDigits) for evaluation.
+
+
+        Returns:
+            None. Results are stored as attributes of the class instance.
         """
         logger.info("Starting PatternAnalysis pipeline...")
         
         # Step 1: Load data if not provided
-        # TODO maybe remove this step and get the data from reader class.
-        # It might greatly improve performance for comparative analysis since each
-        # class is loading the data again. Or just leave it to the hpc supremacy.
         
         if test_dataset == False:
-            self.raw_data, self.sequence_data, self.padded_sequence_data, self.trajectory_list, self.gif_path_list = self.load_and_slice_data(
-                sequence_type=self.sequence_type, make_gif=self.augmented_visualization)
+            
+            if data_package is None:
+                self.raw_sequence_data, self.gif_path_list = self.load_and_slice_data(
+                    sequence_type=self.sequence_type, make_gif=self.augmented_visualization)
+            else:
+                self.raw_sequence_data, self.gif_path_list = data_package
+
+            self.filtered_sequence_data = [sequence[self.features_columns].to_numpy() for sequence in self.raw_sequence_data]
+            self.padded_sequence_data = self.reader.padding_sequences(self.filtered_sequence_data)
+            self.trajectory_list = [self.reader.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in self.raw_sequence_data]
+
         else:
             from aeon.datasets import load_classification
             logger.info("Loading PenDigits test dataset (10k samples)")
-            self.sequence_data, self.validation_labels = load_classification("PenDigits")
-            self.sequence_data = self.sequence_data.transpose(0,2,1) # [N, seq_length, features]
-            self.padded_sequence_data = self.sequence_data # to accomodate the pipeline
+            self.filtered_sequence_data, self.validation_labels = load_classification("PenDigits")
+            self.filtered_sequence_data = self.filtered_sequence_data.transpose(0,2,1) # [N, seq_length, features]
+            self.padded_sequence_data = self.filtered_sequence_data # to accomodate the pipeline
 
         # Step 2a: load or train embedding model
         
@@ -267,14 +292,14 @@ class PatternAnalysis:
             is_model_trained_, model_path = self._check_model_training_status(return_path=True, test_dataset=test_dataset)
  
             if is_model_trained_:
-                logger.info(f"found trained model at {model_path}, loading...")
+                logger.info(f"Found trained model at {model_path}, loading...")
                 self._load_model(model_path)
             else:
-                logger.info(f"no trained model found at {model_path}, training...")
+                logger.info(f"No trained model found at {model_path}, training...")
                 self._train_model(
                     padded_sequence_data=self.padded_sequence_data,
                     test_dataset=test_dataset)
-                logger.info(f"model trained and saved at {model_path}")
+                logger.info(f"Model trained and saved at {model_path}")
 
         # Step 2b: Generate embeddings 
         # (If not conducting geometric clustering, which instead uses trajectory similarity measures)
@@ -308,8 +333,9 @@ class PatternAnalysis:
         )
 
         # Step 4: Validation
-        if self.validation_method and self.raw_data is not None:
-            self.validation_encodings, self.validation_labels = self.calculate_validation_encodings(self.raw_data, self.validation_method)
+        # FIXME add permanency for efficient iteration (if no change in data -> no need for behavlet/labels calc, only val measures)
+        if self.validation_method and self.raw_sequence_data is not None:
+            self.validation_encodings, self.validation_labels = self.calculate_validation_encodings(self.raw_sequence_data, self.validation_method)
         # Calculate clustering validation measures (ARI, AMI, NMI) for each validation label set
             self.validation_measures =self.calculate_validation_measures(
                 labels = self.labels,
@@ -331,7 +357,7 @@ class PatternAnalysis:
     def load_and_slice_data(self, 
                            sequence_type:str = "first_5_seconds",
                            make_gif: bool = False
-                           ) -> tuple[pd.DataFrame ,list[np.ndarray], np.ndarray, list[Trajectory]] | tuple[pd.DataFrame ,list[np.ndarray], np.ndarray, list[Trajectory], list[str]]:
+                           ) -> tuple[list[pd.DataFrame] ,list[np.ndarray], np.ndarray, list[Trajectory]] | tuple[pd.DataFrame ,list[np.ndarray], np.ndarray, list[Trajectory], list[str]]:
         """
         Load and slice data based on the specified sequence type.
 
@@ -348,14 +374,8 @@ class PatternAnalysis:
 
         Returns
         -------
-        raw_data : pd.DataFrame
-            Raw data for the selected sequences.
-        sequence_data : list[np.ndarray]
-            List of game sequences of the chosen type and features.
-        padded_sequence_data : np.ndarray
-            Fixed-length array of shape [n_samples, max_seq_length, n_features], containing padded sequences for deep learning models.
-        trajectory_list : list[Trajectory]
-            List of `Trajectory` objects for each sequence, containing metadata for visualization.
+        raw_sequence_list : pd.DataFrame
+            Extracted raw sequences for the selected sequence_type, containing all collected features.
         gif_path_list: list[str]
             If `make_gif = True`, returns a list of paths to each sequence's rendered .gif animation, for augmented visualization.
         """
@@ -365,39 +385,29 @@ class PatternAnalysis:
         
         # Determine slicing parameters based on sequence type
         if sequence_type == "first_5_seconds":
-            raw_data, sequence_data, traj_list, gif_paths = self.reader.slice_seq_of_each_level(
-                start_step=0, end_step=100, FEATURES=self.features_columns, make_gif=make_gif
+            raw_sequence_list, gif_paths = self.reader.slice_seq_of_each_level(
+                start_step=0, end_step=100, make_gif=make_gif
             )
         elif sequence_type == "whole_level":
-            raw_data, sequence_data, traj_list, gif_paths = self.reader.slice_seq_of_each_level(
-                start_step=0, end_step=-1, FEATURES=self.features_columns, make_gif=make_gif
+            raw_sequence_list, gif_paths = self.reader.slice_seq_of_each_level(
+                start_step=0, end_step=-1, make_gif=make_gif
             )
         elif sequence_type == "last_5_seconds":
-            raw_data, sequence_data, traj_list, gif_paths = self.reader.slice_seq_of_each_level(
-                start_step=-100, end_step=-1, FEATURES=self.features_columns, make_gif=make_gif
+            raw_sequence_list, gif_paths = self.reader.slice_seq_of_each_level(
+                start_step=-100, end_step=-1, make_gif=make_gif
             )
         elif sequence_type == "first_50_steps": # For GeomClustering debugging
-            raw_data, sequence_data, traj_list, gif_paths = self.reader.slice_seq_of_each_level(
-                start_step=0, end_step=50, FEATURES=self.features_columns, make_gif=make_gif
+            raw_sequence_list, gif_paths = self.reader.slice_seq_of_each_level(
+                start_step=0, end_step=50, make_gif=make_gif
             )
             
         else:
             raise ValueError(f"Sequence type ({sequence_type}) not valid")
         
 
-        #= Create dataset
-        # np.ndarray.shape = [n_samples, max_length, features]. Equal length tensor, padded, for DL models.
-        padded_sequence_data = self.reader.padding_sequences(sequence_list=sequence_data)
-        
-        # list[np.ndarray]
-        sequence_data = sequence_data
+        logger.info(f"Data loaded: {len(raw_sequence_list)} sequences")
 
-        # list[Trajectory] // custom class for visualization purposes. Conbtains only Pacman data and level metadata.
-        trajectory_list = traj_list
-        
-        logger.info(f"Data loaded: {len(sequence_data)} sequences with {padded_sequence_data.shape[2]} features")
-
-        return raw_data, sequence_data, padded_sequence_data, trajectory_list, gif_paths
+        return raw_sequence_list, gif_paths
         
 
     ### EMBEDDING
@@ -696,7 +706,7 @@ class PatternAnalysis:
         return new_labels
     
     def calculate_validation_encodings(self, 
-                                       raw_data:list[pd.DataFrame],
+                                       raw_sequence_data:list[pd.DataFrame],
                                        validation_method: str = "Behavlets") -> tuple[pd.DataFrame, pd.DataFrame]:
         """
         Compute validation labels for clustering results using behavioral pattern encodings (Behavlets).
@@ -707,7 +717,7 @@ class PatternAnalysis:
 
         Parameters
         ----------
-        raw_data : list of pd.DataFrame
+        raw_sequence_data : list of pd.DataFrame
             List of DataFrames, each containing the game state sequence for a single sample to be validated.
         validation_method : str, optional
             Validation method to use. Currently, only "Behavlets" is implemented.
@@ -745,9 +755,9 @@ class PatternAnalysis:
                         
             # Get behavlet encodings for validation
             validation_encodings = pd.DataFrame()
-            # To ensure the order of results aligns with the raw_data list, collect results in a list and concatenate at the end
+            # To ensure the order of results aligns with the raw_sequence list, collect results in a list and concatenate at the end
             validation_rows = []
-            for idx, gamestate in enumerate(raw_data):
+            for idx, gamestate in enumerate(raw_sequence_data):
                 try:
                     summary_row = behavlets_encoder.calculate_behavlets_gamestate_slice(
                         gamestates=gamestate, behavlet_type=behavlet_types
@@ -760,7 +770,7 @@ class PatternAnalysis:
                     validation_rows.append(pd.DataFrame())  # Append empty DataFrame to preserve order
                     continue  # Don't append empty DataFrame
 
-            # Concatenate all rows in the same order as raw_data
+            # Concatenate all rows in the same order as raw_sequence_list
             validation_encodings = pd.concat(validation_rows, ignore_index=True)
 
             # Only keep columns ending with "_value" if they exist
@@ -848,7 +858,7 @@ class PatternAnalysis:
         print(f"Random Seed: {getattr(self, 'random_seed', 'N/A')}")
         
         self.results = {
-            'n_samples': len(self.sequence_data) if self.sequence_data else "N/A",
+            'n_samples': len(self.filtered_sequence_data) if self.filtered_sequence_data else "N/A",
             'n_features': len(self.features_columns),
             'sequence_type': self.sequence_type,
             'embedding_dim': self.embeddings.shape[1] if self.embeddings is not None else "N/A",
@@ -937,7 +947,7 @@ class PatternAnalysis:
             plt.show()
 
     def plot_interactive_overview(self, 
-                                  plot_only_latent_space: bool = False,
+                                  plot_only_latent_space: bool = True,
                                   metadata = None , # Not implemented
                                   save_path: str = None,
                                   plot_notebook: bool = False):
@@ -971,6 +981,9 @@ class PatternAnalysis:
             if dir_name:
                 os.makedirs(dir_name, exist_ok=True)
             output_file(save_path)
+
+        ## TODO: validation set as in plot_latent_space_overview()
+        # if validation_set -> labels = self.validation_labels[validation_set]
 
         if isinstance(self.clusterer, GeomClustering):
             # Plot trajectory centroids, as there are no embeddings.
@@ -1128,7 +1141,7 @@ class PatternAnalysis:
             
             fig.suptitle(
                 f"{self.sequence_type}_"
-                f"f{len(self.features_columns)}"
+                f"f{len(self.features_columns)}_"
                 f"{self.embedder.__class__.__name__}_"
                 f"{self.reducer.__class__.__name__}_"
                 f"{self.clusterer.__class__.__name__}"
@@ -1352,6 +1365,7 @@ class PatternAnalysis:
     def _calculate_trajectory_centroids(self) -> list[np.ndarray]:
         """
         Calculate the geometrical centroids of all trajectories for dimensionality reduction and plotting.
+        Only used when self.clusterer == GeomClustering()
 
         Returns:
             List[np.ndarray]: List of centroids for each trajectory
