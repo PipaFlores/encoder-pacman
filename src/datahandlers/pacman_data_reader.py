@@ -932,3 +932,57 @@ class PacmanDataReader:
                     pass
 
         return raw_sequences, gif_path_list
+    
+
+    def slice_attack_modes(self,
+                           CONTEXT: int = 0):
+        """
+        Extracts and slices sequences of game states where Pac-Man is in "attack mode".
+
+        This method identifies contiguous intervals in each level where the "pacman_attack"
+        column is active (i.e., equals 1). For each such interval, it extracts the corresponding
+        subsequence of game states, optionally including a context window (not yet implemented).
+
+        Args:
+            CONTEXT (int, optional): Number of extra frames to include before and after each
+                attack mode interval. Default is 0 (no extra context).
+
+        Returns:
+            raw_sequences (list): List of DataFrames, each containing a sequence of game states
+                where Pac-Man is in attack mode for a given level.
+            gif_path_list (list): Empty list (reserved for future use, e.g., GIF generation).
+        """
+        
+
+        raw_sequences = []
+        gif_path_list = []
+
+        for level_id in self.level_df["level_id"].unique():
+            gamestates = self._filter_gamestate_data(level_id=level_id)[0]
+            # Find indices where "pacman_attack" changes value
+            attack_col = gamestates["pacman_attack"].values
+            change_indices = np.where(attack_col[1:] != attack_col[:-1])[0] + 1  # +1 to get the index where the change happened [if changed to attack, the value at this state, and thereafter, will be 1]
+            
+            # Find (start_index, end_index) tuples where value switches from 1 to 0.
+            # If a 1 is not followed by a 0, use the last index in gamestates as end_index.
+            intervals = []
+            start_index = None
+
+            for idx, value in zip(change_indices, attack_col[change_indices]):
+                if value == 1:
+                    start_index = idx
+                elif value == 0 and start_index is not None:
+                    end_index = idx
+                    intervals.append((start_index, end_index))
+                    start_index = None
+
+            # If we end with a 1 and no following 0, close the interval at the last index
+            if start_index is not None:
+                end_index = gamestates.index[-1]
+                intervals.append((start_index, end_index))
+
+            for (start_index, end_index) in intervals:
+                raw_sequences.append(gamestates.iloc[start_index:end_index+1])
+
+        return raw_sequences, gif_path_list
+        
