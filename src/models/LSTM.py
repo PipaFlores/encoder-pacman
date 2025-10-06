@@ -127,18 +127,32 @@ class AELSTM(nn.Module):
     def loss(self, 
              x_h: torch.Tensor,
              x: torch.Tensor, 
-             mask: torch.Tensor | None = None):
+             mask: torch.Tensor | None = None,
+             obs_mask: torch.Tensor | None = None):
         """
         Reconstruction MSE loss
         """
 
         loss = nn.functional.mse_loss(x_h, x, reduction="none")
 
+        # Handle both obs_mask (element-wise) and mask (sequence length) correctly
+        if obs_mask is not None:
+            loss = loss * obs_mask  # element-wise masking
+
         if mask is not None:
-            mask = mask.unsqueeze(-1) # from [batch, seq_length] -> [batch, seq_length, 1]
-            loss = (loss * mask).sum() / (mask.sum() + 1e-8)
+            mask = mask.unsqueeze(-1)  # [batch, seq_length] -> [batch, seq_length, 1]
+            if obs_mask is not None:
+                # Combine both masks for denominator
+                combined_mask = (obs_mask * mask)
+                loss = (loss * mask).sum() / (combined_mask.sum() + 1e-8)
+            else:
+                loss = (loss * mask).sum() / (mask.sum() + 1e-8)
         else:
-            loss = loss.mean()
+            if obs_mask is not None:
+                denominator = obs_mask.sum().clamp_min(1.0)
+                loss = loss.sum() / denominator
+            else:
+                loss = loss.mean()
 
         return loss
 
@@ -254,12 +268,20 @@ class AE_Trainer():
             for batch in train_iter:
                 x = batch["data"].to(self.device)
                 x_h = self.model(x)
+
+                # masked loss for variable seq_lengths
                 mask = batch.get("mask", None)
-                if mask is not None: # masked loss for variable seq_lengths
+                if mask is not None: 
                     mask = batch["mask"].to(self.device)
 
+                # Observation masked loss for missing elements
+                # e.g., astar distance = inf when ghosts in house 
+                obs_mask = batch.get("obs_mask", None) 
+                if obs_mask is not None:
+                    obs_mask = batch["mask"].to(self.device)
+
                 optimizer.zero_grad()
-                batch_loss = loss(x_h, x, mask)
+                batch_loss = loss(x_h, x, mask, obs_mask)
                 loss_sum += batch_loss.item()
                 
                 batch_loss.backward()
@@ -280,7 +302,11 @@ class AE_Trainer():
                         if mask is not None:
                             mask = batch["mask"].to(self.device)
 
-                        batch_loss = loss(x_h, x, mask)
+                        obs_mask = batch.get("obs_mask", None) 
+                        if obs_mask is not None:
+                            obs_mask = batch["mask"].to(self.device)
+
+                        batch_loss = loss(x_h, x, mask, obs_mask)
                         val_loss_sum += batch_loss.item()
 
 

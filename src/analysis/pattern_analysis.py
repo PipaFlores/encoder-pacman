@@ -274,6 +274,8 @@ class PatternAnalysis:
                     sequence_type=self.sequence_type, make_gif=self.augmented_visualization)
             else:
                 self.raw_sequence_data, self.gif_path_list = data_package
+                logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences ")
+
 
             self.filtered_sequence_data = [sequence[self.features_columns].to_numpy() for sequence in self.raw_sequence_data]
             self.padded_sequence_data = self.reader.padding_sequences(self.filtered_sequence_data)
@@ -461,12 +463,26 @@ class PatternAnalysis:
         Returns:
             None. The trained model is saved to disk at the specified model path.
         """
-
-        model_path = os.path.join(
+        # Create directories for model saving, loss plots, and latent space plots
+        model_dir = os.path.join(
             self.hpc_folder,
             "trained_models",
             self.sequence_type,
-            "f" + str(len(self.features_columns)),
+            "f" + str(len(self.features_columns))
+        )
+        loss_plot_dir = os.path.join(
+            self.hpc_folder,
+            "trained_models",
+            "loss_plots",
+            self.sequence_type,
+            "f" + str(len(self.features_columns))
+        )
+        
+        os.makedirs(model_dir, exist_ok=True)
+        os.makedirs(loss_plot_dir, exist_ok=True)
+
+        model_path = os.path.join(
+             model_dir,
             "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
         )
     
@@ -484,11 +500,7 @@ class PatternAnalysis:
             trainer.fit(model= self.embedder, data=data_tensor)
             trainer.plot_loss(
                 save_path=os.path.join(
-                    self.hpc_folder,
-                    "trained_models",
-                    "loss_plots",
-                    self.sequence_type,
-                    "f" + str(len(self.features_columns)),
+                    loss_plot_dir,
                     "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
                 )
             )
@@ -503,10 +515,7 @@ class PatternAnalysis:
 
             self.embedder.plot_loss_keras(
                 os.path.join(
-                    "trained_models",
-                    "loss_plots",
-                    self.sequence_type,
-                    "f" + str(len(self.features_columns)),
+                    loss_plot_dir,
                     "test_data" if test_dataset else "" + "{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}.png"
                 )
             )       

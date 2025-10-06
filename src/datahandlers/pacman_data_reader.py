@@ -175,6 +175,10 @@ class PacmanDataReader:
             self.gamestate_df = (
                 self._process_logging_bugs()
             )  # Whatever bugs are encountered (e.g., attackmode at initial gamestates)
+
+            logger.warning("Calculating and inserting Astar distances")
+            self._calculate_astar_distances()
+
             self.gamestate_df.to_pickle(os.path.join(self.data_folder, "gamestate.pkl"))
 
         if not read_games_only:
@@ -194,6 +198,41 @@ class PacmanDataReader:
             self.bisbas_df = self._process_bisbas()
     
     ### PRE-PROCESSING METHODS
+    def _calculate_astar_distances(self):
+        """
+        Calculates and inserts A* (Astar) distances between Pacman and each ghost for every game state.
+
+        This method iterates through each row in the gamestate DataFrame, extracts the positions of Pacman and all ghosts,
+        and uses the Astar algorithm to compute the shortest path distance from each ghost to Pacman, taking into account
+        the maze's wall layout. The resulting distances are inserted as new columns (Ghost1_distance, Ghost2_distance, etc.)
+        in the gamestate DataFrame.
+
+        Returns:
+            pd.DataFrame: The updated gamestate DataFrame with Astar distances for each ghost.
+        """
+        from src.utils import Astar
+
+        gamestate_df = self.gamestate_df.copy()
+        wall_grid = Astar.generate_squared_walls(load_maze_data()[0])
+
+
+        for state in gamestate_df.itertuples():
+            pac_pos = (state.Pacman_X, state.Pacman_Y)
+            ghost_positions = [
+                (getattr(state, f"Ghost{i + 1}_X"), getattr(state, f"Ghost{i + 1}_Y"))
+                for i in range(4)
+            ]
+            results = Astar.calculate_ghost_paths_and_distances(
+                pacman_pos=pac_pos,
+                ghost_positions=ghost_positions,
+                grid=wall_grid
+            )
+            for idx, result in enumerate(results):
+                gamestate_df.at[state.game_state_id, f"Ghost{idx+1}_distance"] = result[1]
+
+        return gamestate_df
+
+
     def _process_final_gamestate(self):
         """
         Ensures that for each level where the player loses (i.e., does not win), the final gamestate reflects that all lives have been lost (lives = 0).
@@ -952,7 +991,7 @@ class PacmanDataReader:
                 where Pac-Man is in attack mode for a given level.
             gif_path_list (list): Empty list (reserved for future use, e.g., GIF generation).
         """
-        
+        ## TODO continue here, fine-tune and abstact for any binary column event slicing.
 
         raw_sequences = []
         gif_path_list = []
@@ -970,9 +1009,9 @@ class PacmanDataReader:
 
             for idx, value in zip(change_indices, attack_col[change_indices]):
                 if value == 1:
-                    start_index = idx
+                    start_index = max(idx - CONTEXT , 0)
                 elif value == 0 and start_index is not None:
-                    end_index = idx
+                    end_index = min(idx + CONTEXT, len(gamestates) - 1)
                     intervals.append((start_index, end_index))
                     start_index = None
 

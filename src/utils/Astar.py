@@ -126,19 +126,24 @@ def calculate_path_and_distance(start, goal, grid, blocked_positions=None):
 
 
 def calculate_ghost_paths_and_distances(
-    pacman_pos, ghost_positions, grid, blocked_positions=None
-):
+    pacman_pos: tuple[float, float], 
+    ghost_positions: list[tuple[float,float]], 
+    grid: set[tuple[float,float]], 
+    blocked_positions: set[tuple[float,float]]=None
+) -> list[tuple[list[tuple], float]]:
     """
     Calculate the shortest paths and distances between Pacman and all ghosts.
+    Only raw positions are needed, inner logic will discretize to maze grid
 
     Args:
         pacman_pos (tuple): Pacman's position (x, y)
         ghost_positions (list): List of ghost positions [(x, y), ...]
         grid (set): Set of wall positions, discretized to 0.5 units.
-        blocked_positions (set): Set of positions that are blocked.
+        blocked_positions (set): Set of positions that are blocked, discretized to 0.5 units.
 
     Returns:
-        list: Tuples of (path, distance) to each ghost, in the same order as ghost_positions
+        list: Tuples of (path, distance) to each ghost, in the same order as ghost_positions.
+        [], math.inf if no path is found.
     """
     # Round and transform positions to grid frame of reference.
     pacman_pos_transformed = transform_to_grid(pacman_pos)

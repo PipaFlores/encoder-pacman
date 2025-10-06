@@ -14,12 +14,14 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 ### PYTORCH MODELS
 module load pytorch
 
-FEATURE_SETS=("Pacman" "Pacman_Ghosts")
-SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
+FEATURE_SETS=("Ghost_Distances")
+# ("Pacman" "Pacman_Ghosts" "Ghost_Distances")
+SEQUENCE_TYPES=("pacman_attack")
+#("first_5_seconds" "last_5_seconds")
 
 for FEATURES in "${FEATURE_SETS[@]}"; do
     for SEQ_TYPE in "${SEQUENCE_TYPES[@]}"; do
-        srun python pytorch_pacman.py --sequence-type "$SEQ_TYPE" --n-epochs 500 --features "$FEATURES"
+        srun python pytorch_pacman.py --sequence-type "$SEQ_TYPE" --n-epochs 500 --features "$FEATURES" --context 20
     done
 done
 
