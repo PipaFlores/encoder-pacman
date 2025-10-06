@@ -37,8 +37,31 @@ class PacmanDataset(Dataset):
 
         self.masks = (self.gamestates != padding_value).float()
         self.masks = self.masks.any(dim=-1).float()
-        # self.masks = masks
-        # self.game_ids = game_ids
+        ## TODO add element_wise mask for missing input values (Astar = inf)
+        self.obs_mask = torch.isfinite(self.gamestates).float()
+
+        ## If containing infinite values, switch them to MAX value in column
+        # Find infinite values and replace them with the max value in their respective feature (column)
+        # gamestates shape: (n_trajectories, sequence_length, features)
+        if torch.isinf(self.gamestates).any():
+            # Compute max per feature, ignoring inf/-inf
+            # Flatten batch and sequence dims to compute max per feature
+            flat = self.gamestates.view(-1, self.gamestates.shape[-1])
+            # Mask out inf values for max computation
+            finite_mask = torch.isfinite(flat)
+            # For each feature, get max of finite values
+            max_per_feature = torch.where(
+                finite_mask.any(dim=0),
+                torch.where(
+                    finite_mask, flat, float('-inf')
+                ).max(dim=0).values,
+                torch.zeros(flat.shape[1], device=flat.device)
+            )
+            # Now, replace inf/-inf in self.gamestates with max_per_feature
+            inf_mask = torch.isinf(self.gamestates)
+            for feat in range(self.gamestates.shape[-1]):
+                self.gamestates[..., feat][inf_mask[..., feat]] = max_per_feature[feat]
+        
 
     def __len__(self):
         return len(self.gamestates)
