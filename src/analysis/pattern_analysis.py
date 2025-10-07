@@ -240,7 +240,8 @@ class PatternAnalysis:
             )
 
     def fit(self,
-            data_package: tuple[list[pd.DataFrame], list[str]] | None = None,
+            raw_sequences: list[pd.DataFrame] | None = None,
+            gif_path_list: list[str] | None = None,
             test_dataset: bool = False):
         """
         Main fitting method that runs the complete pipeline.
@@ -269,11 +270,12 @@ class PatternAnalysis:
         
         if test_dataset == False:
             
-            if data_package is None:
+            if raw_sequences is None:
                 self.raw_sequence_data, self.gif_path_list = self.load_and_slice_data(
                     sequence_type=self.sequence_type, make_gif=self.augmented_visualization)
             else:
-                self.raw_sequence_data, self.gif_path_list = data_package
+                self.raw_sequence_data = raw_sequences
+                self.gif_path_list = gif_path_list
                 logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences ")
 
 
@@ -594,23 +596,30 @@ class PatternAnalysis:
                         raise AttributeError("Torch module has no .encode() method to produce embeddings.")
                     
                     all_embeddings.append(batch_embeddings.cpu())
+            # Get a random sample of 10% of the data_tensor and calculate the reconstruction error of self.embedder(x)
+            n_samples = len(data_tensor)
+            sample_size = max(1, int(0.1 * n_samples))
+            sample_indices = np.random.choice(n_samples, size=sample_size, replace=False)
+            sample_batch = data_tensor[sample_indices]["data"].to(device)   
+            mask = data_tensor[sample_indices]["mask"].to(device)   
+            obs_mask = data_tensor[sample_indices]["obs_mask"].to(device)   
+
+            if hasattr(self.embedder, 'forward'):
+                # Forward pass to get reconstruction
+                with torch.no_grad():
+                    recon = self.embedder(sample_batch)
+                # Compute reconstruction error (MSE per sample)
+                recon_error = self.embedder.loss(x_h=recon , x=sample_batch,mask=mask, obs_mask=obs_mask)
+                logger.info(f"Mean reconstruction error on 10% sample: {recon_error}")
+            else:
+                logger.warning("Embedder does not have a forward method for reconstruction error calculation.")
             
             embeddings = torch.cat(all_embeddings, dim=0)
             embeddings = embeddings.detach().numpy()
 
-        if isinstance(self.embedder, BaseDeepClusterer): ## aeon implementations
-            ## Batch form (Seems unnecessary for aeon modules, they have an internal batch logic)
-            # for i in range(0, len(padded_data), self.batch_size):
-            #     batch_data = padded_data[i:i+self.batch_size]
-            #     batch_embeddings = self.embedder.model_.layers[1].predict(batch_data)
-            #     all_embeddings.append(batch_embeddings)
-            # embeddings = np.concatenate(all_embeddings, axis=0)
+        if isinstance(self.embedder, BaseDeepClusterer): 
 
             embeddings = self.embedder.model_.layers[1].predict(padded_data)
-
-            
-
-        
         
         return embeddings
 
@@ -793,6 +802,9 @@ class PatternAnalysis:
                 col_values = validation_encodings[col].to_numpy()
                 if np.sum(col_values) == 0:
                     validation_labels[col] = None
+                elif col == "Aggression3_value":
+                    # For Aggression3_value (Ghost kills), keep the original value if >0, else set to -1
+                    validation_labels[col] = np.where(col_values > 0, col_values, -1)
                 else:
                     validation_labels[col] = np.where(col_values > 0, 1, -1)
 
@@ -1145,7 +1157,7 @@ class PatternAnalysis:
                     # Set labels and title for this subplot
                     current_ax.set_xlabel(xlabel)
                     current_ax.set_ylabel(ylabel)
-                    current_ax.set_title(f"Validation: {val_set}")
+                    current_ax.set_title(f"Validation set: {val_set}")
 
             
             fig.suptitle(

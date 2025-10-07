@@ -156,30 +156,6 @@ class AELSTM(nn.Module):
 
         return loss
 
-class UCR_Dataset(torch.utils.data.Dataset):
-
-    def __init__(self, ucr_dataset):
-        """
-        Utility class to train PyTorch models.
-        Input a UCR classification dataset obtained with aeon.datasets.load_classification()
-        The class will transpose the data from [N, channels, seq_length] -> [N, seq_length, channels]
-        and store the data in batch["data"] and labels in batch["labels]
-        """
-        self.time_series = torch.Tensor(ucr_dataset[0]).transpose(1,2)
-        self.labels = ucr_dataset[1]
-
-    def __len__(self):
-        return len(self.labels)
-    
-    def __getitem__(self, idx):
-        if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        return {
-            "data": self.time_series[idx],
-            "labels": self.labels[idx]
-        }
-
 class AE_Trainer():
     def __init__(self, 
                  max_epochs= 50, 
@@ -278,7 +254,7 @@ class AE_Trainer():
                 # e.g., astar distance = inf when ghosts in house 
                 obs_mask = batch.get("obs_mask", None) 
                 if obs_mask is not None:
-                    obs_mask = batch["mask"].to(self.device)
+                    obs_mask = batch["obs_mask"].to(self.device)
 
                 optimizer.zero_grad()
                 batch_loss = loss(x_h, x, mask, obs_mask)
@@ -304,7 +280,7 @@ class AE_Trainer():
 
                         obs_mask = batch.get("obs_mask", None) 
                         if obs_mask is not None:
-                            obs_mask = batch["mask"].to(self.device)
+                            obs_mask = batch["obs_mask"].to(self.device)
 
                         batch_loss = loss(x_h, x, mask, obs_mask)
                         val_loss_sum += batch_loss.item()

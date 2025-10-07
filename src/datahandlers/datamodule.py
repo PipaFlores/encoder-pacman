@@ -70,6 +70,7 @@ class PacmanDataset(Dataset):
         return {
             "data": self.gamestates[idx],
             "mask": self.masks[idx],
+            "obs_mask": self.obs_mask[idx]
             # "level_id": self.game_ids[idx],
         }
     
@@ -137,3 +138,28 @@ class PacmanDataset(Dataset):
         # - Third dimension: features (time,X, Y, score, powerPellets)
 
         return tensor, mask, ordered_game_ids
+
+
+class UCR_Dataset(torch.utils.data.Dataset):
+
+    def __init__(self, ucr_dataset):
+        """
+        Utility class to train PyTorch models.
+        Input a UCR classification dataset obtained with aeon.datasets.load_classification()
+        The class will transpose the data from [N, channels, seq_length] -> [N, seq_length, channels]
+        and store the data in batch["data"] and labels in batch["labels]
+        """
+        self.time_series = torch.Tensor(ucr_dataset[0]).transpose(1,2)
+        self.labels = ucr_dataset[1]
+
+    def __len__(self):
+        return len(self.labels)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+
+        return {
+            "data": self.time_series[idx],
+            "labels": self.labels[idx]
+        }
