@@ -177,7 +177,7 @@ class PacmanDataReader:
             )  # Whatever bugs are encountered (e.g., attackmode at initial gamestates)
 
             logger.warning("Calculating and inserting Astar distances")
-            self._calculate_astar_distances()
+            self.gamestate_df = self._calculate_astar_distances()
 
             self.gamestate_df.to_pickle(os.path.join(self.data_folder, "gamestate.pkl"))
 

@@ -1,3 +1,3 @@
-from .LSTM import AELSTM, AE_Trainer, UCR_Dataset
+from .LSTM import AELSTM, AE_Trainer
 
-__all__ = ["AELSTM", "AE_Trainer", "UCR_Dataset"]
+__all__ = ["AELSTM", "AE_Trainer"]

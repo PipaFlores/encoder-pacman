@@ -330,9 +330,11 @@ class ClusterVisualizer(BaseVisualizer):
         # Get unique cluster labels (excluding noise if present)
         if labels is not None:
             if all_labels_in_legend:
-                unique_labels = np.unique(labels)
+                unique_labels, unique_labels_size = np.unique(labels, return_counts=True)
             else:
-                unique_labels = np.unique(labels)[:8]
+                unique_labels, unique_labels_size = np.unique(labels, return_counts=True)
+                unique_labels = unique_labels[:8]
+                unique_labels_size = unique_labels_size[:8]
         else:
             unique_labels = np.array([0])
 
@@ -353,16 +355,22 @@ class ClusterVisualizer(BaseVisualizer):
             else:
                 color = cmap(norm(label))
             
+            label_size = unique_labels_size[i] if i < len(unique_labels_size) else 0
+            legend_label = f"{label} (n={label_size})"
+
             handle = mlines.Line2D(
                 [0], [0], marker='o', color='w', markerfacecolor=color, 
-                markeredgecolor=color, markersize=8, linestyle='None', label=str(label)
+                markeredgecolor=color, markersize=5, linestyle='None', label=legend_label  # smaller marker size
             )
             legend_handles.append(handle)
 
-        title = "Cluster" if all_labels_in_legend else "Cluster (first 8)"
-        ax.legend(handles=legend_handles, title=title, loc="upper left", frameon=True)
-
-
+        title = "Label" if all_labels_in_legend else "Label (first 8)"
+        legend = ax.legend(handles=legend_handles, title=title, loc="upper left", frameon=True)
+        # Make legend font smaller
+        for text in legend.get_texts():
+            text.set_fontsize(8)
+        if legend.get_title() is not None:
+            legend.get_title().set_fontsize(9)
 
         ax.set_title("Reduced latent space, individual data points.")
         ax.set_xlabel("X Coordinate")
