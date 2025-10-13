@@ -3,6 +3,11 @@ import torch.nn as nn
 import math
 import os
 from typing import Callable
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
 
 ## LSTM - AutoEncoder
 class Encoder(nn.Module):
@@ -166,7 +171,8 @@ class AE_Trainer():
                  optim_algorithm: torch.optim.Optimizer | None = None,
                  save_model = False,
                  best_path = None,
-                 last_path = None):
+                 last_path = None,
+                 wandb_run = None):
         """
         Trainer class for handling the training loop of a PyTorch model Auto-Encoder (reconstruction target).
 
@@ -200,6 +206,7 @@ class AE_Trainer():
         self.save_model = save_model
         self.best_path = best_path
         self.last_path = last_path
+        self.wandb_run = wandb_run
         
     def fit(self, model:nn.Module , data: torch.utils.data.Dataset):
         """
@@ -315,6 +322,17 @@ class AE_Trainer():
 
             if self.verbose:
                 print(f"Epoch {epoch + 1}: Train loss={epoch_train_loss}, Val loss={epoch_val_loss if self.validation_split else ''}")
+            if self.wandb_run and WANDB_AVAILABLE:
+                self.wandb_run.log(
+                    {
+                        "epoch": epoch + 1,
+                        "train_loss" : epoch_train_loss,
+                        "val_loss": epoch_val_loss if self.validation_split else None,
+                    }
+                )
+        
+        if self.wandb_run and WANDB_AVAILABLE:
+            self.wandb_run.finish()
 
     def plot_loss(self, save_path: str | None = None):
         import matplotlib.pyplot as plt

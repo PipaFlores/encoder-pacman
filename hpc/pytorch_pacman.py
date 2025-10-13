@@ -4,6 +4,12 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 import argparse
 from umap import UMAP
 from sklearn.cluster import HDBSCAN
@@ -107,14 +113,39 @@ if __name__ == "__main__":
         "f" + str(N_FEATURES)
     )
 
+    autoencoder = AELSTM(input_size=data_tensor[0]["data"].shape[1], hidden_size=args.latent_space)
+
+    if WANDB_AVAILABLE:
+
+        run = wandb.init(
+                project = "pacman",
+                config= {
+                    "sequence_type": args.sequence_type,
+                    "n_features": len(FEATURES),
+                    "features_columns": FEATURES,
+                    
+                    # Training hyperparameters
+                    "max_epochs": args.n_epochs,
+                    "batch_size": 32,
+                    "latent_dimension": args.latent_space,
+                    "validation_data_split": args.validation_split,
+                    # Model architecture
+                    "embedder_type": autoencoder.__class__.__name__,
+                },
+                name=f"{autoencoder.__class__.__name__}_h{args.latent_space}_e{args.n_epochs}_{args.sequence_type}_{args.features}",
+                tags=[args.sequence_type, autoencoder.__class__.__name__]
+            )
+    else:
+        run = None
+
     trainer = AE_Trainer(max_epochs=args.n_epochs, 
                         batch_size=32, 
                         validation_split=args.validation_split,
                         save_model=True,
                         best_path=os.path.join(model_path, f"AELSTM_h{args.latent_space}_e{args.n_epochs}_best.pth"),
-                        last_path=os.path.join(model_path, f"AELSTM_h{args.latent_space}_e{args.n_epochs}_last.pth"))
+                        last_path=os.path.join(model_path, f"AELSTM_h{args.latent_space}_e{args.n_epochs}_last.pth"),
+                        wandb_run=run)
 
-    autoencoder = AELSTM(input_size=data_tensor[0]["data"].shape[1], hidden_size=args.latent_space)
 
     os.makedirs(model_path, exist_ok=True)
     os.makedirs(
