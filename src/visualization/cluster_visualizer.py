@@ -337,6 +337,7 @@ class ClusterVisualizer(BaseVisualizer):
                 unique_labels_size = unique_labels_size[:8]
         else:
             unique_labels = np.array([0])
+            unique_labels_size = np.array([0])
 
         norm = Normalize(vmin=-0.5, vmax=max(unique_labels[unique_labels >= 0]) if len(unique_labels[unique_labels >= 0]) > 0 else 1)
 
@@ -504,7 +505,7 @@ class ClusterVisualizer(BaseVisualizer):
             "tooltips_size" : (400,400),
         } ## Good for the big display
 
-        SIZE = MEDIUM
+        SIZE = LARGE
 
 
         TOOLTIPS = f"""
