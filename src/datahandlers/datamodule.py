@@ -19,16 +19,21 @@ class PacmanDataset(Dataset):
         # masks: torch.Tensor| None = None, 
     ):
         """
-        PacmanDataset for handling padded game state sequences.
+        PacmanDataset handles padded game state sequences for each trajectory.
+
+        Note:
+            Any required normalization of the data should be performed before creating this dataset,
+            for example using a method in PacmanDataReader.
 
         Args:
-            gamestates (torch.Tensor or np.ndarray): Tensor or array of shape (n_trajectories, sequence_length, features)
-                containing the padded game state sequences for each trajectory.
-            padding_value (float, optional): The value used for padding invalid timesteps in the sequences. Default is -999.
+            gamestates (torch.Tensor or np.ndarray): Array or tensor of shape (n_trajectories, sequence_length, features)
+                containing the padded game state sequences per trajectory.
+            padding_value (float, optional): Value used for padding invalid timesteps. Default: -999.
 
         Attributes:
-            gamestates (torch.Tensor): Tensor of shape (n_trajectories, sequence_length, features) with game state data.
-            masks (torch.Tensor): Tensor of shape (n_trajectories, sequence_length) indicating valid (non-padding) timesteps.
+            gamestates (torch.Tensor): Tensor of shape (n_trajectories, sequence_length, features), containing the data.
+            masks (torch.Tensor): Tensor of shape (n_trajectories, sequence_length), where 1 indicates valid (not padding), 0 otherwise.
+            obs_mask (torch.Tensor): Tensor of shape (n_trajectories, sequence_length, features), 1 for finite values, 0 otherwise.
         """
         if isinstance(gamestates, torch.Tensor):
             self.gamestates = gamestates
@@ -37,7 +42,6 @@ class PacmanDataset(Dataset):
 
         self.masks = (self.gamestates != padding_value).float()
         self.masks = self.masks.any(dim=-1).float()
-        ## TODO add element_wise mask for missing input values (Astar = inf)
         self.obs_mask = torch.isfinite(self.gamestates).float()
 
         ## If containing infinite values, switch them to MAX value in column

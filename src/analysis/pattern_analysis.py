@@ -22,6 +22,7 @@ except ImportError:
 
 try:
     import tensorflow # check backend
+    import keras
     KERAS_AVAILABLE = True
     from aeon.clustering.deep_learning import AEResNetClusterer, AEDRNNClusterer, AEDCNNClusterer, BaseDeepClusterer
     from aeon.clustering import DummyClusterer
@@ -78,6 +79,7 @@ class PatternAnalysis:
             features_columns: list[str] = ["Pacman_X", "Pacman_Y"], # Maybe use a different input logic (e.g., geometric_2, geometric_10, Astar, full_state,etc.)
             augmented_visualization: bool = False,
             batch_size: int = 32,
+            normalize_data: bool = True,
             max_epochs: int = 500,
             latent_dimension: int = 256,
             validation_data_split: int = 0.3,
@@ -102,6 +104,7 @@ class PatternAnalysis:
             features_columns (list[str]): List of feature column names to use.
             augmented_visualization (bool): Whether to use augmented visualization.
             batch_size (int): Batch size for neural network training.
+            normalize_data (bool): If True, normalizes data according to its type (`see PacmanDataReader.normalize_features()`)
             max_epochs (int): Maximum number of epochs for training.
             latent_dimension (int): Latent dimension size for embeddings.
             validation_data_split (int): Fraction of data to use for validation.
@@ -131,6 +134,7 @@ class PatternAnalysis:
 
             # for deep neural networks
         self.batch_size = batch_size
+        self.normalize_data = normalize_data
         self.max_epochs = max_epochs
         self.latent_dimension = latent_dimension
         self.validation_data_split = validation_data_split
@@ -242,6 +246,7 @@ class PatternAnalysis:
     def fit(self,
             raw_sequences: list[pd.DataFrame] | None = None,
             gif_path_list: list[str] | None = None,
+            validation_encodings: pd.DataFrame | None = None,
             test_dataset: bool = False):
         """
         Main fitting method that runs the complete pipeline.
@@ -254,11 +259,15 @@ class PatternAnalysis:
             5. Performing clustering on the reduced embeddings or trajectories.
 
         Args:
-            data_package (tuple[list[pd.DataFrame], list[str]], optional):
-                Pre-loaded data to use instead of loading, for faster iterations. If None, data is loaded internally according to
-                the "self.sequence_type" attribute. Ensure that sequence_type matches the pre-loaded type, since it
-                is used to read available embedding models and to save any trained ones.
-            test_dataset (bool, optional): If True, uses a test dataset (e.g., PenDigits) for evaluation.
+            raw_sequences (list[pd.DataFrame], optional): 
+                List of game state sequences (as DataFrames), to use as input data. 
+                If None, data will be loaded using the internal data reader according to 'self.sequence_type'.
+            gif_path_list (list[str], optional):
+                If using augmented visualization, list of GIF file paths corresponding to each sequence.
+            validation_encodings (pd.DataFrame, optional):
+                Precomputed validation encodings for the raw_sequences (e.g., Behavlet features).
+            test_dataset (bool, optional): 
+                If True, uses a built-in test dataset (e.g., PenDigits) for evaluation instead of the main data.
 
 
         Returns:
@@ -276,19 +285,28 @@ class PatternAnalysis:
             else:
                 self.raw_sequence_data = raw_sequences
                 self.gif_path_list = gif_path_list
-                logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences ")
+                logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences")
 
 
             self.filtered_sequence_data = [sequence[self.features_columns].to_numpy() for sequence in self.raw_sequence_data]
+            #TODO add normalization step here (?)
+            if self.normalize_data:
+                pass
+
+            logger.info(f"Using {len(self.features_columns)} features: {self.features_columns}")
             self.padded_sequence_data = self.reader.padding_sequences(self.filtered_sequence_data)
             self.trajectory_list = [self.reader.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in self.raw_sequence_data]
 
         else:
             from aeon.datasets import load_classification
             logger.info("Loading PenDigits test dataset (10k samples)")
+            self.features_columns = ["x", "y"]
+            self.sequence_type = "PenDigits10k"
             self.filtered_sequence_data, self.validation_labels = load_classification("PenDigits")
             self.filtered_sequence_data = self.filtered_sequence_data.transpose(0,2,1) # [N, seq_length, features]
             self.padded_sequence_data = self.filtered_sequence_data # to accomodate the pipeline
+            if not isinstance(self.clusterer, GeomClustering):
+                self.embedder = self._initialize_deep_embedder(embedder="LSTM") # reinitialize to new input size
 
         # Step 2a: load or train embedding model
         
@@ -299,7 +317,7 @@ class PatternAnalysis:
                 logger.info(f"Found trained model at {model_path}, loading...")
                 self._load_model(model_path)
             else:
-                logger.info(f"No trained model found at {model_path}, training...")
+                logger.warning(f"No trained model found at {model_path}, training...")
                 self._train_model(
                     padded_sequence_data=self.padded_sequence_data,
                     test_dataset=test_dataset)
@@ -337,9 +355,14 @@ class PatternAnalysis:
         )
 
         # Step 4: Validation
-        # FIXME add permanency for efficient iteration (if no change in data -> no need for behavlet/labels calc, only val measures)
-        if self.validation_method and self.raw_sequence_data is not None:
-            self.validation_encodings, self.validation_labels = self.calculate_validation_encodings(self.raw_sequence_data, self.validation_method)
+        if self.validation_method:
+            if test_dataset == False:
+                if validation_encodings is None:
+                    self.validation_encodings = self.calculate_validation_encodings(self.raw_sequence_data, self.validation_method)
+                else:
+                    self.validation_encodings = validation_encodings
+
+                self.validation_labels = self.calculate_validation_labels(self.validation_encodings)
         # Calculate clustering validation measures (ARI, AMI, NMI) for each validation label set
             self.validation_measures =self.calculate_validation_measures(
                 labels = self.labels,
@@ -569,12 +592,13 @@ class PatternAnalysis:
         #     else:
         #         return np.array(data)
 
-    def _generate_deep_embeddings(self, padded_data: np.ndarray) -> np.ndarray:
+    def _generate_deep_embeddings(self, padded_data: np.ndarray, check_recon_error: bool=True) -> np.ndarray:
         """
         Generate embeddings using deep learning models.
         
         Args:
             padded_data: np.ndarray. sequences of equal length, or padded.
+            check_recon_error: bool. Whether to calculate the reconstruction error to a random 10% of the data.
             
         Returns:
             Deep embeddings as numpy array [n_samples, embeddings_dimensionality]
@@ -596,30 +620,51 @@ class PatternAnalysis:
                         raise AttributeError("Torch module has no .encode() method to produce embeddings.")
                     
                     all_embeddings.append(batch_embeddings.cpu())
-            # Get a random sample of 10% of the data_tensor and calculate the reconstruction error of self.embedder(x)
-            n_samples = len(data_tensor)
-            sample_size = max(1, int(0.1 * n_samples))
-            sample_indices = np.random.choice(n_samples, size=sample_size, replace=False)
-            sample_batch = data_tensor[sample_indices]["data"].to(device)   
-            mask = data_tensor[sample_indices]["mask"].to(device)   
-            obs_mask = data_tensor[sample_indices]["obs_mask"].to(device)   
 
-            if hasattr(self.embedder, 'forward'):
-                # Forward pass to get reconstruction
-                with torch.no_grad():
-                    recon = self.embedder(sample_batch)
-                # Compute reconstruction error (MSE per sample)
-                recon_error = self.embedder.loss(x_h=recon , x=sample_batch,mask=mask, obs_mask=obs_mask)
-                logger.info(f"Mean reconstruction error on 10% sample: {recon_error}")
-            else:
-                logger.warning("Embedder does not have a forward method for reconstruction error calculation.")
-            
             embeddings = torch.cat(all_embeddings, dim=0)
             embeddings = embeddings.detach().numpy()
+
+            if check_recon_error:
+                # Get a random sample of 10% of the data_tensor and calculate the reconstruction error of self.embedder(x)
+                n_samples = len(data_tensor)
+                sample_size = max(1, int(0.1 * n_samples))
+                sample_indices = np.random.choice(n_samples, size=sample_size, replace=False)
+                sample_batch = data_tensor[sample_indices]["data"].to(device)   
+                mask = data_tensor[sample_indices]["mask"].to(device)   
+                obs_mask = data_tensor[sample_indices]["obs_mask"].to(device)   
+
+                if hasattr(self.embedder, 'forward'):
+                    # Forward pass to get reconstruction
+                    with torch.no_grad():
+                        recon = self.embedder(sample_batch)
+                    # Compute reconstruction error (MSE per sample)
+                    recon_error = self.embedder.loss(x_h=recon , x=sample_batch,mask=mask, obs_mask=obs_mask)
+                    logger.info(f"Mean reconstruction error on 10% sample: {recon_error:.2f}")
+                else:
+                    logger.warning("Pytorch embedder does not have a forward method for reconstruction error calculation.")
+            
 
         if isinstance(self.embedder, BaseDeepClusterer): 
 
             embeddings = self.embedder.model_.layers[1].predict(padded_data)
+
+            if check_recon_error:
+                ## recon error, aeon/keras version (no masking)
+                n_samples = len(padded_data)
+                sample_size = max(1, int(0.1 * n_samples))
+                sample_indices = np.random.choice(n_samples, size=sample_size, replace=False)
+                sample_batch = padded_data[sample_indices]
+
+                if hasattr(self.embedder, 'predict'):
+                    # Convert sample_batch to tf.Tensor
+                    sample_batch_tensor = tensorflow.convert_to_tensor(sample_batch)
+                    recon = self.embedder.model_(sample_batch_tensor, training=False)
+                    # Use tf.losses.mean_squared_error directly on tensors
+                    recon_error = tensorflow.reduce_mean(keras.losses.mean_squared_error(sample_batch_tensor, recon)).numpy()
+                    logger.info(f"Mean reconstruction error on 10% sample: {recon_error:.2f}")
+                else:
+                    logger.warning("Aeon/keras embedder does not have a predict method for reconstruction error calculation.")
+
         
         return embeddings
 
@@ -725,7 +770,7 @@ class PatternAnalysis:
     
     def calculate_validation_encodings(self, 
                                        raw_sequence_data:list[pd.DataFrame],
-                                       validation_method: str = "Behavlets") -> tuple[pd.DataFrame, pd.DataFrame]:
+                                       validation_method: str = "Behavlets") -> pd.DataFrame:
         """
         Compute validation labels for clustering results using behavioral pattern encodings (Behavlets).
 
@@ -741,21 +786,12 @@ class PatternAnalysis:
             Validation method to use. Currently, only "Behavlets" is implemented.
 
         Returns
-        -------
+        ----------
         validation_encodings : pd.DataFrame
             DataFrame of raw (non-binarized) behavlet values for each sequence and behavlet type.
-        validation_labels : pd.DataFrame
-            DataFrame of binarized validation labels for each sequence and behavlet type.
-            Each column corresponds to a behavlet (e.g., "Aggression1_value"). Values are:
-                1   if the behavlet is present in the sequence (>0)
-               -1   if the behavlet is absent in the sequence (<=0)
-               None if the behavlet is always zero across all sequences (i.e., not observed in any sample).
-        Returns
-        -------
-        tuple[pd.DataFrame, pd.DataFrame]
-            A tuple containing (validation_labels, validation_encodings).
+        
         """
-        logger.info(f"Validating with {self.validation_method}...")
+        logger.info(f"Calculating validation encodings ({self.validation_method})...")
         
         if validation_method == "Behavlets":
             # Use BehavletsEncoding for validation
@@ -786,7 +822,6 @@ class PatternAnalysis:
                         f"Failed to calculate validation for gamestate idx {idx} (level_id {getattr(gamestate[0], 'level_id', 'unknown')})"
                     )
                     validation_rows.append(pd.DataFrame())  # Append empty DataFrame to preserve order
-                    continue  # Don't append empty DataFrame
 
             # Concatenate all rows in the same order as raw_sequence_list
             validation_encodings = pd.concat(validation_rows, ignore_index=True)
@@ -796,42 +831,98 @@ class PatternAnalysis:
             if value_cols:
                 validation_encodings = validation_encodings[value_cols]
 
-            # Binarize each column in validation_encodings: >0 -> 1, <=0 -> -1, unless all zeros (then None)
-            validation_labels = pd.DataFrame(index=validation_encodings.index)
-            for col in validation_encodings.columns:
-                col_values = validation_encodings[col].to_numpy()
-                if np.sum(col_values) == 0:
-                    validation_labels[col] = None
-                elif col == "Aggression3_value":
-                    # For Aggression3_value (Ghost kills), keep the original value if >0, else set to -1
-                    validation_labels[col] = np.where(col_values > 0, col_values, -1)
-                else:
-                    validation_labels[col] = np.where(col_values > 0, 1, -1)
-
-
-            return validation_encodings, validation_labels
+            return validation_encodings
         else:
             raise NotImplementedError(f"Validation method not supported ({validation_method})")
         
-    
+    def calculate_validation_labels(self, validation_encodings:pd.DataFrame):
+        """
+        Calculates validation labels based on validation encodings.
+        It eithers: binarize values to present/not-present, or discretizes into bins or steps.
+        """
+        # Binarize each column in validation_encodings: >0 -> 1, <=0 -> -1, unless all zeros (then None)
+        # TODO: consider the other behavlets unique nature (as in Aggression3)
+        logger.info(f"Calcuating validation labels")
+        validation_labels = pd.DataFrame(index=validation_encodings.index)
+        for col in validation_encodings.columns:
+            col_values = validation_encodings[col].to_numpy()
+            if np.sum(col_values) == 0:
+                validation_labels[col] = None
+            elif col == "Aggression3_value":
+                # For Aggression3_value (Ghost kills), keep the original value if >0, else set to -1
+                validation_labels[col] = np.where(col_values > 0, col_values, -1)
+            else:
+                validation_labels[col] = np.where(col_values > 0, 1, -1)
+
+        return validation_labels
+
+
+
     def calculate_validation_measures(
             self,
             labels : np.ndarray,
             validation_labels : pd.DataFrame
             ): 
+        """
+        Calculates clustering validation measures (ARI, AMI, NMI) between provided cluster labels and validation label sets.
+
+        This method computes quantitative metrics assessing the match between clustering results and a set of "validation" or reference labels
+        (for example, labels derived from domain knowledge or target values such as Behavlet values). For each validation label set (i.e., each column in
+        the validation_labels DataFrame), the following metrics are calculated:
+
+            - ARI (Adjusted Rand Index)
+            - AMI (Adjusted Mutual Information)
+            - NMI (Normalized Mutual Information)
+
+        If the reference labels are all NaN, all zeros, or otherwise degenerate, the metrics are set to NaN for that validation set.
+
+        Args:
+            labels (np.ndarray): The cluster labels produced by the clustering algorithm.
+            validation_labels (pd.DataFrame): DataFrame where each column is a set of reference/validation labels for the same instances.
+
+        Returns:
+            pd.DataFrame: DataFrame indexed by validation_set (column name), with columns 'ARI', 'AMI', and 'NMI'.
+        """
         
         from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score, normalized_mutual_info_score
         if validation_labels is not None:
             validation_measures_rows = []
-            for col in validation_labels.columns:
-                val_labels = validation_labels[col].to_numpy()
+
+            # If validation_labels is a pandas DataFrame (multiple columns)
+            if hasattr(validation_labels, "columns"):
+                for col in validation_labels.columns:
+                    val_labels = validation_labels[col].to_numpy()
+                    # Only compute if val_labels is not all NaN and not all zeros
+                    if np.all(pd.isnull(val_labels)) or (np.unique(val_labels).size == 1 and np.unique(val_labels)[0] in [None, np.nan, 0]):
+                        ari = np.nan
+                        ami = np.nan
+                        nmi = np.nan
+                    else:
+                        # Some validation labels may have NaNs, mask those out for fair comparison
+                        mask = ~pd.isnull(val_labels)
+                        if np.sum(mask) == 0:
+                            ari = np.nan
+                            ami = np.nan
+                            nmi = np.nan
+                        else:
+                            ari = adjusted_rand_score(labels[mask], val_labels[mask])
+                            ami = adjusted_mutual_info_score(labels[mask], val_labels[mask])
+                            nmi = normalized_mutual_info_score(labels[mask], val_labels[mask])
+                    validation_measures_rows.append({
+                        "validation_set": col,
+                        "ARI": ari,
+                        "AMI": ami,
+                        "NMI": nmi
+                    })
+            # If validation_labels is a 1D numpy array or list-like (single label set)
+            else:
+                val_labels = np.asarray(validation_labels)
                 # Only compute if val_labels is not all NaN and not all zeros
                 if np.all(pd.isnull(val_labels)) or (np.unique(val_labels).size == 1 and np.unique(val_labels)[0] in [None, np.nan, 0]):
                     ari = np.nan
                     ami = np.nan
                     nmi = np.nan
                 else:
-                    # Some validation labels may have NaNs, mask those out for fair comparison
                     mask = ~pd.isnull(val_labels)
                     if np.sum(mask) == 0:
                         ari = np.nan
@@ -842,7 +933,7 @@ class PatternAnalysis:
                         ami = adjusted_mutual_info_score(labels[mask], val_labels[mask])
                         nmi = normalized_mutual_info_score(labels[mask], val_labels[mask])
                 validation_measures_rows.append({
-                    "validation_set": col,
+                    "validation_set": "validation_labels",
                     "ARI": ari,
                     "AMI": ami,
                     "NMI": nmi
@@ -879,7 +970,7 @@ class PatternAnalysis:
         print(f"Random Seed: {getattr(self, 'random_seed', 'N/A')}")
         
         self.results = {
-            'n_samples': len(self.filtered_sequence_data) if self.filtered_sequence_data else "N/A",
+            'n_samples': len(self.raw_sequence_data) if self.raw_sequence_data else "N/A",
             'n_features': len(self.features_columns),
             'sequence_type': self.sequence_type,
             'embedding_dim': self.embeddings.shape[1] if self.embeddings is not None else "N/A",
