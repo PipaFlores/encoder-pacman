@@ -29,6 +29,11 @@ try:
 except ImportError:
     KERAS_AVAILABLE = False
 
+try: 
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
 ## Reducing
 from umap import UMAP
 try:
@@ -76,7 +81,7 @@ class PatternAnalysis:
             similarity_measure: str = "euclidean",
             sequence_type: str = "first_5_seconds",
             validation_method: str | None = "Behavlets",
-            features_columns: list[str] = ["Pacman_X", "Pacman_Y"], # Maybe use a different input logic (e.g., geometric_2, geometric_10, Astar, full_state,etc.)
+            feature_set: str = "Pacman", # TODO switched this to align with wandb and hpc script. Check whether to rename folder organization
             augmented_visualization: bool = False,
             batch_size: int = 32,
             normalize_data: bool = True,
@@ -101,7 +106,7 @@ class PatternAnalysis:
             used in clustering or reducing, define those in reducer, or clusterer instances.
             sequence_type (str): Type of sequence to analyze (e.g., "first_5_seconds").
             validation (str): Validation method for clusters (e.g., "Behavlets").
-            features_columns (list[str]): List of feature column names to use.
+            feature_set (str): Name of feature set to be used in analysis
             augmented_visualization (bool): Whether to use augmented visualization.
             batch_size (int): Batch size for neural network training.
             normalize_data (bool): If True, normalizes data according to its type (`see PacmanDataReader.normalize_features()`)
@@ -146,6 +151,7 @@ class PatternAnalysis:
         self.reader = reader if reader is not None else PacmanDataReader(data_folder)
         if isinstance(clusterer, GeomClustering): # Only clusterer.
             
+            self.feature_set = "Pacman"
             self.features_columns = ["Pacman_X", "Pacman_Y"] # Always these two features
             logger.info(f"features columns set to Pacman's X,Y coordinates for GeomClustering")
             self.embedder = None
@@ -153,7 +159,8 @@ class PatternAnalysis:
             self.clusterer = clusterer
             self.similarity_measure = clusterer.similarity_measures.measure_type
         else: # Neural-Network embedding -> Reducer -> clusterer
-            self.features_columns = features_columns
+            self.feature_set = feature_set
+            self.features_columns = self._get_feature_columns(feature_set)
             self.embedder = self._initialize_deep_embedder(embedder) if embedder is not None else None
             self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="euclidean", random_state=random_seed)
             self.clusterer = clusterer if clusterer is not None else HDBSCAN(min_cluster_size=20, min_samples=None)
@@ -298,15 +305,7 @@ class PatternAnalysis:
             self.trajectory_list = [self.reader.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in self.raw_sequence_data]
 
         else:
-            from aeon.datasets import load_classification
-            logger.info("Loading PenDigits test dataset (10k samples)")
-            self.features_columns = ["x", "y"]
-            self.sequence_type = "PenDigits10k"
-            self.filtered_sequence_data, self.validation_labels = load_classification("PenDigits")
-            self.filtered_sequence_data = self.filtered_sequence_data.transpose(0,2,1) # [N, seq_length, features]
-            self.padded_sequence_data = self.filtered_sequence_data # to accomodate the pipeline
-            if not isinstance(self.clusterer, GeomClustering):
-                self.embedder = self._initialize_deep_embedder(embedder="LSTM") # reinitialize to new input size
+            self._load_train_dataset()
 
         # Step 2a: load or train embedding model
         
@@ -360,6 +359,7 @@ class PatternAnalysis:
                 if validation_encodings is None:
                     self.validation_encodings = self.calculate_validation_encodings(self.raw_sequence_data, self.validation_method)
                 else:
+                    logger.info(f"Using preloaded validation encodings")
                     self.validation_encodings = validation_encodings
 
                 self.validation_labels = self.calculate_validation_labels(self.validation_encodings)
@@ -407,8 +407,6 @@ class PatternAnalysis:
             If `make_gif = True`, returns a list of paths to each sequence's rendered .gif animation, for augmented visualization.
         """
         logger.info(f"Loading and slicing data for {self.sequence_type}...")
-
-        ## TODO add event-based slicing
         
         # Determine slicing parameters based on sequence type
         if sequence_type == "first_5_seconds":
@@ -427,7 +425,11 @@ class PatternAnalysis:
             raw_sequence_list, gif_paths = self.reader.slice_seq_of_each_level(
                 start_step=0, end_step=50, make_gif=make_gif
             )
-            
+        elif sequence_type == "pacman_attack":
+            raw_sequence_list, gif_paths = self.reader.slice_attack_modes(
+                CONTEXT=20, make_gif=make_gif
+            )
+
         else:
             raise ValueError(f"Sequence type ({sequence_type}) not valid")
         
@@ -510,6 +512,17 @@ class PatternAnalysis:
              model_dir,
             "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
         )
+
+        if WANDB_AVAILABLE:
+            wandb_config = self._get_wandb_config()
+            run = wandb.init(
+                project = "pacman",
+                config= wandb_config,
+                name=f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}_{self.sequence_type}_{self.feature_set}",
+                tags=[self.sequence_type, self.embedder.__class__.__name__]
+            )
+        else:
+            run = None
     
         if self.using_torch:
             trainer = AE_Trainer(
@@ -520,6 +533,7 @@ class PatternAnalysis:
                 save_model=True,
                 best_path=model_path + "_best.pth",
                 last_path=model_path + "_last.pth",
+                wandb_run=run
                 )
             data_tensor = PacmanDataset(gamestates = padded_sequence_data)
             trainer.fit(model= self.embedder, data=data_tensor)
@@ -566,31 +580,6 @@ class PatternAnalysis:
         
         else:
             self.reader.level_df 
-
-        # else:
-        #     # Use raw features as embeddings. 
-        # TODO: implement something, either flattening sequences or using higher-level feats
-        # such as highest-score, avg. distance to ghosts, whatever. Not a main concern, yet
-        #     # FIXME the data is never inputted as a Tensor, so it should be constructed here.
-        #     logger.info("Using raw features as embeddings")
-        #     if isinstance(data, PacmanDataset):
-        #         # Flatten sequences or use summary statistics
-        #         embeddings = []
-        #         for i in range(len(data)):
-        #             sequence = data[i]["data"].numpy()
-        #             mask = data[i]["mask"].numpy()
-                    
-        #             # Use mean of valid timesteps as embedding
-        #             valid_sequence = sequence[mask.astype(bool)]
-        #             if len(valid_sequence) > 0:
-        #                 embedding = np.mean(valid_sequence, axis=0)
-        #             else:
-        #                 embedding = np.zeros(sequence.shape[-1])
-        #             embeddings.append(embedding)
-                
-        #         return np.array(embeddings)
-        #     else:
-        #         return np.array(data)
 
     def _generate_deep_embeddings(self, padded_data: np.ndarray, check_recon_error: bool=True) -> np.ndarray:
         """
@@ -792,6 +781,7 @@ class PatternAnalysis:
         
         """
         logger.info(f"Calculating validation encodings ({self.validation_method})...")
+        ## TODO implement self.validation_methos == metadatacolumn (e.g, level, user_id, duration, etc)
         
         if validation_method == "Behavlets":
             # Use BehavletsEncoding for validation
@@ -1492,6 +1482,69 @@ class PatternAnalysis:
         logger.debug("Trajectory centroids calculated")
         return centroids_array
     
+    def _get_feature_columns(self, feature_set:str):
+        if feature_set == "Pacman":
+            feature_columns = [
+                "Pacman_X",
+                "Pacman_Y",
+            ]
+        elif feature_set == "Pacman_Ghosts":
+            feature_columns = [
+                "Pacman_X",
+                "Pacman_Y",
+                "Ghost1_X",
+                "Ghost1_Y",
+                "Ghost2_X",
+                "Ghost2_Y",
+                "Ghost3_X",
+                "Ghost3_Y",
+                "Ghost4_X",
+                "Ghost4_Y",
+            ]
+        elif feature_set == "Ghost_Distances":
+            feature_columns=[
+            'Ghost1_distance',
+            'Ghost2_distance', 
+            'Ghost3_distance', 
+            'Ghost4_distance'
+            ]
+        else:
+            raise ValueError(f"Unknown features selection: {feature_set}")
+        
+        return feature_columns
+
+
+    def _load_train_dataset(self):
+
+        from aeon.datasets import load_classification
+        logger.info("Loading PenDigits test dataset (10k samples)")
+        self.features_columns = ["x", "y"]
+        self.sequence_type = "PenDigits10k"
+        self.filtered_sequence_data, self.validation_labels = load_classification("PenDigits")
+        self.filtered_sequence_data = self.filtered_sequence_data.transpose(0,2,1) # [N, seq_length, features]
+        self.padded_sequence_data = self.filtered_sequence_data # to accomodate the pipeline
+        if not isinstance(self.clusterer, GeomClustering):
+            self.embedder = self._initialize_deep_embedder(embedder="LSTM") # reinitialize to new input size
+    
+    def _get_wandb_config(self):
+
+        wandb_config = {
+            # Hyperparameters only available in pattern_analysis
+            "sequence_type": self.sequence_type,
+            "n_features": len(self.features_columns),
+            "features_columns": self.features_columns,
+            
+            # Training hyperparameters
+            "max_epochs": self.max_epochs,
+            "batch_size": self.batch_size,
+            "latent_dimension": self.latent_dimension,
+            "validation_data_split": self.validation_data_split,
+            # Model architecture
+            "embedder_type": self.embedder.__class__.__name__,
+        }
+
+        return wandb_config
+
     # def get_cluster_samples(self, cluster_id: int, n_samples: int = 5) -> list[int]:
     #     """
     #     Get sample indices from a specific cluster.
