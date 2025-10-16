@@ -1,6 +1,7 @@
 
 import os
 import sys
+import datetime
 import numpy as np
 import pandas as pd
 
@@ -11,6 +12,13 @@ import matplotlib.pyplot as plt
 
 
 import tensorflow as tf
+try:
+    import wandb
+    from wandb.integration.keras import WandbMetricsLogger
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+
 from aeon.clustering.deep_learning import BaseDeepClusterer, AEAttentionBiGRUClusterer, AEFCNClusterer, AEResNetClusterer, AEDCNNClusterer, AEDRNNClusterer
 from aeon.clustering import DummyClusterer
 
@@ -103,6 +111,7 @@ def parse_args():
     # parser.add_argument('--input_size', type=int, default=2, help='Input size (number of channels/dimensions)')
     parser.add_argument('--verbose', action='store_true', help='Verbosity flag')
     parser.add_argument('--sequence-type', type= str, default="", help= "On what type of sequences to train the model, see source code")
+    parser.add_argument('--logging-comment', type= str, default="", help= "Any special comment to be sent to wandb (if logging)")
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -207,6 +216,31 @@ if __name__ == "__main__":
             )
 
 
+    if WANDB_AVAILABLE:
+        run = wandb.init(
+                project = "pacman",
+                config= {
+                    "sequence_type": args.sequence_type,
+                    "n_features": len(FEATURES),
+                    "features_columns": FEATURES,
+                    "feature_set":args.features,
+                    
+                    # Training hyperparameters'
+                    "max_epochs": args.n_epochs,
+                    "batch_size": 32,
+                    "latent_dimension": args.latent_space,
+                    "validation_data_split": args.validation_split,
+                    # Model architecture
+                    "embedder_type": autoencoder.__class__.__name__,
+                    "comment": args.logging_comment
+                },
+                name=f"{args.sequence_type}_{args.features}_{datetime.datetime.now().strftime('%m_%d_%H_%M')}",
+                tags=[args.sequence_type, autoencoder.__class__.__name__]
+            )
+        autoencoder.callbacks = WandbMetricsLogger()
+    else:
+        run = None
+
     os.makedirs(model_path, exist_ok=True)
     os.makedirs(
         os.path.join(
@@ -273,7 +307,7 @@ if __name__ == "__main__":
         labels[name] = clusterer.fit_predict(embeddings_2D)
 
     ## VISUALIZE
-    fig, axs = plt.subplots(1, len(labels.values()), figsize=(6 * len(labels.values()), 6))
+    fig, axs = plt.subplots(1, len(labels.values()), figsize=(10 * len(labels.values()), 10))
 
     # Ensure axs is always a list
     if len(labels.values()) == 1:
@@ -291,6 +325,18 @@ if __name__ == "__main__":
             f"{autoencoder.__class__.__name__}_h{args.latent_space}_e{args.n_epochs}.png"
         )
     fig.savefig(fname=save_path)
+
+    if WANDB_AVAILABLE:
+        run.log({"latent_space_plot": fig})
+        run.finish()
+        # data = [[x, y, c] for (x, y, c) in zip(embeddings_2D[:,0], embeddings_2D[:,1], predictions)]
+
+        # table = wandb.Table(data=data, columns = ["Dim1", "Dim2", "labels"])
+
+        # run.log({"chart" : wandb.plot.scatter(table, "Dim1", "Dim2",
+        #                      title="Latent space plot")
+        # })
+
     print(f"Saved embedding plot in {save_path}")
 
 

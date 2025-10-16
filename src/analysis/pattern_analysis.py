@@ -88,6 +88,7 @@ class PatternAnalysis:
             max_epochs: int = 500,
             latent_dimension: int = 256,
             validation_data_split: int = 0.3,
+            sort_distances: bool = False,
             using_hpc: bool = False,
             random_seed: int | None = None,
             verbose: bool = False
@@ -143,6 +144,7 @@ class PatternAnalysis:
         self.max_epochs = max_epochs
         self.latent_dimension = latent_dimension
         self.validation_data_split = validation_data_split
+        self.sort_distances = sort_distances
 
         if TORCH_AVAILABLE:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -187,6 +189,7 @@ class PatternAnalysis:
         self.validation_labels = None
         self.metadata = None
         self.results = {}
+        self.wandb_logging = False  # Active when training new model, logging latent_space plots and validation measures in wandb
 
     def _initialize_deep_embedder(self, embedder:str):
 
@@ -202,7 +205,7 @@ class PatternAnalysis:
             self.using_keras = False
             return AELSTM(
                 input_size= len(self.features_columns),
-                hidden_size=256,
+                hidden_size=self.latent_dimension,
             ) # other params defined in trainer during fitting stage.
         
         if embedder == "DRNN":
@@ -254,7 +257,9 @@ class PatternAnalysis:
             raw_sequences: list[pd.DataFrame] | None = None,
             gif_path_list: list[str] | None = None,
             validation_encodings: pd.DataFrame | None = None,
-            test_dataset: bool = False):
+            force_training: bool = False,
+            test_dataset: bool = False,
+            close_wandb_logger: bool = True):
         """
         Main fitting method that runs the complete pipeline.
 
@@ -273,8 +278,13 @@ class PatternAnalysis:
                 If using augmented visualization, list of GIF file paths corresponding to each sequence.
             validation_encodings (pd.DataFrame, optional):
                 Precomputed validation encodings for the raw_sequences (e.g., Behavlet features).
+            force_training (bool, optional):
+                If True, trains deep embedding models even if there is an available model (will replace it)
             test_dataset (bool, optional): 
                 If True, uses a built-in test dataset (e.g., PenDigits) for evaluation instead of the main data.
+            close_wandb_logger (bool, optional):
+                If True, close the wandb logger (if present) after logging validation measures, or training.
+                If False, leaves logger open, useful for logging latent space charts after calling the fit() method.
 
 
         Returns:
@@ -300,8 +310,28 @@ class PatternAnalysis:
             if self.normalize_data:
                 pass
 
+
             logger.info(f"Using {len(self.features_columns)} features: {self.features_columns}")
             self.padded_sequence_data = self.reader.padding_sequences(self.filtered_sequence_data)
+            
+            if self.sort_distances:
+                # Find indices of ghost distance columns
+                ghost_distance_indices = []
+                for i, col in enumerate(self.features_columns):
+                    if col.startswith('Ghost') and col.endswith('_distance'):
+                        ghost_distance_indices.append(i)
+                
+                if ghost_distance_indices:
+                    # Sort only the ghost distance columns
+                    for i in range(self.padded_sequence_data.shape[0]):  # For each sequence
+                        for j in range(self.padded_sequence_data.shape[1]):  # For each time step
+                            # Sort only the ghost distance values at this time step
+                            ghost_values = self.padded_sequence_data[i, j, ghost_distance_indices]
+                            sorted_ghost_values = np.sort(ghost_values)
+                            self.padded_sequence_data[i, j, ghost_distance_indices] = sorted_ghost_values
+                
+
+
             self.trajectory_list = [self.reader.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in self.raw_sequence_data]
 
         else:
@@ -311,10 +341,17 @@ class PatternAnalysis:
         
         if self.embedder is not None:
             is_model_trained_, model_path = self._check_model_training_status(return_path=True, test_dataset=test_dataset)
- 
+
             if is_model_trained_:
-                logger.info(f"Found trained model at {model_path}, loading...")
-                self._load_model(model_path)
+                if force_training:
+                    logger.info(f"Force_training = {force_training}, training new model and replacing at {model_path}")
+                    self._train_model(
+                        padded_sequence_data=self.padded_sequence_data,
+                        test_dataset=test_dataset)
+                    logger.info(f"Model trained and saved at {model_path}")
+                else:
+                    logger.info(f"Found trained model at {model_path}, loading...")
+                    self._load_model(model_path)
             else:
                 logger.warning(f"No trained model found at {model_path}, training...")
                 self._train_model(
@@ -369,13 +406,12 @@ class PatternAnalysis:
                 validation_labels= self.validation_labels
                 )
             
-
-        # Step 5: Visualization and Collection of Results
         
-        
-        # self.summarize()
+        if WANDB_AVAILABLE and self.wandb_logging:
+            if close_wandb_logger:
+                self.wandbrun.finish()
 
-        # self.plot_results()
+            self.wandb_logging = False
         
         logger.info("Pipeline completed successfully!")
         return self
@@ -514,15 +550,17 @@ class PatternAnalysis:
         )
 
         if WANDB_AVAILABLE:
+            import datetime
             wandb_config = self._get_wandb_config()
-            run = wandb.init(
+            self.wandbrun = wandb.init(
                 project = "pacman",
                 config= wandb_config,
-                name=f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}_{self.sequence_type}_{self.feature_set}",
+                name=f"{self.sequence_type}_{self.feature_set}_{datetime.datetime.now().strftime('%m_%d_%H_%M')}",
                 tags=[self.sequence_type, self.embedder.__class__.__name__]
             )
+            self.wandb_logging = True
         else:
-            run = None
+            self.wandbrun = None
     
         if self.using_torch:
             trainer = AE_Trainer(
@@ -533,7 +571,7 @@ class PatternAnalysis:
                 save_model=True,
                 best_path=model_path + "_best.pth",
                 last_path=model_path + "_last.pth",
-                wandb_run=run
+                wandb_run=self.wandbrun
                 )
             data_tensor = PacmanDataset(gamestates = padded_sequence_data)
             trainer.fit(model= self.embedder, data=data_tensor)
@@ -549,6 +587,11 @@ class PatternAnalysis:
             self.embedder.best_file_name = model_path + "_best"
             self.embedder.save_last_model = True
             self.embedder.last_file_name = model_path + "_last"
+            
+            if WANDB_AVAILABLE:
+                from wandb.integration.keras import WandbMetricsLogger
+                self.embedder.callbacks = WandbMetricsLogger()
+
 
             self.embedder.fit(padded_sequence_data.transpose(0,2,1)) # Transpose to match aeon input format of [n, channels, seq_length]
 
@@ -1509,7 +1552,7 @@ class PatternAnalysis:
             'Ghost4_distance'
             ]
         else:
-            raise ValueError(f"Unknown features selection: {feature_set}")
+            raise ValueError(f"Unknown features selection: {feature_set}. Options are (Pacman, Pacman_Ghosts, Ghost_Distances)")
         
         return feature_columns
 
@@ -1533,6 +1576,7 @@ class PatternAnalysis:
             "sequence_type": self.sequence_type,
             "n_features": len(self.features_columns),
             "features_columns": self.features_columns,
+            "feature_set": self.feature_set,
             
             # Training hyperparameters
             "max_epochs": self.max_epochs,
