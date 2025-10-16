@@ -4,6 +4,7 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
+import datetime
 try:
     import wandb
     WANDB_AVAILABLE = True
@@ -30,6 +31,7 @@ def parse_args():
     # parser.add_argument('--input_size', type=int, default=2, help='Input size (number of channels/dimensions)')
     parser.add_argument('--verbose', action='store_true', help='Verbosity flag')
     parser.add_argument('--sequence-type', type= str, default="", help= "On what type of sequences to train the model, see source code")
+    parser.add_argument('--logging-comment', type= str, default="", help= "Any special comment to be sent to wandb (if logging)")
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -101,6 +103,21 @@ if __name__ == "__main__":
     filtered_sequence_list = [sequence[FEATURES].to_numpy() for sequence in raw_sequence_list]
     X_padded = reader.padding_sequences(sequence_list=filtered_sequence_list)
 
+    ghost_distance_indices = []
+    for i, col in enumerate(FEATURES):
+        if col.startswith('Ghost') and col.endswith('_distance'):
+            ghost_distance_indices.append(i)
+    
+    if ghost_distance_indices:
+        # Sort only the ghost distance columns
+        for i in range(X_padded.shape[0]):  # For each sequence
+            for j in range(X_padded.shape[1]):  # For each time step
+                # Sort only the ghost distance values at this time step
+                ghost_values = X_padded[i, j, ghost_distance_indices]
+                sorted_ghost_values = np.sort(ghost_values)
+                X_padded[i, j, ghost_distance_indices] = sorted_ghost_values
+
+
     data_tensor = PacmanDataset(X_padded)
     data_tensor[:]["data"].to(device)
 
@@ -123,6 +140,7 @@ if __name__ == "__main__":
                     "sequence_type": args.sequence_type,
                     "n_features": len(FEATURES),
                     "features_columns": FEATURES,
+                    "feature_set":args.features,
                     
                     # Training hyperparameters
                     "max_epochs": args.n_epochs,
@@ -131,8 +149,9 @@ if __name__ == "__main__":
                     "validation_data_split": args.validation_split,
                     # Model architecture
                     "embedder_type": autoencoder.__class__.__name__,
+                    "comment": args.logging_comment
                 },
-                name=f"{autoencoder.__class__.__name__}_h{args.latent_space}_e{args.n_epochs}_{args.sequence_type}_{args.features}",
+                name=f"{args.sequence_type}_{args.features}_{datetime.datetime.now().strftime('%m_%d_%H_%M')}",
                 tags=[args.sequence_type, autoencoder.__class__.__name__]
             )
     else:
@@ -199,7 +218,7 @@ if __name__ == "__main__":
     embeddings = torch.cat(all_embeddings, dim=0)
 
     ## reduce
-    reducer = UMAP()
+    reducer = UMAP(n_neighbors=15, n_components=2, metric="euclidean") # default parameters, just explicit 
     embeddings_2D = reducer.fit_transform(embeddings.detach().numpy())
 
 
@@ -216,15 +235,18 @@ if __name__ == "__main__":
         labels[name] = clusterer.fit_predict(embeddings_2D)
 
     ## VISUALIZE
-    fig, axs = plt.subplots(1, len(labels.values()), figsize=(6 * len(labels.values()), 6))
+    fig, axs = plt.subplots(1, len(labels.values()), figsize=(10 * len(labels.values()), 10))
 
     # Ensure axs is always a list
     if len(labels.values()) == 1:
         axs = [axs]
 
     for i, (name, predictions) in enumerate(labels.items()):
-        axs[i].scatter(embeddings_2D[:,0], embeddings_2D[:,1], s=2, cmap="tab10", c=predictions)
+        axs[i].scatter(embeddings_2D[:,0], embeddings_2D[:,1], s=2, cmap="tab20", c=predictions)
         axs[i].set_title(f"Deep Clustering with UMAP-{name} for LSTM", size=8)
+
+
+
 
     save_path = os.path.join(
             "trained_models",
@@ -233,7 +255,19 @@ if __name__ == "__main__":
             "f" + str(N_FEATURES),
             f"{autoencoder.__class__.__name__}_h{args.latent_space}_e{args.n_epochs}.png"
         )
+
     fig.savefig(fname=save_path)
+    if WANDB_AVAILABLE:
+        run.log({"latent_space_plot": fig})
+        run.finish()
+        # data = [[x, y, c] for (x, y, c) in zip(embeddings_2D[:,0], embeddings_2D[:,1], predictions)]
+
+        # table = wandb.Table(data=data, columns = ["Dim1", "Dim2", "labels"])
+
+        # run.log({"chart" : wandb.plot.scatter(table, "Dim1", "Dim2",
+        #                      title="Latent space plot")
+        # })
+
     print(f"saved embedding plot in {save_path}")
 
 

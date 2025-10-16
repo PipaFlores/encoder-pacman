@@ -234,7 +234,7 @@ class AE_Trainer():
         
         loss = self.model.loss if hasattr(self.model, "loss") and callable(self.model.loss) else lambda x_h, x: nn.MSELoss(reduction="sum")(x_h, x)
 
-        if self.validation_split:
+        if self.validation_split > 0:
             train_set, val_set = torch.utils.data.random_split(data, [1 - self.validation_split, self.validation_split])
             val_iter = torch.utils.data.DataLoader(val_set, batch_size=self.batch_size, shuffle=False)
         else:
@@ -273,7 +273,7 @@ class AE_Trainer():
                     torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
                 optimizer.step()
 
-            if self.validation_split:
+            if self.validation_split > 0:
                 self.model.eval()
                 val_loss_sum = 0 
 
@@ -297,7 +297,7 @@ class AE_Trainer():
             self.train_loss_list.append(epoch_train_loss)
             self.model.loss_history = self.train_loss_list
 
-            if self.validation_split:
+            if self.validation_split > 0:
                 epoch_val_loss = val_loss_sum / len(val_iter)
                 self.val_loss_list.append(epoch_val_loss)
                 self.model.val_loss_history = self.val_loss_list
@@ -309,7 +309,7 @@ class AE_Trainer():
                 os.makedirs(os.path.dirname(self.best_path), exist_ok=True)
                 os.makedirs(os.path.dirname(self.last_path), exist_ok=True)
                 
-                if self.validation_split:
+                if self.validation_split > 0:
                     if epoch_val_loss < best_loss:
                         best_loss = epoch_val_loss
                         torch.save(model.state_dict(), self.best_path)
@@ -321,18 +321,18 @@ class AE_Trainer():
                 torch.save(model.state_dict(), self.last_path)
 
             if self.verbose:
-                print(f"Epoch {epoch + 1}: Train loss={epoch_train_loss}, Val loss={epoch_val_loss if self.validation_split else ''}")
+                print(f"Epoch {epoch + 1}: Train loss={epoch_train_loss}, Val loss={epoch_val_loss if self.validation_split > 0 else ''}")
             if self.wandb_run and WANDB_AVAILABLE:
                 self.wandb_run.log(
                     {
                         "epoch": epoch + 1,
                         "train_loss" : epoch_train_loss,
-                        "val_loss": epoch_val_loss if self.validation_split else None,
+                        "val_loss": epoch_val_loss if self.validation_split > 0 else None,
                     }
                 )
         
-        if self.wandb_run and WANDB_AVAILABLE:
-            self.wandb_run.finish()
+        # if self.wandb_run and WANDB_AVAILABLE:
+        #     self.wandb_run.finish() ## run is always managed by external calls, so finish it there, after logging other important things (as plots)
 
     def plot_loss(self, save_path: str | None = None):
         import matplotlib.pyplot as plt
