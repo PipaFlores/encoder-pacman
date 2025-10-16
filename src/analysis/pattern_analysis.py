@@ -88,6 +88,7 @@ class PatternAnalysis:
             max_epochs: int = 500,
             latent_dimension: int = 256,
             validation_data_split: int = 0.3,
+            use_best: bool = True,
             sort_distances: bool = False,
             using_hpc: bool = False,
             random_seed: int | None = None,
@@ -114,6 +115,8 @@ class PatternAnalysis:
             max_epochs (int): Maximum number of epochs for training.
             latent_dimension (int): Latent dimension size for embeddings.
             validation_data_split (int): Fraction of data to use for validation.
+            use_best (bool): Whether to use best or last autoencoder model.
+            sort_distance (bool): If using Astar distances as features, sort them in ascending order.
             using_hpc (bool): Whether to use HPC for parallel computations.
             random_seed (int | None): Random seed for reproducibility.
             verbose (bool): If True, enables verbose logging.
@@ -144,6 +147,7 @@ class PatternAnalysis:
         self.max_epochs = max_epochs
         self.latent_dimension = latent_dimension
         self.validation_data_split = validation_data_split
+        self.use_best = use_best
         self.sort_distances = sort_distances
 
         if TORCH_AVAILABLE:
@@ -340,7 +344,7 @@ class PatternAnalysis:
         # Step 2a: load or train embedding model
         
         if self.embedder is not None:
-            is_model_trained_, model_path = self._check_model_training_status(return_path=True, test_dataset=test_dataset)
+            is_model_trained_, model_path = self._check_model_training_status(return_path=True, test_dataset=test_dataset, use_best=self.use_best)
 
             if is_model_trained_:
                 if force_training:
@@ -477,7 +481,7 @@ class PatternAnalysis:
 
     ### EMBEDDING
 
-    def _check_model_training_status(self, return_path=False, test_dataset = False) -> bool | tuple[bool, str]:
+    def _check_model_training_status(self, return_path=False, test_dataset = False, use_best: bool = True) -> bool | tuple[bool, str]:
         """
         Check if a trained model already exists for the current configuration.
         
@@ -493,9 +497,9 @@ class PatternAnalysis:
         )
         
         if self.using_torch:
-            model_path += "_best.pth"
+            model_path += "_best.pth" if use_best else "_last.pth"
         elif self.using_keras:
-            model_path += "_best.keras"
+            model_path += "_best.keras" if use_best else "_last.keras"
 
         if return_path:
             return os.path.exists(model_path) , model_path

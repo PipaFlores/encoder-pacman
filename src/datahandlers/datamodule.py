@@ -36,9 +36,9 @@ class PacmanDataset(Dataset):
             obs_mask (torch.Tensor): Tensor of shape (n_trajectories, sequence_length, features), 1 for finite values, 0 otherwise.
         """
         if isinstance(gamestates, torch.Tensor):
-            self.gamestates = gamestates
+            self.gamestates = gamestates.copy()
         else:
-            self.gamestates = torch.Tensor(gamestates)
+            self.gamestates = torch.Tensor(gamestates.copy())
 
         self.masks = (self.gamestates != padding_value).float()
         self.masks = self.masks.any(dim=-1).float()
