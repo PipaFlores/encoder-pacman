@@ -488,12 +488,12 @@ class ClusterVisualizer(BaseVisualizer):
         ## Add metadata arrays # TODO implement this
         if metadata is not None:
             for key in metadata:
-                data[str(key)] = metadata[key]
-            raise NotImplementedError
-
-        source = ColumnDataSource(
-            data=data
-        )
+                # Make sure the metadata array is the same length as traj_embeddings
+                if len(metadata[key]) == len(traj_embeddings):
+                    data[str(key)] = metadata[key]
+                else:
+                    raise ValueError(f"Metadata field '{key}' must be the same length as traj_embeddings")
+        source = ColumnDataSource(data=data)
 
         # TODO figure out what to do with this
         MEDIUM = {
@@ -507,6 +507,19 @@ class ClusterVisualizer(BaseVisualizer):
 
         SIZE = LARGE
 
+        # Define which metadata fields to show in the tooltip (in the black box overlay)
+        metadata_to_show = []
+        if metadata is not None:
+            metadata_to_show = list(metadata.keys())
+        
+        # Build HTML for metadata labels/values
+        if metadata_to_show:
+            metadata_html = "".join(
+                f'<div><span style="font-size: 10px;">{key}: @{key}</span></div>'
+                for key in metadata_to_show
+            )
+        else:
+            metadata_html = ""
 
         TOOLTIPS = f"""
             <div>
@@ -517,6 +530,10 @@ class ClusterVisualizer(BaseVisualizer):
                         border="2"
                     ></img>
                 </div>
+                <div>
+                    <span style="font-size: 9px; font-weight: bold;">Cluster: @cluster</span>
+                </div>
+                {metadata_html}
             </div>
         """
 
