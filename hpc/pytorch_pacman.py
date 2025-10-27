@@ -190,6 +190,9 @@ if __name__ == "__main__":
     trainer.fit(autoencoder, data_tensor)
     print(f"Model saved to {model_path}")
 
+
+
+
     trainer.plot_loss(
         os.path.join(  
             "trained_models",
@@ -258,7 +261,13 @@ if __name__ == "__main__":
 
     fig.savefig(fname=save_path)
     if WANDB_AVAILABLE:
-        run.log({"latent_space_plot": fig})
+        run.log({"latent_space_plot": fig})  
+        
+        artifact = wandb.Artifact('model', type='model')
+        artifact.add_file(os.path.join(model_path, f"AELSTM_h{args.latent_space}_e{args.n_epochs}_best.pth"))
+        artifact.add_file(os.path.join(model_path, f"AELSTM_h{args.latent_space}_e{args.n_epochs}_last.pth"))
+
+        run.log_artifact(artifact)
         run.finish()
         # data = [[x, y, c] for (x, y, c) in zip(embeddings_2D[:,0], embeddings_2D[:,1], predictions)]
 
