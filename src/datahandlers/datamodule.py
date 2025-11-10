@@ -65,6 +65,7 @@ class PacmanDataset(Dataset):
             inf_mask = torch.isinf(self.gamestates)
             for feat in range(self.gamestates.shape[-1]):
                 self.gamestates[..., feat][inf_mask[..., feat]] = max_per_feature[feat]
+                # self.gamestates[..., feat][inf_mask[..., feat]] = 1e6 ## Unstable
         
 
     def __len__(self):

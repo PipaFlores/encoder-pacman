@@ -13,15 +13,37 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 ### PYTORCH MODELS
 module load pytorch
+ 
+## ALL OPTIONS
+# FEATURE_SETS=("Pacman" "Pacman_Ghosts" "Ghost_Distances")
+# SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds" "pacman_attack")
 
+## SPECIFIC (COMMENT OUT ABOVE)
+# FEATURE_SETS=("Pacman" "Pacman_Ghosts")
+# FEATURE_SETS=("Pacman_Ghosts")
 FEATURE_SETS=("Ghost_Distances")
-# ("Pacman" "Pacman_Ghosts" "Ghost_Distances")
+
+# SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
 SEQUENCE_TYPES=("pacman_attack")
-#("first_5_seconds" "last_5_seconds")
+
+N_EPOCHS=500
+CONTEXT=20
+VALIDATION_SPLIT=0.3
+LOGGING_COMMENT="dropout 0.5 sorted distances"
+LATENT_SPACE=256
+DROPOUT=0.5
 
 for FEATURES in "${FEATURE_SETS[@]}"; do
     for SEQ_TYPE in "${SEQUENCE_TYPES[@]}"; do
-        srun python pytorch_pacman.py --sequence-type "$SEQ_TYPE" --n-epochs 500 --features "$FEATURES" --context 20
+        srun python pytorch_pacman.py \
+            --sequence-type "$SEQ_TYPE" \
+            --n-epochs "$N_EPOCHS" \
+            --features "$FEATURES" \
+            --latent-space "$LATENT_SPACE" \
+            --dropout "$DROPOUT" \
+            --context "$CONTEXT" \
+            --validation-split "$VALIDATION_SPLIT" \
+            --logging-comment "$LOGGING_COMMENT"
     done
 done
 
