@@ -18,11 +18,22 @@ MODELS=("DRNN" "ResNet" "DCNN")
 SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
 FEATURES_SETS=("Pacman" "Pacman_Ghosts")
 
+N_EPOCHS=500
+CONTEXT=20
+VALIDATION_SPLIT=0.3
+LOGGING_COMMENT="sorted distances"
+
 # Loop through models, sequence types, and feature sets
 for MODEL in "${MODELS[@]}"; do
     for SEQ_TYPE in "${SEQUENCE_TYPES[@]}"; do
         for FEATURES in "${FEATURES_SETS[@]}"; do
-            srun python keras_pacman.py --model "$MODEL" --sequence-type "$SEQ_TYPE" --n-epochs 500 --features "$FEATURES"
+            srun python keras_pacman.py --model "$MODEL" \
+            --sequence-type "$SEQ_TYPE" \
+            --n-epochs "$N_EPOCHS" \
+            --features "$FEATURES" \
+            --context "$CONTEXT" \
+            --validation-split "$VALIDATION_SPLIT" \
+            --logging-comment "$LOGGING_COMMENT"
         done
     done
 done

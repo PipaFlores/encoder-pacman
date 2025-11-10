@@ -22,8 +22,11 @@ class Encoder(nn.Module):
         self.seq_length = seq_length
 
         self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size, dropout=dropout, batch_first=True)
+        self.input_dropout = nn.Dropout(p=dropout)
 
     def forward(self, X: torch.Tensor):
+
+        X = self.input_dropout(X)
         out, (h, c) = self.lstm(X) # output hidden_state vector for each timestep, (last h, last c)
         x_encoding = h.squeeze(dim=0) #  [1, batch_size, hidden_size] -> [batch_size, hidden_size]
         ## Implementation from Matan Levi repeats the hidden vector to the seq_length here, but I will do it at the AE forward step.
@@ -65,7 +68,15 @@ class Decoder(nn.Module):
         return reconstruction
 
 class AELSTM(nn.Module):
-    def __init__(self, input_size, hidden_size, dropout= 0,last_act = None ,seq_length=None, forced_teacher = False):
+    def __init__(self, 
+                 input_size, 
+                 hidden_size, 
+                 dropout= 0.1,
+                 last_act = None ,
+                 seq_length=None, 
+                 forced_teacher = False,
+                 n_clusters = 6,
+                 clustering_weight = 0.1):
         """
         FIXME : Implement forced_teacher
         LSTM Autoencoder (AELSTM) module.
@@ -90,6 +101,11 @@ class AELSTM(nn.Module):
         self.seq_length = seq_length
 
         self.encoder = Encoder(input_size=input_size, hidden_size=hidden_size, dropout=dropout, seq_length=seq_length)
+
+        # Add clustering parameters
+        self.n_clusters = n_clusters
+        self.clustering_weight = clustering_weight
+        self.cluster_centroids = nn.Parameter(torch.randn(n_clusters, hidden_size))
 
         if forced_teacher:
             self.decoder = Decoder(input_size=input_size, 
@@ -133,39 +149,86 @@ class AELSTM(nn.Module):
              x_h: torch.Tensor,
              x: torch.Tensor, 
              mask: torch.Tensor | None = None,
-             obs_mask: torch.Tensor | None = None):
+             obs_mask: torch.Tensor | None = None,
+             include_clustering: bool = False):
         """
         Reconstruction MSE loss
         """
 
-        loss = nn.functional.mse_loss(x_h, x, reduction="none")
+        recon_loss = nn.functional.mse_loss(x_h, x, reduction="none")
 
         # Handle both obs_mask (element-wise) and mask (sequence length) correctly
         if obs_mask is not None:
-            loss = loss * obs_mask  # element-wise masking
+            recon_loss = recon_loss * obs_mask  # element-wise masking
 
         if mask is not None:
             mask = mask.unsqueeze(-1)  # [batch, seq_length] -> [batch, seq_length, 1]
             if obs_mask is not None:
                 # Combine both masks for denominator
                 combined_mask = (obs_mask * mask)
-                loss = (loss * mask).sum() / (combined_mask.sum() + 1e-8)
+                recon_loss = (recon_loss * mask).sum() / (combined_mask.sum() + 1e-8)
             else:
-                loss = (loss * mask).sum() / (mask.sum() + 1e-8)
+                recon_loss = (recon_loss * mask).sum() / (mask.sum() + 1e-8)
         else:
             if obs_mask is not None:
                 denominator = obs_mask.sum().clamp_min(1.0)
-                loss = loss.sum() / denominator
+                recon_loss = recon_loss.sum() / denominator
             else:
-                loss = loss.mean()
+                recon_loss = recon_loss.mean()
 
-        return loss
+        total_loss = recon_loss
+
+        if include_clustering:
+            encodings = self.encode(x)
+            # cluster_loss, _ = self.clustering_loss(encodings)
+            cluster_loss, _ = self.deep_clustering_loss(encodings)
+            total_loss = recon_loss + self.clustering_weight * cluster_loss
+
+        return total_loss
+    
+    def clustering_loss(self, encodings):
+        """
+        Compute K-means clustering loss
+        """
+        # Compute distances from each encoding to all cluster centroids
+        distances = torch.cdist(encodings, self.cluster_centroids, p=2)
+        
+        # Find closest cluster for each encoding
+        min_distances, cluster_assignments = torch.min(distances, dim=1)
+        
+        # Compute clustering loss (sum of squared distances to closest centroids)
+        clustering_loss = torch.mean(min_distances ** 2)
+        
+        return clustering_loss, cluster_assignments
+    
+    def deep_clustering_loss(self, encodings, alpha=1.0):
+        """
+        Deep clustering loss combining separation and compactness
+        """
+        
+        # Compute distances to cluster centroids
+        distances_to_centroids = torch.cdist(encodings, self.cluster_centroids, p=2)
+        min_distances, cluster_assignments = torch.min(distances_to_centroids, dim=1)
+        
+        # Compactness loss: minimize intra-cluster distances
+        compactness_loss = torch.mean(min_distances ** 2)
+        
+        # Separation loss: maximize inter-cluster distances
+        # Compute distances between cluster centroids
+        centroid_distances = torch.cdist(self.cluster_centroids, self.cluster_centroids, p=2)
+        # Remove diagonal (distance to self)
+        mask = torch.eye(self.n_clusters, device=centroid_distances.device).bool()
+        inter_centroid_distances = centroid_distances[~mask]
+        separation_loss = -torch.mean(inter_centroid_distances)
+        
+        return compactness_loss + alpha * separation_loss, cluster_assignments
 
 class AE_Trainer():
     def __init__(self, 
                  max_epochs= 50, 
                  batch_size= 32, 
                  validation_split: float | None = 0.3, 
+                 lr: float = 0.001,
                  gradient_clipping = None, 
                  verbose = True,
                  optim_algorithm: torch.optim.Optimizer | None = None,
@@ -201,6 +264,7 @@ class AE_Trainer():
         self.batch_size = batch_size
         self.validation_split = validation_split
         self.gradient_clipping = gradient_clipping
+        self.lr = lr
         self.verbose = verbose
         self.optim_algorithm = optim_algorithm
         self.save_model = save_model
@@ -227,12 +291,15 @@ class AE_Trainer():
             optimizer = (
                 self.model.configure_optimizer()
                 if hasattr(self.model, "configure_optimizer")
-                else torch.optim.Adam(self.model.parameters(), lr=0.001)
+                else torch.optim.Adam(self.model.parameters(), lr=self.lr)
             )
         else:
-            optimizer = self.optim_algorithm(params=self.model.parameters(), lr=0.001)
+            optimizer = self.optim_algorithm(params=self.model.parameters(), lr=self.lr)
         
-        loss = self.model.loss if hasattr(self.model, "loss") and callable(self.model.loss) else lambda x_h, x: nn.MSELoss(reduction="sum")(x_h, x)
+        if hasattr(self.model, "loss") and callable(self.model.loss):
+            loss = self.model.loss
+        else:
+            raise AttributeError("Model does not have a callable 'loss' attribute.")
 
         if self.validation_split > 0:
             train_set, val_set = torch.utils.data.random_split(data, [1 - self.validation_split, self.validation_split])
