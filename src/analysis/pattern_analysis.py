@@ -1192,17 +1192,29 @@ class PatternAnalysis:
     
     def plot_latent_space_overview(self, 
                                    plot_cluster_centroids = False,
+                                   custom_labels: np.ndarray | list[int] | None = None,
                                    validation_set: str | list | None = None,
                                    all_labels_in_legend: bool = False,
+                                   title_suffix : str = "",
                                    save_path:str = None):
         """
         Plot the trajectory embeddings (or geometrical centroids) colored by their cluster assignments.
         
-        This method visualizes the spatial distribution of trajectory centroids,
+        This method visualizes the spatial distribution of trajectory embeddings, or centroids,
         with each point colored according to its cluster membership.
 
-        If using embeddings, the centroids plot will only use the first two dimensions.
+        Args:
+            plot_cluster_centroids (bool): If True, plot geometrical centroids of the original trajectories.
+            custom_labels (np.ndarray | list[int] | None): Custom cluster/label assignments to use for coloring points.
+            validation_set (str | list | None): Validation set name or indices.  
+                                                If provided as str, use labels for that validation set.
+                                                If None, use main clustering results.
+            all_labels_in_legend (bool): If True, show all labels in the legend; otherwise, show only the first 8.
+            title_suffix (str): Optional string to append to the plot's title.
+            save_path (str): Path to save the plot. If None, the plot is not saved ## FIXME not implemented.
         """
+        if custom_labels is not None and validation_set is not None:
+            raise SyntaxError("Provided both custom_labels and validation_set. Only one of them can be used")
 
         if not plot_cluster_centroids:
 
@@ -1236,7 +1248,13 @@ class PatternAnalysis:
                     elif np.sum(labels) == 0:
                         labels = None
 
-                else:
+                elif custom_labels is not None:
+                    # Use custom labels
+                    assert len(custom_labels) == len(traj_embeddings)
+                    labels = np.array(custom_labels)
+                
+                else: 
+                    # Use clustering results
                     labels = self.labels
 
                 self.clustervisualizer.plot_trajectories_embedding(
@@ -1294,6 +1312,7 @@ class PatternAnalysis:
                 f"{self.embedder.__class__.__name__}_"
                 f"{self.reducer.__class__.__name__}_"
                 f"{self.clusterer.__class__.__name__}"
+                f"{title_suffix}"
             )
             fig.tight_layout()
 

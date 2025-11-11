@@ -273,7 +273,9 @@ class ClusterVisualizer(BaseVisualizer):
 
         Args:
             traj_embeddings (np.ndarray): Array of trajectory centroid coordinates or 2D embedding (n,2)
-            labels (np.ndarray): Labels of the trajectories
+            labels (np.ndarray): Labels of the trajectories.
+                For absence/presence labels, provide them as -1 (absence) and >=0 (presence). 
+                This sets them to have gray/red colours.
             ax (plt.Axes | None, optional): Matplotlib axes to plot on. If None, creates new figure.
                 Defaults to None.
             show_maze (bool, optional): Whether to set axis limits to maze boundaries.
@@ -286,7 +288,7 @@ class ClusterVisualizer(BaseVisualizer):
         else:
             show_plot = False
 
-        # Check if we have exactly 2 labels: -1 and one other
+        # Check if we have exactly 2 labels: -1 and one other (absence/presence)
         if labels is not None:
             non_noise_labels = np.unique(labels[labels >= 0])
             has_noise = -1 in labels
@@ -304,13 +306,30 @@ class ClusterVisualizer(BaseVisualizer):
 
         if use_red_for_single_cluster:
             # Create custom colors for the special case
-            colors = ['red' if label >= 0 else 'gray' for label in labels]
-            scatter = ax.scatter(
-                traj_embeddings[:, 0],
-                traj_embeddings[:, 1],
-                c=colors,
-                s=3,
-            )
+            # Plot gray points first, then red points on top
+            # This way the gray will not mask out the red ones (which are more relevant)
+            gray_mask = labels < 0
+            red_mask = labels >= 0
+            
+            # Plot gray points first (noise)
+            if np.any(gray_mask):
+                ax.scatter(
+                    traj_embeddings[gray_mask, 0],
+                    traj_embeddings[gray_mask, 1],
+                    c='gray',
+                    s=3,
+                )
+            
+            # Plot red points on top (cluster)
+            if np.any(red_mask):
+                scatter = ax.scatter(
+                    traj_embeddings[red_mask, 0],
+                    traj_embeddings[red_mask, 1],
+                    c='red',
+                    s=3,
+                )
+            else:
+                scatter = None
         else:
             scatter = ax.scatter(
                 traj_embeddings[:, 0],
