@@ -34,3 +34,5 @@ playground/*
 trained_models/
 
 hpc/videos/
+*.html
+*.gif

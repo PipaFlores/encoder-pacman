@@ -29,3 +29,4 @@ playground/
 hpc/trained_models/
 hpc/videos/
 hpc/affinity_matrices/
+hpc/wandb/

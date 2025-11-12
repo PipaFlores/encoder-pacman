@@ -1097,8 +1097,9 @@ class PatternAnalysis:
 
     def plot_interactive_overview(self, 
                                   plot_only_latent_space: bool = True,
-                                  metadata = None , # Not implemented
-                                  save_path: str = None,
+                                  validation_set: str | list | None = None,
+                                  plot_metadata: bool = True,
+                                  save_path: str | None = None,
                                   plot_notebook: bool = False):
         """
         Create an interactive visualization of the affinity matrix and trajectory embeddings.
@@ -1120,6 +1121,9 @@ class PatternAnalysis:
         """
         from bokeh.plotting import show, row, output_notebook, output_file
         
+        if plot_notebook:
+            output_notebook()
+            
 
         if save_path is not None:
             # If save_path is a filename without a directory, os.path.dirname(save_path) returns ''
@@ -1130,9 +1134,35 @@ class PatternAnalysis:
             if dir_name:
                 os.makedirs(dir_name, exist_ok=True)
             output_file(save_path)
+        else:
+            output_file("./bokeh_plot.html")
 
-        ## TODO: validation set as in plot_latent_space_overview()
-        # if validation_set -> labels = self.validation_labels[validation_set]
+
+        metadata = {}
+        if plot_metadata:
+            for key in self.trajectory_list[0].metadata.keys():
+                metadata[key] = np.array([traj.metadata[key] for traj in self.trajectory_list])
+
+        ## TODO change logic to input all available metadata and validation labels as a dictionary to the bokeh visualization.
+        if isinstance(validation_set, str):
+            # Get labels for the specified validation set
+            try:
+                labels = self.validation_labels[validation_set].to_numpy()
+            except KeyError:
+                raise KeyError(f"Could not find '{validation_set}'. "
+                    f"Possible validation sets are: {list(self.validation_labels.columns)}")
+            # If all values are None, set labels to None
+            if np.all(pd.isnull(labels)):
+                labels = None
+            elif np.sum(labels) == 0:
+                labels = None
+        
+        if isinstance(validation_set, list):
+
+            raise NotImplementedError
+
+        else:
+            labels = self.labels    
 
         if isinstance(self.clusterer, GeomClustering):
             # Plot trajectory centroids, as there are no embeddings.
@@ -1146,13 +1176,14 @@ class PatternAnalysis:
                 p2 = self.clustervisualizer.plot_augmented_trajectories_embedding_bokeh(
                     traj_embeddings=self.trajectory_centroids,
                     gif_path_list=self.gif_path_list,
-                    labels=self.labels,
+                    labels=labels,
                     metadata=metadata
                 )
             else:
                 p2 = self.clustervisualizer.plot_trajectories_embedding_bokeh(
                         traj_embeddings=self.trajectory_centroids,
-                        labels=self.labels
+                        labels=labels,
+                        metadata=metadata
                     )
             
         else:
@@ -1168,20 +1199,19 @@ class PatternAnalysis:
                 p2 = self.clustervisualizer.plot_augmented_trajectories_embedding_bokeh(
                     traj_embeddings=self.reduced_embeddings,
                     gif_path_list=self.gif_path_list,
-                    labels=self.labels,
+                    labels=labels,
                     metadata=metadata
                 )
             else:
                 p2 = self.clustervisualizer.plot_trajectories_embedding_bokeh(
                         traj_embeddings=self.reduced_embeddings,
-                        labels=self.labels
+                        labels=labels,
+                        metadata=metadata
                     )
             
             p2.xaxis.axis_label = "Reduced Dim. 1"
             p2.yaxis.axis_label = "Reduced Dim. 2"
 
-        if plot_notebook:
-            output_notebook()
             
         if plot_only_latent_space:
             show(p2)
@@ -1255,7 +1285,7 @@ class PatternAnalysis:
                 
                 else: 
                     # Use clustering results
-                    labels = self.labels
+                    labels = np.array(self.labels)
 
                 self.clustervisualizer.plot_trajectories_embedding(
                     traj_embeddings=traj_embeddings,
