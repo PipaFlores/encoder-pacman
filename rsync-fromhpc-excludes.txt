@@ -25,3 +25,4 @@ temp/
 playground/*
 slurm*
 *.py
+wandb/

@@ -11,7 +11,7 @@ from bokeh.models import (
     ColumnDataSource,
 )
 
-from bokeh.palettes import Viridis256
+from bokeh.palettes import Viridis256, Category20_20
 
 
 logger = setup_logger(__name__)
@@ -106,9 +106,6 @@ class ClusterVisualizer(BaseVisualizer):
         row_indices, col_indices = np.meshgrid(
             np.arange(shape[0]), np.arange(shape[1]), indexing="ij"
         )
-
-        ## TODO: include augmented hover tool, if self.augmented_visualization
-
 
         source = ColumnDataSource(
             data=dict(
@@ -331,12 +328,19 @@ class ClusterVisualizer(BaseVisualizer):
             else:
                 scatter = None
         else:
+            if labels is not None:
+                non_noise_labels = labels[labels >= 0]
+                vmax = max(non_noise_labels) if len(non_noise_labels) > 0 else 1
+            else:
+                vmax = 1
+
             scatter = ax.scatter(
                 traj_embeddings[:, 0],
                 traj_embeddings[:, 1],
                 c=labels,
                 cmap=cmap,
                 vmin=-0.5,
+                vmax=vmax,
                 s=3,
             )
 
@@ -346,14 +350,14 @@ class ClusterVisualizer(BaseVisualizer):
         import matplotlib.lines as mlines
         from matplotlib.colors import Normalize
 
-        # Get unique cluster labels (excluding noise if present)
+        # Get unique cluster labels
         if labels is not None:
-            if all_labels_in_legend:
-                unique_labels, unique_labels_size = np.unique(labels, return_counts=True)
-            else:
-                unique_labels, unique_labels_size = np.unique(labels, return_counts=True)
-                unique_labels = unique_labels[:8]
-                unique_labels_size = unique_labels_size[:8]
+            # if all_labels_in_legend:
+            unique_labels, unique_labels_size = np.unique(labels, return_counts=True)
+            # else:
+            #     unique_labels, unique_labels_size = np.unique(labels, return_counts=True)
+            #     unique_labels = unique_labels[:8]
+            #     unique_labels_size = unique_labels_size[:8]
         else:
             unique_labels = np.array([0])
             unique_labels_size = np.array([0])
@@ -367,7 +371,9 @@ class ClusterVisualizer(BaseVisualizer):
         has_noise = -1 in unique_labels
         use_red_for_single_cluster = has_noise and len(non_noise_labels) == 1
         
-        for i, label in enumerate(unique_labels):
+        handle_iterator = enumerate(unique_labels if all_labels_in_legend else unique_labels[:8])
+
+        for i, label in handle_iterator:
             if label == -1:
                 color = "gray"
             elif use_red_for_single_cluster:
@@ -435,49 +441,58 @@ class ClusterVisualizer(BaseVisualizer):
             y_axis_label="Y Coordinate",
         )
 
-        # Create color mapper for clusters
-        if labels is not None:
+        if labels is None:
+            scatter = p.scatter(
+            x="x",
+            y="y",
+            source=source,
+        )
+
+        else:
+            # Create color mapper for clusters
             unique_labels = np.sort(np.unique(labels))
             unique_labels_str = [str(label) for label in unique_labels]
             n_clusters = len(unique_labels)
 
-            # If we have noise points (-1), we need a special color for them
+            colors = []
             if -1 in unique_labels:
-                step = max(1, 256 // (n_clusters - 1))
-                colors = ["gray"] + list(Viridis256[::step][: n_clusters - 1])
+                # handle noise
+                step = max(1, 20 // (n_clusters - 1)) if (n_clusters - 1) > 0 else 1
+                base_colors = ["gray"] + list(Category20_20[::step][: min(n_clusters - 1, 20)])
+                # If we have excess clusters, assign black to all remaining (beyond 20)
+                if n_clusters > 21:  # -1 plus 20
+                    base_colors += ["black"] * (n_clusters - 21)
+                colors = base_colors
             else:
-                step = max(1, 256 // n_clusters)
-                colors = list(Viridis256[::step][:n_clusters])
+                step = max(1, 20 // n_clusters) if n_clusters > 0 else 1
+                base_colors = list(Category20_20[::step][: min(n_clusters, 20)])
+                if n_clusters > 20:
+                    base_colors += ["black"] * (n_clusters - 20)
+                colors = base_colors
 
             color_mapper = CategoricalColorMapper(factors=unique_labels_str, palette=colors)
 
+            # Add scatter plot with color mapping
             scatter = p.scatter(
                 x="x",
                 y="y",
+                source=source,
                 color={"field": "cluster", "transform": color_mapper},
                 legend_group="cluster",
-                source=source,
             )
+
             sorted_legend_items = sorted(p.legend.items, key=lambda x: int(x.label.value))
             p.legend.items = sorted_legend_items
-            # Add legend
             p.legend.title = "Clusters"
             p.legend.location = "top_right"
-        
-        else:
-            scatter = p.scatter(
-                x="x",
-                y="y",       
-                source=source,
-                )
-
+            p.legend.label_text_font_size = "8pt"
 
         return p
 
     def plot_augmented_trajectories_embedding_bokeh(self, 
                                           traj_embeddings: np.ndarray,
                                           gif_path_list: list[str],
-                                          labels: np.ndarray | None = None,
+                                          labels: np.ndarray | dict[str: np.ndarray] | None = None,
                                           title: str | None = "",
                                           metadata: dict[str, np.ndarray] | None = None):
         """
@@ -496,6 +511,11 @@ class ClusterVisualizer(BaseVisualizer):
             bokeh.plotting.figure: A Bokeh figure containing the interactive trajectory visualization
         """
 
+        # TODO finnish this, add slider for multiple label sets based on validation labels.
+        if isinstance(labels, dict):
+            for label_key in labels.keys():
+                labels[label_key] = [str(l) for l in labels[label_key]]
+
         labels_str = [str(l) for l in labels]
         
         data = dict(
@@ -504,7 +524,6 @@ class ClusterVisualizer(BaseVisualizer):
         cluster=labels_str,
         gif_path= gif_path_list,
     )
-        ## Add metadata arrays # TODO implement this
         if metadata is not None:
             for key in metadata:
                 # Make sure the metadata array is the same length as traj_embeddings
@@ -565,34 +584,51 @@ class ClusterVisualizer(BaseVisualizer):
             height= SIZE["fig_size"][1]
         )
 
-        # Create color mapper for clusters
-        unique_labels = np.sort(np.unique(labels))
-        unique_labels_str = [str(label) for label in unique_labels]
-        n_clusters = len(unique_labels)
-
-        # If we have noise points (-1), we need a special color for them
-        if -1 in unique_labels:
-            step = max(1, 256 // (n_clusters - 1)) if (n_clusters - 1) > 0 else 1
-            colors = ["gray"] + list(Viridis256[::step][: n_clusters - 1])
-        else:
-            step = max(1, 256 // n_clusters)
-            colors = list(Viridis256[::step][:n_clusters])
-
-        color_mapper = CategoricalColorMapper(factors=unique_labels_str, palette=colors)
-
-        # Add scatter plot with color mapping
-        scatter = p.scatter(
+        if labels is None:
+            scatter = p.scatter(
             x="x",
             y="y",
             source=source,
-            color={"field": "cluster", "transform": color_mapper},
-            legend_field="cluster",
         )
 
-        # Fix legend: Bokeh auto-creates legend items for legend_field
-        p.legend.title = "Clusters"
-        p.legend.location = "top_right"
-        p.legend.label_text_font_size = "8pt"
+        else:
+            # Create color mapper for clusters
+            unique_labels = np.sort(np.unique(labels))
+            unique_labels_str = [str(label) for label in unique_labels]
+            n_clusters = len(unique_labels)
+
+            colors = []
+            if -1 in unique_labels:
+                # handle noise
+                step = max(1, 20 // (n_clusters - 1)) if (n_clusters - 1) > 0 else 1
+                base_colors = ["gray"] + list(Category20_20[::step][: min(n_clusters - 1, 20)])
+                # If we have excess clusters, assign black to all remaining (beyond 20)
+                if n_clusters > 21:  # -1 plus 20
+                    base_colors += ["black"] * (n_clusters - 21)
+                colors = base_colors
+            else:
+                step = max(1, 20 // n_clusters) if n_clusters > 0 else 1
+                base_colors = list(Category20_20[::step][: min(n_clusters, 20)])
+                if n_clusters > 20:
+                    base_colors += ["black"] * (n_clusters - 20)
+                colors = base_colors
+
+            color_mapper = CategoricalColorMapper(factors=unique_labels_str, palette=colors)
+
+            # Add scatter plot with color mapping
+            scatter = p.scatter(
+                x="x",
+                y="y",
+                source=source,
+                color={"field": "cluster", "transform": color_mapper},
+                legend_group="cluster",
+            )
+
+            sorted_legend_items = sorted(p.legend.items, key=lambda x: int(x.label.value))
+            p.legend.items = sorted_legend_items
+            p.legend.title = "Clusters"
+            p.legend.location = "top_right"
+            p.legend.label_text_font_size = "8pt"
 
         return p
 
