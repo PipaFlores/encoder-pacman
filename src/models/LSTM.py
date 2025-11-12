@@ -418,3 +418,95 @@ class AE_Trainer():
         else:
             plt.show()
                 
+
+
+if __name__ == '__main__':
+    import numpy as np
+    import sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
+    from src.datahandlers import PacmanDataReader, PacmanDataset
+    
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    ### Parameters
+    ## of model
+    hidden_size=256
+    dropout=0.1
+
+    ## of trainer
+    max_epochs=5
+    batch_size=32
+    validation_split=0.3
+
+    ### PRE-PROCESSING DATA  -> slice-filter-padding-sort
+    print("Loading data (pacman_attack slices using ghost astar distances)")
+    reader = PacmanDataReader(data_folder="data/")
+    
+    raw_sequence_list, _ = reader.slice_attack_modes(
+            CONTEXT=20
+        )
+    
+    FEATURES=[
+        'Ghost1_distance',
+        'Ghost2_distance', 
+        'Ghost3_distance', 
+        'Ghost4_distance'
+        ]
+    
+    filtered_sequence_list = [sequence[FEATURES].to_numpy() for sequence in raw_sequence_list]
+    X_padded = reader.padding_sequences(sequence_list=filtered_sequence_list)[:500]
+
+    print("Sorting ghost distances")
+    ghost_distance_indices = []
+    for i, col in enumerate(FEATURES):
+        if col.startswith('Ghost') and col.endswith('_distance'):
+            ghost_distance_indices.append(i)
+    
+    if ghost_distance_indices:
+        # Sort only the ghost distance columns
+        for i in range(X_padded.shape[0]):  # For each sequence
+            for j in range(X_padded.shape[1]):  # For each time step
+                # Sort only the ghost distance values at this time step
+                ghost_values = X_padded[i, j, ghost_distance_indices]
+                sorted_ghost_values = np.sort(ghost_values)
+                X_padded[i, j, ghost_distance_indices] = sorted_ghost_values
+
+    print("Creating tensor and masks")
+
+    ## Data tensor -> This will create the loss masks
+    data_tensor = PacmanDataset(X_padded)
+    data_tensor[:]["data"].to(device)
+
+    print(f"loaded data tensor of shape {data_tensor.gamestates.shape}")
+
+    ### TRAIN MODEL
+    model_path = os.path.join(
+        "trained_models",
+        "pacman_attack",
+        "f" + str(len(FEATURES))
+    )
+
+    print("Initializing model")
+
+    autoencoder = AELSTM(input_size=data_tensor[0]["data"].shape[1], 
+                         hidden_size=hidden_size,
+                         dropout=dropout)
+    
+    if WANDB_AVAILABLE:
+        pass
+    
+    print("Initializing trainer")
+
+    trainer = AE_Trainer(max_epochs=max_epochs, 
+                        batch_size=32, 
+                        validation_split=validation_split,
+                        save_model=True,
+                        best_path=os.path.join(model_path, f"AELSTM_test_train_best.pth"),
+                        last_path=os.path.join(model_path, f"AELSTM_test_train_last.pth"),
+                        wandb_run=None) ## logger pass
+    
+    ## mkdirs boilerplate
+    print("Fitting model")
+
+    trainer.fit(autoencoder, data_tensor)
+    print(f"Model saved to {model_path}")
