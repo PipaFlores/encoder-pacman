@@ -53,6 +53,23 @@ class PacmanDataReader:
     BANNED_USERS = [42]
     BANNED_GAMES = [419]  ## Game with 600 second idle duration (bug)
 
+    FEATURE_SETS: dict[str, list[str]] = {
+    "Pacman": ["Pacman_X", "Pacman_Y"],
+    "Pacman_Ghosts": [
+        "Pacman_X", "Pacman_Y",
+        "Ghost1_X", "Ghost1_Y",
+        "Ghost2_X", "Ghost2_Y",
+        "Ghost3_X", "Ghost3_Y",
+        "Ghost4_X", "Ghost4_Y",
+    ],
+    "Ghost_Distances": [
+        "Ghost1_distance", "Ghost2_distance",
+        "Ghost3_distance", "Ghost4_distance",
+    ],
+    }
+
+
+
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super(PacmanDataReader, cls).__new__(cls)
@@ -62,9 +79,12 @@ class PacmanDataReader:
         self,
         data_folder: str,
         read_games_only: bool = True,
+        rebase_score_per_level: bool = True,
+        process_pellet: bool = True,
+        force_preprocess: bool = False,
         verbose: bool = False,
         debug: bool = False,
-        process_pellet: bool = True,
+
     ):
         # Initialize basic attributes if not already initialized
         if not hasattr(self, "initialized"):
@@ -72,12 +92,13 @@ class PacmanDataReader:
             self.verbose = verbose
             self.initialized = True
             self.read_games_only = read_games_only
+            self.rebase_score_per_level = rebase_score_per_level
             self.process_pellet = process_pellet
             logger.info(
                 f"Initializing PacmanDataReader with read_games_only: {read_games_only}"
             )
             self._init_logger(verbose, debug)
-            self._read_data(read_games_only)  # Initial load with BANNED_USERS = [42]
+            self._read_data(read_games_only, force_preprocess=force_preprocess)  # Initial load with BANNED_USERS = [42]
         # If already initialized but requesting more data, load it
         elif not self.read_games_only and read_games_only:
             logger.info(
@@ -86,7 +107,7 @@ class PacmanDataReader:
         elif self.read_games_only and not read_games_only:
             self._init_logger(verbose, debug)
             logger.info("Loading additional data as requested...")
-            self._read_data(read_games_only)
+            self._read_data(read_games_only, force_preprocess=force_preprocess)
             self.read_games_only = read_games_only
 
         elif not self.process_pellet and process_pellet:
@@ -196,6 +217,96 @@ class PacmanDataReader:
             # Process psych data
             self.game_flow_df = self._process_flow()
             self.bisbas_df = self._process_bisbas()
+
+    def make_data(
+        self,
+        feature_set: str = "Pacman",
+        sequence_type: str = "first_5_seconds",
+        context: int = 20,
+        padding_value: float = -999.0,
+        sort_ghost_distances: bool = True,
+        normalization: str | None = None,
+        make_gif: bool = False,
+        return_raw_sequences: bool = False
+    ):
+        """
+        Assemble processed game data sequences, returning normalized and padded feature arrays.
+
+        Args:
+            feature_set (str): Name of the feature set to extract columns from for analysis. Must match keys in self.FEATURE_SETS.
+            sequence_type (str): The method or rule for slicing sequences (e.g., 'first_5_seconds', 'start_to_first_death').
+            context (int): Number of timesteps to include before/after the main slicing window, for context.
+            padding_value (float): Value used to pad variable-length sequences to uniform length.
+            sort_ghost_distances (bool): Whether to sort all columns ending in '_distance' for ghosts in ascending order per timestep/sample.
+            normalization (str|None): Can be 'global', 'sequence', 'sample', or None. Specifies normalization strategy for features.
+            make_gif (bool): If True, generates GIFs (visualizations) for each sequence.
+            as_pytorch_dataset (bool): If True, returns a PyTorch-ready dataset (not implemented/used here).
+            return_raw_sequences (bool): If True, returns raw/from-info dataframes for each sliced sequence. Used in `patern_analysis` for validation
+
+        Returns:
+            If return_raw_sequences is True:
+                tuple: (raw_sequences, X_padded, gif_paths, features)
+                - raw_sequences: list[pd.DataFrame] of each sliced sequence.
+                - X_padded: np.ndarray, shape (n_sequences, sequence_length, n_features), normalized and padded data.
+                - gif_paths: list[str], paths to any generated GIFs (if make_gif is True).
+                - features: list[str], feature column names used for extraction.
+            Otherwise:
+                (Not used here; function expects return_raw_sequences and will return above tuple.)
+        """
+        
+        seq_type = sequence_type
+        try:
+            features = self.FEATURE_SETS[feature_set]
+        except KeyError as exc:
+            raise ValueError(f"Unknown features selection: {feature_set}") from exc
+        
+        ## Initialize Normalizer class
+
+        normalization = None if normalization == "None" else normalization
+        if normalization is not None:
+            from src.datahandlers import FeatureNormalizer
+            Normalizer = FeatureNormalizer()
+
+        ## Slice sequences according to type
+        raw_sequences, gif_paths = self._slice_by_sequence_type(seq_type, context, make_gif=make_gif)
+
+        ## If global normalization, then normalize before slicing
+        if normalization == "global": ## full dataset normalization
+            non_normalized_gamestate_df = self.gamestate_df.copy()
+            self.gamestate_df = Normalizer.normalize(self.gamestate_df) # normalize raw dataframe for slicing method
+            normalized_sequences, _ = self._slice_by_sequence_type(seq_type, context, make_gif=False)
+            self.gamestate_df = non_normalized_gamestate_df # return to original raw dataframe
+
+        # Local normalizations
+        elif normalization == "sequence": ## across sequence subset (e.g., across first 5 seconds)
+            df = Normalizer.normalize(pd.concat(raw_sequences))
+            normalized_sequences = [df.iloc[start:end] for start, end in zip(
+                np.cumsum([0] + [len(seq) for seq in raw_sequences[:-1]]),
+                np.cumsum([len(seq) for seq in raw_sequences])
+            )]
+        elif normalization == "sample": # Per sample
+            normalized_sequences = [Normalizer.normalize(seq) for seq in raw_sequences]
+        
+        elif normalization is None:
+            normalized_sequences = raw_sequences
+
+
+        filtered = [sequence[features].to_numpy() for sequence in normalized_sequences]
+        X_padded = self.padding_sequences(filtered, padding_value=padding_value)
+
+        if sort_ghost_distances:
+            ghost_idx = [
+                i for i, col in enumerate(features)
+                if col.startswith("Ghost") and col.endswith("_distance")
+            ]
+            if ghost_idx:
+                X_padded[..., ghost_idx] = np.sort(X_padded[..., ghost_idx], axis=-1)
+
+
+        if return_raw_sequences:
+            return raw_sequences, X_padded, gif_paths, features
+
+        return X_padded, gif_paths, features
     
     ### PRE-PROCESSING METHODS
     def _calculate_astar_distances(self):
@@ -874,7 +985,7 @@ class PacmanDataReader:
 ### Tensor pre-processing
     def padding_sequences(self,
                           sequence_list:list[np.ndarray], 
-                          padding_value = -999.0):
+                          padding_value = -999.0) -> np.ndarray:
 
         # Find the maximum sequence length
         max_seq_length = max(x.shape[0] for x in sequence_list)
@@ -889,7 +1000,6 @@ class PacmanDataReader:
 
         return padded_sequence_list
 
-
 ### SLICING METHODS. 
 # One method iterates all levels and returns slice type.
 # If interactive plotting, include gif_path
@@ -900,6 +1010,87 @@ class PacmanDataReader:
 #                                   metadata_list, 
 #                                   traj_list, 
 #                                   gif_path_list] // CORE-Optional
+
+    def _slice_by_sequence_type(
+        self,
+        sequence_type: str,
+        context: int = 20,
+        make_gif = False,
+        videos_directory= "../hpc/videos/",
+        gifs_directory = "./Results/subsequences/"
+    ) -> Tuple[list[pd.DataFrame], list[str]]:
+        """
+        Load and slice data based on the specified sequence type.
+
+        Parameters
+        ----------
+        sequence_type : str
+            Type of sequence to extract. Valid options include:
+                - "first_5_seconds"
+                - "whole_level"
+                - "last_5_seconds"
+                - "pacman_attack"
+                - "first_50_steps" (for debugging)
+        context : int, optional
+            Context window (in steps) for special slicing modes, such as "pacman_attack". Default is 20.
+        make_gif : bool, optional
+            Whether to generate GIFs for the sequences. Default is False.
+        videos_directory : str, optional
+            Directory containing input videos for GIF generation.
+        gifs_directory : str, optional
+            Directory to save generated GIFs.
+
+        Returns
+        -------
+        raw_sequence_list : pd.DataFrame
+            Extracted raw sequences for the selected sequence_type, containing all collected features.
+        gif_path_list: list[str]
+            If `make_gif = True`, returns a list of paths to each sequence's rendered .gif animation, for augmented visualization.
+        """
+
+        if sequence_type == "first_5_seconds":
+            raw_sequences, gif_paths = self.slice_seq_of_each_level(
+                start_step=0,
+                end_step=100,
+                make_gif=make_gif,
+                videos_directory=videos_directory,
+                gifs_directory=gifs_directory
+            )
+        elif sequence_type == "whole_level":
+            raw_sequences, gif_paths = self.slice_seq_of_each_level(
+                start_step=0,
+                end_step=-1,
+                make_gif=make_gif,
+                videos_directory=videos_directory,
+                gifs_directory=gifs_directory
+            )
+        elif sequence_type == "last_5_seconds":
+            raw_sequences, gif_paths = self.slice_seq_of_each_level(
+                start_step=-100,
+                end_step=-1,
+                make_gif=make_gif,
+                videos_directory=videos_directory,
+                gifs_directory=gifs_directory
+            )
+        elif sequence_type == "pacman_attack":
+            raw_sequences, gif_paths = self.slice_attack_modes(
+                CONTEXT=context,
+                make_gif=make_gif,
+                videos_directory=videos_directory,
+                gifs_directory=gifs_directory
+            )
+        elif sequence_type == "first_50_steps": # For fast debugging
+            raw_sequences, gif_paths = self.slice_seq_of_each_level(
+                start_step=0, 
+                end_step=50,
+                make_gif=make_gif,
+                videos_directory=videos_directory,
+                gifs_directory=gifs_directory
+            )
+        else:    
+            raise ValueError(f"Sequence type ({sequence_type}) not valid")
+        
+        return raw_sequences, gif_paths
 
     def slice_seq_of_each_level(
             self,
