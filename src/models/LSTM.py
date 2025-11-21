@@ -3,6 +3,7 @@ import torch.nn as nn
 import math
 import os
 from typing import Callable
+from .loss import MaskedMSELoss
 try:
     import wandb
     WANDB_AVAILABLE = True
@@ -145,83 +146,6 @@ class AELSTM(nn.Module):
         """
         return torch.optim.Adam(self.parameters(), lr= 0.001)
     
-    def loss(self, 
-             x_h: torch.Tensor,
-             x: torch.Tensor, 
-             mask: torch.Tensor | None = None,
-             obs_mask: torch.Tensor | None = None,
-             include_clustering: bool = False):
-        """
-        Reconstruction MSE loss
-        """
-
-        recon_loss = nn.functional.mse_loss(x_h, x, reduction="none")
-
-        # Handle both obs_mask (element-wise) and mask (sequence length) correctly
-        if obs_mask is not None:
-            recon_loss = recon_loss * obs_mask  # element-wise masking
-
-        if mask is not None:
-            mask = mask.unsqueeze(-1)  # [batch, seq_length] -> [batch, seq_length, 1]
-            if obs_mask is not None:
-                # Combine both masks for denominator
-                combined_mask = (obs_mask * mask)
-                recon_loss = (recon_loss * mask).sum() / (combined_mask.sum() + 1e-8)
-            else:
-                recon_loss = (recon_loss * mask).sum() / (mask.sum() + 1e-8)
-        else:
-            if obs_mask is not None:
-                denominator = obs_mask.sum().clamp_min(1.0)
-                recon_loss = recon_loss.sum() / denominator
-            else:
-                recon_loss = recon_loss.mean()
-
-        total_loss = recon_loss
-
-        if include_clustering:
-            encodings = self.encode(x)
-            # cluster_loss, _ = self.clustering_loss(encodings)
-            cluster_loss, _ = self.deep_clustering_loss(encodings)
-            total_loss = recon_loss + self.clustering_weight * cluster_loss
-
-        return total_loss
-    
-    def clustering_loss(self, encodings):
-        """
-        Compute K-means clustering loss
-        """
-        # Compute distances from each encoding to all cluster centroids
-        distances = torch.cdist(encodings, self.cluster_centroids, p=2)
-        
-        # Find closest cluster for each encoding
-        min_distances, cluster_assignments = torch.min(distances, dim=1)
-        
-        # Compute clustering loss (sum of squared distances to closest centroids)
-        clustering_loss = torch.mean(min_distances ** 2)
-        
-        return clustering_loss, cluster_assignments
-    
-    def deep_clustering_loss(self, encodings, alpha=1.0):
-        """
-        Deep clustering loss combining separation and compactness
-        """
-        
-        # Compute distances to cluster centroids
-        distances_to_centroids = torch.cdist(encodings, self.cluster_centroids, p=2)
-        min_distances, cluster_assignments = torch.min(distances_to_centroids, dim=1)
-        
-        # Compactness loss: minimize intra-cluster distances
-        compactness_loss = torch.mean(min_distances ** 2)
-        
-        # Separation loss: maximize inter-cluster distances
-        # Compute distances between cluster centroids
-        centroid_distances = torch.cdist(self.cluster_centroids, self.cluster_centroids, p=2)
-        # Remove diagonal (distance to self)
-        mask = torch.eye(self.n_clusters, device=centroid_distances.device).bool()
-        inter_centroid_distances = centroid_distances[~mask]
-        separation_loss = -torch.mean(inter_centroid_distances)
-        
-        return compactness_loss + alpha * separation_loss, cluster_assignments
 
 class AE_Trainer():
     def __init__(self, 
@@ -296,17 +220,15 @@ class AE_Trainer():
         else:
             optimizer = self.optim_algorithm(params=self.model.parameters(), lr=self.lr)
         
-        if hasattr(self.model, "loss") and callable(self.model.loss):
-            loss = self.model.loss
-        else:
-            raise AttributeError("Model does not have a callable 'loss' attribute.")
+
+        loss = MaskedMSELoss()
 
         if self.validation_split > 0:
             train_set, val_set = torch.utils.data.random_split(data, [1 - self.validation_split, self.validation_split])
-            val_iter = torch.utils.data.DataLoader(val_set, batch_size=self.batch_size, shuffle=False)
+            val_iter = torch.utils.data.DataLoader(val_set, batch_size=self.batch_size, shuffle=True)
         else:
             train_set = data
-        train_iter = torch.utils.data.DataLoader(train_set, batch_size=self.batch_size, shuffle=False)
+        train_iter = torch.utils.data.DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
 
         self.train_loss_list, self.val_loss_list = [], []
         best_loss = math.inf
@@ -320,9 +242,9 @@ class AE_Trainer():
                 x_h = self.model(x)
 
                 # masked loss for variable seq_lengths
-                mask = batch.get("mask", None)
-                if mask is not None: 
-                    mask = batch["mask"].to(self.device)
+                padding_mask = batch.get("padding_mask", None)
+                if padding_mask is not None: 
+                    padding_mask = batch["padding_mask"].to(self.device)
 
                 # Observation masked loss for missing elements
                 # e.g., astar distance = inf when ghosts in house 
@@ -331,7 +253,7 @@ class AE_Trainer():
                     obs_mask = batch["obs_mask"].to(self.device)
 
                 optimizer.zero_grad()
-                batch_loss = loss(x_h, x, mask, obs_mask)
+                batch_loss = loss.forward(x_h, x, padding_mask, obs_mask)
                 loss_sum += batch_loss.item()
                 
                 batch_loss.backward()
@@ -348,15 +270,15 @@ class AE_Trainer():
                     with torch.no_grad():
                         x = batch["data"].to(self.device)
                         x_h = self.model(x)
-                        mask = batch.get("mask", None)
-                        if mask is not None:
-                            mask = batch["mask"].to(self.device)
+                        padding_mask = batch.get("padding_mask", None)
+                        if padding_mask is not None:
+                            padding_mask = batch["padding_mask"].to(self.device)
 
                         obs_mask = batch.get("obs_mask", None) 
                         if obs_mask is not None:
                             obs_mask = batch["obs_mask"].to(self.device)
 
-                        batch_loss = loss(x_h, x, mask, obs_mask)
+                        batch_loss = loss.forward(x_h, x, padding_mask, obs_mask)
                         val_loss_sum += batch_loss.item()
 
 
@@ -379,13 +301,13 @@ class AE_Trainer():
                 if self.validation_split > 0:
                     if epoch_val_loss < best_loss:
                         best_loss = epoch_val_loss
-                        torch.save(model.state_dict(), self.best_path)
+                        torch.save(self.model.state_dict(), self.best_path)
                 else:
                     if epoch_train_loss < best_loss:
                         best_loss = epoch_train_loss
-                        torch.save(model.state_dict(), self.best_path)
+                        torch.save(self.model.state_dict(), self.best_path)
 
-                torch.save(model.state_dict(), self.last_path)
+                torch.save(self.model.state_dict(), self.last_path)
 
             if self.verbose:
                 print(f"Epoch {epoch + 1}: Train loss={epoch_train_loss}, Val loss={epoch_val_loss if self.validation_split > 0 else ''}")
