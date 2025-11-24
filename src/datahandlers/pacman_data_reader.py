@@ -202,6 +202,12 @@ class PacmanDataReader:
 
             self.gamestate_df.to_pickle(os.path.join(self.data_folder, "gamestate.pkl"))
 
+        if self.rebase_score_per_level:
+                # For each level_id, rebase the scores so that the first score in the level becomes zero.
+                # This guarantees that 'score' starts from 0 at every level, by subtracting the level's first score from each row in that level.
+                first_scores = self.gamestate_df.groupby("level_id")["score"].transform("first")
+                self.gamestate_df["score"] = self.gamestate_df["score"] - first_scores
+
         if not read_games_only:
             self.user_df = pd.read_csv(os.path.join(self.data_folder, "user.csv"))
             self.ip_df = pd.read_csv(os.path.join(self.data_folder, "userip.csv"))
@@ -227,7 +233,8 @@ class PacmanDataReader:
         sort_ghost_distances: bool = True,
         normalization: str | None = None,
         make_gif: bool = False,
-        return_raw_sequences: bool = False
+        return_raw_sequences: bool = False,
+        max_samples : int | None = None
     ):
         """
         Assemble processed game data sequences, returning normalized and padded feature arrays.
@@ -261,24 +268,27 @@ class PacmanDataReader:
             raise ValueError(f"Unknown features selection: {feature_set}") from exc
         
         ## Initialize Normalizer class
-
-        normalization = None if normalization == "None" else normalization
+        
+        if isinstance(normalization, str) and normalization.lower() == "none":
+            normalization = None
+            
         if normalization is not None:
             from src.datahandlers import FeatureNormalizer
             Normalizer = FeatureNormalizer()
 
-        ## Slice sequences according to type
+        # Slice sequences by type
         raw_sequences, gif_paths = self._slice_by_sequence_type(seq_type, context, make_gif=make_gif)
 
         ## If global normalization, then normalize before slicing
         if normalization == "global": ## full dataset normalization
             non_normalized_gamestate_df = self.gamestate_df.copy()
             self.gamestate_df = Normalizer.normalize(self.gamestate_df) # normalize raw dataframe for slicing method
-            normalized_sequences, _ = self._slice_by_sequence_type(seq_type, context, make_gif=False)
+            normalized_sequences, gif_paths = self._slice_by_sequence_type(seq_type, context, make_gif=make_gif)
             self.gamestate_df = non_normalized_gamestate_df # return to original raw dataframe
 
+
         # Local normalizations
-        elif normalization == "sequence": ## across sequence subset (e.g., across first 5 seconds)
+        if normalization == "sequence": ## across sequence subset (e.g., across first 5 seconds)
             df = Normalizer.normalize(pd.concat(raw_sequences))
             normalized_sequences = [df.iloc[start:end] for start, end in zip(
                 np.cumsum([0] + [len(seq) for seq in raw_sequences[:-1]]),
@@ -302,6 +312,12 @@ class PacmanDataReader:
             if ghost_idx:
                 X_padded[..., ghost_idx] = np.sort(X_padded[..., ghost_idx], axis=-1)
 
+
+        if max_samples:
+            raw_sequences = raw_sequences[:max_samples]
+            X_padded = X_padded[:max_samples]
+            gif_paths = gif_paths[:max_samples]
+            features = features[:max_samples]
 
         if return_raw_sequences:
             return raw_sequences, X_padded, gif_paths, features

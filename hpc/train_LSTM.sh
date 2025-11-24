@@ -18,13 +18,14 @@ module load pytorch
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds" "pacman_attack")
 
 ## SPECIFIC (COMMENT OUT ABOVE)
-# FEATURE_SETS=("Pacman" "Pacman_Ghosts")
-# FEATURE_SETS=("Pacman_Ghosts")
-FEATURE_SETS=("Ghost_Distances")
 
+FEATURE_SETS=("Pacman" "Pacman_Ghosts")
+# FEATURE_SETS=("Pacman_Ghosts")
+# FEATURE_SETS=("Ghost_Distances")
 
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
-SEQUENCE_TYPES=("pacman_attack")
+SEQUENCE_TYPES=("first_5_seconds")
+# SEQUENCE_TYPES=("pacman_attack")
 
 EMBEDDER="LSTM"
 CLUSTERER="hdbscan"
@@ -34,13 +35,15 @@ N_EPOCHS=500
 LATENT_SPACE=256
 BATCH_SIZE=32
 VALIDATION_SPLIT=0.3
+DROPOUT=0.1
 CONTEXT=20
-NORMALIZATION="global"
-LOGGING_COMMENT="shuffle=True change"
+NORMALIZATION="none"
+LOGGING_COMMENT="No normalization"
 EXTRA_FLAGS=(
     --using-hpc
     --verbose
 )
+
 
 for FEATURES in "${FEATURE_SETS[@]}"; do
     for SEQ_TYPE in "${SEQUENCE_TYPES[@]}"; do
@@ -59,6 +62,7 @@ for FEATURES in "${FEATURE_SETS[@]}"; do
             --latent-space "$LATENT_SPACE" \
             --batch-size "$BATCH_SIZE" \
             --validation-split "$VALIDATION_SPLIT" \
+            --dropout "$DROPOUT" \
             --context "$CONTEXT" \
             --normalization "$NORMALIZATION" \
             --logging-comment "$LOGGING_COMMENT" \
