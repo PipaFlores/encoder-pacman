@@ -127,8 +127,23 @@ class ImputationDataset(Dataset):
         """
 
         X = self.gamestates[ind]  # (seq_length, feat_dim) array
-        noise_mask = create_noise_mask(X, self.masking_ratio, self.mean_mask_length, self.mode, self.distribution,
-                          self.exclude_feats)  # (seq_length, feat_dim) boolean array
+        valid_steps = self.padding_mask[ind].bool()
+        valid_len = int(valid_steps.sum().item())
+
+        noise_mask = np.ones(X.shape, dtype=bool)
+        if valid_len > 0:
+            mask_core = create_noise_mask(
+                X = X[:valid_len].cpu().numpy(),
+                masking_ratio=self.masking_ratio,
+                lm=self.mean_mask_length,
+                mode=self.mode,
+                distribution=self.distribution,
+                exclude_feats=self.exclude_feats
+            )
+            noise_mask[:valid_len] = mask_core
+
+        # noise_mask = create_noise_mask(X, self.masking_ratio, self.mean_mask_length, self.mode, self.distribution,
+        #                   self.exclude_feats)  # (seq_length, feat_dim) boolean array
 
         return {
             "data": X,

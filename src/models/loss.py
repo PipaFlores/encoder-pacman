@@ -25,7 +25,8 @@ class MaskedMSELoss(nn.Module):
              x: torch.Tensor,
              padding_mask: torch.Tensor | None = None,
              obs_mask: torch.Tensor | None = None,
-             loss_mask: torch.Tensor | None = None): 
+             loss_mask: torch.Tensor | None = None,
+             reduce_to_mean: bool = True): 
         
         recon_loss = nn.functional.mse_loss(x_h, x, reduction="none")
 
@@ -49,19 +50,32 @@ class MaskedMSELoss(nn.Module):
             if obs_mask is not None:
                 combined_mask = combined_mask * obs_mask
             combined_mask = combined_mask * padding_mask
-            numerator = (recon_loss * padding_mask).sum()
-            denominator = combined_mask.sum().clamp_min(1.0)
-            recon_loss = numerator / (denominator + 1e-8)
-        else:
+
+            if reduce_to_mean:
+                numerator = (recon_loss * padding_mask).sum()
+                denominator = combined_mask.sum().clamp_min(1.0)
+                recon_loss = numerator / (denominator + 1e-8)
+            else:
+                # Reduce by sum (no mean): elementwise masked loss, sum over all valid (or keep as is)
+                recon_loss = (recon_loss * padding_mask)
+
             # No padding mask, just use combined valid-mask
+            # This is in the 'else' path for padding_mask is None
+        else:
             combined_mask = torch.ones_like(recon_loss)
             if loss_mask is not None:
                 combined_mask = combined_mask * loss_mask
             if obs_mask is not None:
                 combined_mask = combined_mask * obs_mask
-            numerator = recon_loss.sum()
-            denominator = combined_mask.sum().clamp_min(1.0)
-            recon_loss = numerator / (denominator + 1e-8)
+
+            if reduce_to_mean:
+                numerator = recon_loss.sum()
+                denominator = combined_mask.sum().clamp_min(1.0)
+                recon_loss = numerator / (denominator + 1e-8)
+            else:
+                # Reduce by sum (no mean): elementwise masked loss
+                # recon_loss stays un-reduced (optionally apply the combined mask)
+                recon_loss = recon_loss
 
         return recon_loss
     
