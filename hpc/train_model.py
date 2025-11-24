@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
         "--embedder",
         type=str,
         default="LSTM",
-        choices=["LSTM", "DRNN", "DCNN", "ResNet", "none"],
+        choices=["LSTM", "DRNN", "DCNN", "ResNet", "Transformer" ,"none"],
         help="Deep embedder to use. 'none' skips embedding (geom clustering only).",
     )
     parser.add_argument(
@@ -82,6 +82,7 @@ def parse_args() -> argparse.Namespace:
         default=500,
         help="Maximum number of epochs for embedding training.",
     )
+
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -93,6 +94,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.3,
         help="Fraction of data set aside for validation during training.",
+    )
+    parser.add_argument(
+        "--dropout",
+        type=float,
+        default=0.1,
+        help="Dropout probability for the autoencoder embedder (default: 0.1).",
     )
 
     # Reducer -------------------------------------------------------------------
@@ -313,6 +320,7 @@ def main():
         max_epochs=args.n_epochs,
         latent_dimension=args.latent_space,
         validation_data_split=args.validation_split,
+        dropout=args.dropout,
         sort_distances=args.sort_ghost_distances,
         using_hpc=args.using_hpc,
         random_seed=args.seed,

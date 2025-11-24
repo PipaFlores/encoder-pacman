@@ -313,7 +313,9 @@ class TSTransformerEncoder(nn.Module):
 
         self.feat_dim = feat_dim
 
-    def forward(self, X, padding_masks):
+    def forward(self, 
+                X: Tensor, 
+                padding_masks: Tensor):
         """
         Args:
             X: (batch_size, seq_length, feat_dim) torch tensor of masked features (input)
@@ -321,6 +323,8 @@ class TSTransformerEncoder(nn.Module):
         Returns:
             output: (batch_size, seq_length, feat_dim)
         """
+
+        
 
         latent_representation = self.encode(X, padding_masks, pooling=False)
         output = self.dropout1(latent_representation)
@@ -335,10 +339,14 @@ class TSTransformerEncoder(nn.Module):
                pooling = False):
         # permute because pytorch convention for transformers is [seq_length, batch_size, feat_dim]. padding_masks [batch_size, feat_dim]
         inp = X.permute(1, 0, 2)
+        
+        # project input vectors to d_model dimensional space. And scaling by d_model for expected variance
         inp = self.project_inp(inp) * math.sqrt(
-            self.d_model)  # [seq_length, batch_size, d_model] project input vectors to d_model dimensional space
+            self.d_model)  # [seq_length, batch_size, d_model] 
         inp = self.pos_enc(inp)  # add positional encoding
+
         # NOTE: logic for padding masks is reversed to comply with definition in MultiHeadAttention, TransformerEncoderLayer
+        padding_masks = padding_masks.bool()  # Ensures padding_masks is boolean type; required by transformer modules
         latent_representation = self.transformer_encoder(inp, src_key_padding_mask=~padding_masks)  # (seq_length, batch_size, d_model)
         latent_representation = self.act(latent_representation)  # the output transformer encoder/decoder embeddings don't include non-linearity
         latent_representation = latent_representation.permute(1, 0, 2)  # (batch_size, seq_length, d_model)
@@ -361,7 +369,7 @@ class Transformer_Trainer():
                  gradient_clipping = None,
                  seed: int | None = None, 
                  verbose = True,
-                 optim_algorithm: str = "Radam", # FIXME Radam
+                 optim_algorithm: str = "Radam",
                  save_model = False,
                  best_path = None,
                  last_path = None,

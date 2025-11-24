@@ -8,7 +8,7 @@ import time
 from src.utils import setup_logger
 
 ### Data Handling
-from src.datahandlers import PacmanDataReader, PacmanDataset, Trajectory
+from src.datahandlers import PacmanDataReader
 
 ### Embedding 
 ### trying lazy import first to avoid hpc environment issues. 
@@ -16,7 +16,8 @@ from src.datahandlers import PacmanDataReader, PacmanDataset, Trajectory
 try:
     import torch
     TORCH_AVAILABLE = True
-    from src.models import LSTM, AE_Trainer, AELSTM
+    from src.models import LSTM, AE_Trainer, AELSTM, TSTransformerEncoder, Transformer_Trainer
+    from src.datahandlers import PacmanDataset, ImputationDataset
 except ImportError:
     TORCH_AVAILABLE = False
 
@@ -24,7 +25,7 @@ try:
     import tensorflow # check backend
     import keras
     KERAS_AVAILABLE = True
-    from aeon.clustering.deep_learning import AEResNetClusterer, AEDRNNClusterer, AEDCNNClusterer, BaseDeepClusterer
+    from aeon.clustering.deep_learning import AEResNetClusterer, AEDRNNClusterer, AEDCNNClusterer
     from aeon.clustering import DummyClusterer
 except ImportError:
     KERAS_AVAILABLE = False
@@ -80,11 +81,13 @@ class PatternAnalysis:
             clusterer: HDBSCAN | KMeans | GeomClustering = None,
             similarity_measure: str = "euclidean",
             sequence_type: str = "first_5_seconds",
+            context: int = 20,
             validation_method: str | None = "Behavlets",
-            feature_set: str = "Pacman", # TODO switched this to align with wandb and hpc script. Check whether to rename folder organization
+            feature_set: str = "Pacman",
             augmented_visualization: bool = False,
             batch_size: int = 32,
-            normalize_data: bool = True,
+            normalization: str | None = None,
+            dropout: float = 0.1,
             max_epochs: int = 500,
             latent_dimension: int = 256,
             validation_data_split: int = 0.3,
@@ -92,7 +95,10 @@ class PatternAnalysis:
             sort_distances: bool = False,
             using_hpc: bool = False,
             random_seed: int | None = None,
-            verbose: bool = False
+            verbose: bool = False,
+            max_samples: int | None = False,
+            wandb_logging: bool = True,
+            wandb_logging_comment:str = ""
             ):
         """
         Initializes the PatternAnalysis pipeline with the specified configuration.
@@ -107,11 +113,13 @@ class PatternAnalysis:
             similarity_measure (str): Similarity metric for affinity matrix calculation (euclidean or cosine). Not the one
             used in clustering or reducing, define those in reducer, or clusterer instances.
             sequence_type (str): Type of sequence to analyze (e.g., "first_5_seconds").
+            context (int): Number of steps to be added as context for certain sequence_types
             validation (str): Validation method for clusters (e.g., "Behavlets").
             feature_set (str): Name of feature set to be used in analysis
             augmented_visualization (bool): Whether to use augmented visualization.
             batch_size (int): Batch size for neural network training.
-            normalize_data (bool): If True, normalizes data according to its type (`see PacmanDataReader.normalize_features()`)
+            normalization (str): Can be `global`, `sequence`, `sample`, or `none`.
+            dropout (float): Dropout for DNN training (Only for "LSTM" and "Transformer" models)
             max_epochs (int): Maximum number of epochs for training.
             latent_dimension (int): Latent dimension size for embeddings.
             validation_data_split (int): Fraction of data to use for validation.
@@ -119,7 +127,10 @@ class PatternAnalysis:
             sort_distance (bool): If using Astar distances as features, sort them in ascending order.
             using_hpc (bool): Whether to use HPC for parallel computations.
             random_seed (int | None): Random seed for reproducibility.
+            max_samples (int | None): Max number of samples to be used, for fast debugging purposes
             verbose (bool): If True, enables verbose logging.
+            wandb_logging
+            wandb_logging_comment
 
         Sets up the core components of the pipeline, including data reader, embedder, reducer, clusterer,
         and visualization tools. Handles configuration for both geometric and neural network-based clustering.
@@ -131,10 +142,12 @@ class PatternAnalysis:
         
         # Configuration
         self.sequence_type = sequence_type
+        self.context = context
         self.validation_method = validation_method ## What kind of method used to assess cluster validity
         self.augmented_visualization = augmented_visualization
         self.hpc_folder = hpc_folder ## for videos and trained models lookups (wherever videos/ affinity_matrices/ and trained_models/ are)
         self.using_hpc = using_hpc ## For parallel computing of affinity matrix
+        self.random_seed = random_seed
         if random_seed is not None: # For reproducibility
             if TORCH_AVAILABLE:
                 torch.manual_seed(random_seed)
@@ -143,12 +156,14 @@ class PatternAnalysis:
 
             # for deep neural networks
         self.batch_size = batch_size
-        self.normalize_data = normalize_data
+        self.normalization = normalization
+        self.dropout = dropout
         self.max_epochs = max_epochs
         self.latent_dimension = latent_dimension
         self.validation_data_split = validation_data_split
         self.use_best = use_best
         self.sort_distances = sort_distances
+        self.max_samples = max_samples
 
         if TORCH_AVAILABLE:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -159,22 +174,25 @@ class PatternAnalysis:
             
             self.feature_set = "Pacman"
             self.features_columns = ["Pacman_X", "Pacman_Y"] # Always these two features
+            self.normalization = "none"
             logger.info(f"features columns set to Pacman's X,Y coordinates for GeomClustering")
             self.embedder = None
+            self.embedder_type = None
             self.reducer = None
             self.clusterer = clusterer
             self.similarity_measure = clusterer.similarity_measures.measure_type
         else: # Neural-Network embedding -> Reducer -> clusterer
             self.feature_set = feature_set
             self.features_columns = self._get_feature_columns(feature_set)
-            self.embedder = self._initialize_deep_embedder(embedder) if embedder is not None else None
+            # Embedder initialized after make_data, as some models look for data's size/length
+            self.embedder_type = embedder
+            self.embedder = embedder
+            # self.embedder = self._initialize_deep_embedder(embedder) if embedder is not None else None
             self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="euclidean", random_state=random_seed)
             self.clusterer = clusterer if clusterer is not None else HDBSCAN(min_cluster_size=20, min_samples=None)
             self.similarity_measure = similarity_measure
 
 
-        
-        
         # Visualization components
         self.gamevisualizer = GameVisualizer(data_folder)
         self.clustervisualizer = ClusterVisualizer()
@@ -182,7 +200,7 @@ class PatternAnalysis:
         # Pipeline state
         self.raw_sequence_data = None
         self.filtered_sequence_data = None
-        self.padded_sequence_data = None
+        self.processed_sequence_data = None
         self.trajectory_list = None
         self.gif_path_list = None
         self.embeddings = None
@@ -193,11 +211,15 @@ class PatternAnalysis:
         self.validation_labels = None
         self.metadata = None
         self.results = {}
-        self.wandb_logging = False  # Active when training new model, logging latent_space plots and validation measures in wandb
+
+        # Logging
+        self.wandb_logging = wandb_logging 
+        self.wandb_logging_comment = wandb_logging_comment
+
 
     def _initialize_deep_embedder(self, embedder:str):
 
-        supported = ["LSTM", "DRNN", "DCNN", "ResNet"]
+        supported = ["LSTM", "Transformer","DRNN", "DCNN", "ResNet"]
         if embedder not in supported:
             raise ValueError(f"Embedder {embedder} is not one of the supported embedding deep networks ({supported})")
         
@@ -210,7 +232,25 @@ class PatternAnalysis:
             return AELSTM(
                 input_size= len(self.features_columns),
                 hidden_size=self.latent_dimension,
+                dropout=self.dropout
             ) # other params defined in trainer during fitting stage.
+        if embedder == "Transformer":
+            if not TORCH_AVAILABLE:
+                raise ModuleNotFoundError(f"Using LSTM requires torch in the environment")
+
+            self.using_torch = True
+            self.using_keras = False
+            return TSTransformerEncoder(
+                feat_dim= len(self.features_columns),
+                max_len= self.processed_sequence_data.shape[1], # max_sequence_length
+                d_model=self.latent_dimension,
+                dropout=self.dropout,
+                pos_encoding="fixed",
+                pooling_method="mean",
+                n_heads=8,
+                num_layers=3,
+                dim_feedforward=256
+            ) # TODO make this into input arguments
         
         if embedder == "DRNN":
             if not KERAS_AVAILABLE:
@@ -259,7 +299,9 @@ class PatternAnalysis:
 
     def fit(self,
             raw_sequences: list[pd.DataFrame] | None = None,
+            processed_sequences: np.ndarray[float] = None,
             gif_path_list: list[str] | None = None,
+            features_columns: list[str] | None = None,
             validation_encodings: pd.DataFrame | None = None,
             force_training: bool = False,
             test_dataset: bool = False,
@@ -268,7 +310,7 @@ class PatternAnalysis:
         Main fitting method that runs the complete pipeline.
 
         This method orchestrates the full analysis workflow, including:
-            1. Loading and preparing the data (unless a data package is provided).
+            1. Loading and preparing the data (unless `reader.make_data()` is pre-computed and provided as input).
             2. Loading or training the embedding model, if an embedder is specified.
             3. Generating embeddings for the input data (unless using geometric clustering).
             4. Reducing the dimensionality of embeddings if necessary.
@@ -276,10 +318,20 @@ class PatternAnalysis:
 
         Args:
             raw_sequences (list[pd.DataFrame], optional): 
-                List of game state sequences (as DataFrames), to use as input data. 
-                If None, data will be loaded using the internal data reader according to 'self.sequence_type'.
+                List of game state sequences (as DataFrames), typically representing sequences of Pacman game states. 
+                If None, these will be loaded automatically from disk using the internal data reader according to 'self.sequence_type'.
+            processed_sequences (np.ndarray, optional): 
+                Numpy array of sequences, typically shape (n_sequences, sequence_length, n_features), where each sequence contains the extracted feature vectors. 
+                Together with raw_sequences, this is an output of the reader.make_data() method. 
+                If None, will be computed from raw_sequences.
             gif_path_list (list[str], optional):
-                If using augmented visualization, list of GIF file paths corresponding to each sequence.
+                List of file paths to GIF visualizations corresponding to each input sequence, 
+                if augmented visualization is enabled. This is the third output of reader.make_data().
+                If None, will be computed as needed.
+            feature_columns (list[str], optional): 
+                List of feature column names used in the processed data. 
+                Should match the features used to generate processed_sequences. 
+                This is the fourth output of reader.make_data().
             validation_encodings (pd.DataFrame, optional):
                 Precomputed validation encodings for the raw_sequences (e.g., Behavlet features).
             force_training (bool, optional):
@@ -301,72 +353,59 @@ class PatternAnalysis:
         if test_dataset == False:
             
             if raw_sequences is None:
-                self.raw_sequence_data, self.gif_path_list = self.load_and_slice_data(
-                    sequence_type=self.sequence_type, make_gif=self.augmented_visualization)
+                self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns = self.reader.make_data(
+                    feature_set=self.feature_set,
+                    sequence_type=self.sequence_type,
+                    context=self.context,
+                    sort_ghost_distances=self.sort_distances,
+                    normalization=self.normalization,
+                    make_gif=self.augmented_visualization,
+                    return_raw_sequences=True,
+                    max_samples=self.max_samples
+                )
+                logger.info(f"Loaded {len(self.raw_sequence_data)} sequences")
             else:
                 self.raw_sequence_data = raw_sequences
+                self.processed_sequence_data = processed_sequences
+                self.features_columns = features_columns
                 self.gif_path_list = gif_path_list
                 logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences")
 
-
-            self.filtered_sequence_data = [sequence[self.features_columns].to_numpy() for sequence in self.raw_sequence_data]
-            #TODO add normalization step here (?)
-            if self.normalize_data:
-                pass
-
-
             logger.info(f"Using {len(self.features_columns)} features: {self.features_columns}")
-            self.padded_sequence_data = self.reader.padding_sequences(self.filtered_sequence_data)
-            
-            if self.sort_distances:
-                # Find indices of ghost distance columns
-                ghost_distance_indices = []
-                for i, col in enumerate(self.features_columns):
-                    if col.startswith('Ghost') and col.endswith('_distance'):
-                        ghost_distance_indices.append(i)
                 
-                if ghost_distance_indices:
-                    # Sort only the ghost distance columns
-                    for i in range(self.padded_sequence_data.shape[0]):  # For each sequence
-                        for j in range(self.padded_sequence_data.shape[1]):  # For each time step
-                            # Sort only the ghost distance values at this time step
-                            ghost_values = self.padded_sequence_data[i, j, ghost_distance_indices]
-                            sorted_ghost_values = np.sort(ghost_values)
-                            self.padded_sequence_data[i, j, ghost_distance_indices] = sorted_ghost_values
-                
-
-
             self.trajectory_list = [self.reader.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in self.raw_sequence_data]
 
         else:
             self._load_train_dataset()
 
-        # Step 2a: load or train embedding model
+        # Step 2a: load or train embedding model. GeomClustering skips this step
         
         if self.embedder is not None:
-            is_model_trained_, model_path = self._check_model_training_status(return_path=True, test_dataset=test_dataset, use_best=self.use_best)
+            self.embedder = self._initialize_deep_embedder(embedder = self.embedder_type)
+            is_model_trained_, self.model_path = self._check_model_training_status(return_path=True, test_dataset=test_dataset, use_best=self.use_best)
 
             if is_model_trained_:
                 if force_training:
-                    logger.info(f"Force_training = {force_training}, training new model and replacing at {model_path}")
+                    logger.info(f"Force_training = {force_training}, training new model and replacing at {self.model_path}")
                     self._train_model(
-                        padded_sequence_data=self.padded_sequence_data,
+                        padded_sequence_data=self.processed_sequence_data,
                         test_dataset=test_dataset)
-                    logger.info(f"Model trained and saved at {model_path}")
+                    logger.info(f"Model trained and saved at {self.model_path}")
                 else:
-                    logger.info(f"Found trained model at {model_path}, loading...")
-                    self._load_model(model_path)
+                    logger.info(f"Found trained model at {self.model_path}, loading...")
+                    self.wandb_logging = False
+                    self._load_model(self.model_path)
             else:
-                logger.warning(f"No trained model found at {model_path}, training...")
+                logger.warning(f"No trained model found at {self.model_path}, training...")
                 self._train_model(
-                    padded_sequence_data=self.padded_sequence_data,
+                    padded_sequence_data=self.processed_sequence_data,
                     test_dataset=test_dataset)
-                logger.info(f"Model trained and saved at {model_path}")
+                logger.info(f"Model trained and saved at {self.model_path}")
 
         # Step 2b: Generate embeddings 
         # (If not conducting geometric clustering, which instead uses trajectory similarity measures)
         if not isinstance(self.clusterer, GeomClustering):
-            self.embeddings = self.embed(self.padded_sequence_data)
+            self.embeddings = self.embed(self.processed_sequence_data)
             
             # Step 2c: Reduce dimensions if embeddings are high-dimensional
             if self.embeddings.shape[1] > 2:
@@ -419,65 +458,6 @@ class PatternAnalysis:
         
         logger.info("Pipeline completed successfully!")
         return self
-
-    ### DATA SLICING
-    def load_and_slice_data(self, 
-                           sequence_type:str = "first_5_seconds",
-                           make_gif: bool = False
-                           ) -> tuple[list[pd.DataFrame] ,list[np.ndarray], np.ndarray, list[Trajectory]] | tuple[pd.DataFrame ,list[np.ndarray], np.ndarray, list[Trajectory], list[str]]:
-        """
-        Load and slice data based on the specified sequence type.
-
-        Parameters
-        ----------
-        sequence_type : str
-            Type of sequence to extract. Options are:
-                - "first_5_seconds"
-                - "whole_level"
-                - "last_5_seconds"
-                - "first_50_steps" (for debugging)
-        make_gif : bool, optional
-            Whether to generate GIFs for the sequences.
-
-        Returns
-        -------
-        raw_sequence_list : pd.DataFrame
-            Extracted raw sequences for the selected sequence_type, containing all collected features.
-        gif_path_list: list[str]
-            If `make_gif = True`, returns a list of paths to each sequence's rendered .gif animation, for augmented visualization.
-        """
-        logger.info(f"Loading and slicing data for {self.sequence_type}...")
-        
-        # Determine slicing parameters based on sequence type
-        if sequence_type == "first_5_seconds":
-            raw_sequence_list, gif_paths = self.reader.slice_seq_of_each_level(
-                start_step=0, end_step=100, make_gif=make_gif
-            )
-        elif sequence_type == "whole_level":
-            raw_sequence_list, gif_paths = self.reader.slice_seq_of_each_level(
-                start_step=0, end_step=-1, make_gif=make_gif
-            )
-        elif sequence_type == "last_5_seconds":
-            raw_sequence_list, gif_paths = self.reader.slice_seq_of_each_level(
-                start_step=-100, end_step=-1, make_gif=make_gif
-            )
-        elif sequence_type == "first_50_steps": # For GeomClustering debugging
-            raw_sequence_list, gif_paths = self.reader.slice_seq_of_each_level(
-                start_step=0, end_step=50, make_gif=make_gif
-            )
-        elif sequence_type == "pacman_attack":
-            raw_sequence_list, gif_paths = self.reader.slice_attack_modes(
-                CONTEXT=20, make_gif=make_gif
-            )
-
-        else:
-            raise ValueError(f"Sequence type ({sequence_type}) not valid")
-        
-
-        logger.info(f"Data loaded: {len(raw_sequence_list)} sequences")
-
-        return raw_sequence_list, gif_paths
-        
 
     ### EMBEDDING
 
@@ -553,7 +533,7 @@ class PatternAnalysis:
             "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
         )
 
-        if WANDB_AVAILABLE:
+        if WANDB_AVAILABLE and self.wandb_logging:
             import datetime
             wandb_config = self._get_wandb_config()
             self.wandbrun = wandb.init(
@@ -562,29 +542,45 @@ class PatternAnalysis:
                 name=f"{self.sequence_type}_{self.feature_set}_{datetime.datetime.now().strftime('%m_%d_%H_%M')}",
                 tags=[self.sequence_type, self.embedder.__class__.__name__]
             )
-            self.wandb_logging = True
         else:
             self.wandbrun = None
     
         if self.using_torch:
-            trainer = AE_Trainer(
-                max_epochs= self.max_epochs,
-                batch_size=self.batch_size,
-                validation_split=self.validation_data_split,
-                verbose=self.verbose,
-                save_model=True,
-                best_path=model_path + "_best.pth",
-                last_path=model_path + "_last.pth",
-                wandb_run=self.wandbrun
-                )
-            data_tensor = PacmanDataset(gamestates = padded_sequence_data)
-            trainer.fit(model= self.embedder, data=data_tensor)
-            trainer.plot_loss(
-                save_path=os.path.join(
-                    loss_plot_dir,
-                    "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
-                )
-            )
+            if isinstance(self.embedder, AELSTM):
+                trainer = AE_Trainer(
+                    max_epochs= self.max_epochs,
+                    batch_size=self.batch_size,
+                    validation_split=self.validation_data_split,
+                    verbose=self.verbose,
+                    save_model=True,
+                    best_path=model_path + "_best.pth",
+                    last_path=model_path + "_last.pth",
+                    wandb_run=self.wandbrun
+                    )
+                data_tensor = PacmanDataset(gamestates = padded_sequence_data)
+                trainer.fit(model= self.embedder, data=data_tensor)
+
+            elif isinstance(self.embedder, TSTransformerEncoder):
+                trainer = Transformer_Trainer(
+                    max_epochs= self.max_epochs, 
+                    batch_size= self.batch_size, 
+                    validation_split= self.validation_data_split, 
+                    use_imputation = True,
+                    lr = 0.001,
+                    global_regularization = False, # default to false
+                    l2_reg = 0, ## default to 0
+                    gradient_clipping = None,
+                    seed = self.random_seed, 
+                    verbose = self.verbose,
+                    optim_algorithm = "Radam",
+                    save_model = True,
+                    best_path=model_path + "_best.pth",
+                    last_path=model_path + "_last.pth",
+                    wandb_run = self.wandbrun
+                    )
+                
+                data_class = ImputationDataset(gamestates=padded_sequence_data)
+                trainer.fit(self.embedder, data_class)
             
         elif self.using_keras:
             self.embedder.save_best_model = True
@@ -642,18 +638,24 @@ class PatternAnalysis:
         all_embeddings = []
         
         if self.using_torch:
+            from torch.utils.data import DataLoader
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            data_tensor = PacmanDataset(gamestates=padded_data)
+            data_tensor = PacmanDataset(gamestates=padded_data) if isinstance(self.embedder, AELSTM) else ImputationDataset(gamestates=padded_data)
+            data_loader = DataLoader(data_tensor, batch_size=self.batch_size, shuffle=False)
+
             self.embedder.to(device).eval()
             with torch.no_grad():
-                for i in range(0, len(data_tensor), self.batch_size):
-                    batch_data = data_tensor[i:i+self.batch_size]["data"].to(device)
+                for batch in data_loader:
+                    batch_data = batch["data"].to(device)
                     
-                    if hasattr(self.embedder, 'encode'):
+                    if isinstance(self.embedder, AELSTM):
                         # For AELSTM and similar torch models
                         batch_embeddings = self.embedder.encode(batch_data)
+                    elif isinstance(self.embedder, TSTransformerEncoder):
+                        batch_padding_masks = batch["padding_mask"].to(device)
+                        batch_embeddings = self.embedder.encode(batch_data, batch_padding_masks, pooling=True)
                     else:
-                        raise AttributeError("Torch module has no .encode() method to produce embeddings.")
+                        TypeError(f"Unknown pytorch model ({self.embedder})")
                     
                     all_embeddings.append(batch_embeddings.cpu())
 
@@ -662,25 +664,31 @@ class PatternAnalysis:
 
             if check_recon_error:
                 # Get a random sample of 10% of the data_tensor and calculate the reconstruction error of self.embedder(x)
+                from src.models.loss import MaskedMSELoss
+
+                loss = MaskedMSELoss()
                 n_samples = len(data_tensor)
                 sample_size = max(1, int(0.1 * n_samples))
                 sample_indices = np.random.choice(n_samples, size=sample_size, replace=False)
-                sample_batch = data_tensor[sample_indices]["data"].to(device)   
-                mask = data_tensor[sample_indices]["mask"].to(device)   
-                obs_mask = data_tensor[sample_indices]["obs_mask"].to(device)   
+                # Accessing indeces one at a time to avoid the issues of ImputationDataset.__getitem__() dynamic masking
+                sample_batch = torch.stack([data_tensor[i]["data"] for i in sample_indices]).to(device)
+                padding_mask = torch.stack([data_tensor[i]["padding_mask"] for i in sample_indices]).to(device)
+                obs_mask = torch.stack([data_tensor[i]["obs_mask"] for i in sample_indices]).to(device)
 
-                if hasattr(self.embedder, 'forward'):
-                    # Forward pass to get reconstruction
-                    with torch.no_grad():
+
+                # Forward pass to get reconstruction
+                with torch.no_grad():
+                    if isinstance(self.embedder, AELSTM):
                         recon = self.embedder(sample_batch)
-                    # Compute reconstruction error (MSE per sample)
-                    recon_error = self.embedder.loss(x_h=recon , x=sample_batch,mask=mask, obs_mask=obs_mask)
-                    logger.info(f"Mean reconstruction error on 10% sample: {recon_error:.2f}")
-                else:
-                    logger.warning("Pytorch embedder does not have a forward method for reconstruction error calculation.")
+                    elif isinstance(self.embedder, TSTransformerEncoder):
+                        recon = self.embedder(sample_batch, padding_mask)
+                # Compute reconstruction error (MSE per sample)
+                recon_error = loss.forward(x_h=recon , x=sample_batch, padding_mask=padding_mask, obs_mask=obs_mask)
+                logger.info(f"Mean reconstruction error on 10% sample: {recon_error:.6f}")
+
             
 
-        if isinstance(self.embedder, BaseDeepClusterer): 
+        if self.using_keras: 
 
             embeddings = self.embedder.model_.layers[1].predict(padded_data)
 
@@ -1610,7 +1618,7 @@ class PatternAnalysis:
         return feature_columns
 
 
-    def _load_train_dataset(self):
+    def _load_train_dataset(self, max_samples:int = None):
 
         from aeon.datasets import load_classification
         logger.info("Loading PenDigits test dataset (10k samples)")
@@ -1618,9 +1626,8 @@ class PatternAnalysis:
         self.sequence_type = "PenDigits10k"
         self.filtered_sequence_data, self.validation_labels = load_classification("PenDigits")
         self.filtered_sequence_data = self.filtered_sequence_data.transpose(0,2,1) # [N, seq_length, features]
-        self.padded_sequence_data = self.filtered_sequence_data # to accomodate the pipeline
-        if not isinstance(self.clusterer, GeomClustering):
-            self.embedder = self._initialize_deep_embedder(embedder="LSTM") # reinitialize to new input size
+        self.processed_sequence_data = self.filtered_sequence_data # to accomodate the pipeline
+        # FIXME add normalization for Transformer
     
     def _get_wandb_config(self):
 
@@ -1630,14 +1637,18 @@ class PatternAnalysis:
             "n_features": len(self.features_columns),
             "features_columns": self.features_columns,
             "feature_set": self.feature_set,
+            "normalization_type": self.normalization,
             
             # Training hyperparameters
             "max_epochs": self.max_epochs,
             "batch_size": self.batch_size,
+            "dropout": self.dropout,
             "latent_dimension": self.latent_dimension,
             "validation_data_split": self.validation_data_split,
             # Model architecture
             "embedder_type": self.embedder.__class__.__name__,
+
+            "comment": self.wandb_logging_comment
         }
 
         return wandb_config
