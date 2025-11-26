@@ -54,7 +54,9 @@ class PacmanDataReader:
     BANNED_GAMES = [419]  ## Game with 600 second idle duration (bug)
 
     FEATURE_SETS: dict[str, list[str]] = {
-    "Pacman": ["Pacman_X", "Pacman_Y"],
+    "Pacman": [
+        "Pacman_X", "Pacman_Y"],
+
     "Pacman_Ghosts": [
         "Pacman_X", "Pacman_Y",
         "Ghost1_X", "Ghost1_Y",
@@ -62,10 +64,23 @@ class PacmanDataReader:
         "Ghost3_X", "Ghost3_Y",
         "Ghost4_X", "Ghost4_Y",
     ],
+
     "Ghost_Distances": [
         "Ghost1_distance", "Ghost2_distance",
         "Ghost3_distance", "Ghost4_distance",
     ],
+
+    "Experimental": [
+        "Ghost1_distance", "Ghost2_distance",
+        "Ghost3_distance", "Ghost4_distance",
+        "score", "lives"
+    ],
+    
+    "Experimental2": [
+        "Ghost1_distance", "Ghost2_distance",
+        "Ghost3_distance", "Ghost4_distance",
+        "score"
+    ]
     }
 
 
@@ -229,6 +244,7 @@ class PacmanDataReader:
         feature_set: str = "Pacman",
         sequence_type: str = "first_5_seconds",
         context: int = 20,
+        rebase_scores: float = "True",
         padding_value: float = -999.0,
         sort_ghost_distances: bool = True,
         normalization: str | None = None,
@@ -244,11 +260,12 @@ class PacmanDataReader:
             sequence_type (str): The method or rule for slicing sequences (e.g., 'first_5_seconds', 'start_to_first_death').
             context (int): Number of timesteps to include before/after the main slicing window, for context.
             padding_value (float): Value used to pad variable-length sequences to uniform length.
+            rebase_score (bool): Whether to rebase the score on each sequence so in every one it starts from 0.
             sort_ghost_distances (bool): Whether to sort all columns ending in '_distance' for ghosts in ascending order per timestep/sample.
             normalization (str|None): Can be 'global', 'sequence', 'sample', or None. Specifies normalization strategy for features.
             make_gif (bool): If True, generates GIFs (visualizations) for each sequence.
-            as_pytorch_dataset (bool): If True, returns a PyTorch-ready dataset (not implemented/used here).
             return_raw_sequences (bool): If True, returns raw/from-info dataframes for each sliced sequence. Used in `patern_analysis` for validation
+            max_samples (int): Max number of samples to be returnes. For fast debugging purposes
 
         Returns:
             If return_raw_sequences is True:
@@ -277,13 +294,13 @@ class PacmanDataReader:
             Normalizer = FeatureNormalizer()
 
         # Slice sequences by type
-        raw_sequences, gif_paths = self._slice_by_sequence_type(seq_type, context, make_gif=make_gif)
+        raw_sequences, gif_paths = self._slice_by_sequence_type(seq_type, context, make_gif=make_gif, rebase_scores=rebase_scores)
 
         ## If global normalization, then normalize before slicing
         if normalization == "global": ## full dataset normalization
             non_normalized_gamestate_df = self.gamestate_df.copy()
             self.gamestate_df = Normalizer.normalize(self.gamestate_df) # normalize raw dataframe for slicing method
-            normalized_sequences, gif_paths = self._slice_by_sequence_type(seq_type, context, make_gif=make_gif)
+            normalized_sequences, _ = self._slice_by_sequence_type(seq_type, context, make_gif=False, rebase_scores=rebase_scores)
             self.gamestate_df = non_normalized_gamestate_df # return to original raw dataframe
 
 
@@ -318,6 +335,11 @@ class PacmanDataReader:
             X_padded = X_padded[:max_samples]
             gif_paths = gif_paths[:max_samples]
             features = features[:max_samples]
+
+        if make_gif:
+            assert len(raw_sequences) == len(gif_paths)
+        assert len(raw_sequences) == len(X_padded)
+        assert X_padded.shape[-1] == len(features)
 
         if return_raw_sequences:
             return raw_sequences, X_padded, gif_paths, features
@@ -1017,20 +1039,12 @@ class PacmanDataReader:
         return padded_sequence_list
 
 ### SLICING METHODS. 
-# One method iterates all levels and returns slice type.
-# If interactive plotting, include gif_path
-# self.slicing_method(**slicing params, 
-#                       FEATURES, 
-#                       make_gif
-#                            ) -> [sequence_list,  // CORE -> This could be padded (maybe slicing parameter)
-#                                   metadata_list, 
-#                                   traj_list, 
-#                                   gif_path_list] // CORE-Optional
 
     def _slice_by_sequence_type(
         self,
         sequence_type: str,
         context: int = 20,
+        rebase_scores: float = True,
         make_gif = False,
         videos_directory= "../hpc/videos/",
         gifs_directory = "./Results/subsequences/"
@@ -1049,6 +1063,8 @@ class PacmanDataReader:
                 - "first_50_steps" (for debugging)
         context : int, optional
             Context window (in steps) for special slicing modes, such as "pacman_attack". Default is 20.
+        rebase_score (bool): 
+            Whether to rebase the score on each sequence so in every one it starts from 0.
         make_gif : bool, optional
             Whether to generate GIFs for the sequences. Default is False.
         videos_directory : str, optional
@@ -1105,7 +1121,15 @@ class PacmanDataReader:
             )
         else:    
             raise ValueError(f"Sequence type ({sequence_type}) not valid")
-        
+
+
+        # For each sequence in raw_sequences, rebase the 'score' column to the first row's value.
+        # This will help focus on the 
+        if rebase_scores:
+                for seq in raw_sequences:
+                    if "score" in seq.columns and not seq.empty:
+                        seq["score"] = seq["score"] - seq.iloc[0]["score"]
+
         return raw_sequences, gif_paths
 
     def slice_seq_of_each_level(
@@ -1114,7 +1138,7 @@ class PacmanDataReader:
             end_step=-1,
             make_gif=False,
             videos_directory= "../hpc/videos/",
-            gifs_directory = "./subsequences/"
+            gifs_directory = "./Results/subsequences/"
         )-> tuple[list[pd.DataFrame], list[str]]:
         """
         Extracts a slice (subsequence) of game states for each level, from `start_step` to `end_step`.
@@ -1136,10 +1160,14 @@ class PacmanDataReader:
 
         if make_gif:
             from src.visualization import GameReplayer
+            from tqdm import tqdm
             replayer = GameReplayer()
             logger.info("Using augmented visualization, checking for .gif or creating (can take long)")
+            level_iter = tqdm(self.level_df["level_id"].unique(), desc="Processing levels for GIFs")
+        else:
+            level_iter = self.level_df["level_id"].unique()
 
-        for level_id in self.level_df["level_id"].unique():
+        for level_id in level_iter:
             gamestates, _ = self._filter_gamestate_data(level_id=level_id, include_metadata=False)
 
             start_step_ = start_step
@@ -1181,7 +1209,10 @@ class PacmanDataReader:
     
 
     def slice_attack_modes(self,
-                           CONTEXT: int = 0):
+                           CONTEXT: int = 20,
+                           make_gif: bool=False,
+                           videos_directory= "../hpc/videos/",
+                           gifs_directory = "./Results/subsequences/"):
         """
         Extracts and slices sequences of game states where Pac-Man is in "attack mode".
 
@@ -1198,12 +1229,21 @@ class PacmanDataReader:
                 where Pac-Man is in attack mode for a given level.
             gif_path_list (list): Empty list (reserved for future use, e.g., GIF generation).
         """
-        ## TODO continue here, fine-tune and abstact for any binary column event slicing.
+        ## TODO fine-tune and abstact for any binary column event slicing.
 
         raw_sequences = []
         gif_path_list = []
 
-        for level_id in self.level_df["level_id"].unique():
+        if make_gif:
+            from src.visualization import GameReplayer
+            from tqdm import tqdm
+            replayer = GameReplayer()
+            logger.info("Using augmented visualization, checking for .gif or creating (can take long if first time)")
+            level_iter = tqdm(self.level_df["level_id"].unique(), desc="Processing levels for GIFs")
+        else:
+            level_iter = self.level_df["level_id"].unique()
+
+        for level_id in level_iter:
             gamestates = self._filter_gamestate_data(level_id=level_id)[0]
             # Find indices where "pacman_attack" changes value
             attack_col = gamestates["pacman_attack"].values
@@ -1229,6 +1269,20 @@ class PacmanDataReader:
 
             for (start_index, end_index) in intervals:
                 raw_sequences.append(gamestates.iloc[start_index:end_index+1])
+                ## and create video_sequence
+                if make_gif:
+                    gif_path = os.path.join(gifs_directory, f"level_{level_id}_{start_index:06d}_{end_index:06d}.gif")
+                    gif_path_list.append(gif_path)
+                    if not os.path.exists(gif_path):
+                        replayer.extract_gamestate_subsequence_ffmpeg(
+                            video_path=os.path.join(videos_directory, f"{level_id}.mp4"),
+                            start_gamestate=start_index, 
+                            end_gamestate=end_index,
+                            output_path=gif_path)
+                        
+                    else:
+                        # print(f"sequence for level_id {level_id} already exists, skipping")
+                        pass
 
         return raw_sequences, gif_path_list
         
