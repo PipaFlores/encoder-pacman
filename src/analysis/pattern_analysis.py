@@ -82,6 +82,7 @@ class PatternAnalysis:
             similarity_measure: str = "euclidean",
             sequence_type: str = "first_5_seconds",
             context: int = 20,
+            rebase_score: bool = True,
             validation_method: str | None = "Behavlets",
             feature_set: str = "Pacman",
             augmented_visualization: bool = False,
@@ -113,7 +114,8 @@ class PatternAnalysis:
             similarity_measure (str): Similarity metric for affinity matrix calculation (euclidean or cosine). Not the one
             used in clustering or reducing, define those in reducer, or clusterer instances.
             sequence_type (str): Type of sequence to analyze (e.g., "first_5_seconds").
-            context (int): Number of steps to be added as context for certain sequence_types
+            context (int): Number of steps to be added as context for certain sequence_types.
+            rebase_score (bool): Whether to rebase the score on each sequence so in every one it starts from 0.
             validation (str): Validation method for clusters (e.g., "Behavlets").
             feature_set (str): Name of feature set to be used in analysis
             augmented_visualization (bool): Whether to use augmented visualization.
@@ -1133,17 +1135,30 @@ class PatternAnalysis:
             output_notebook()
             
 
-        if save_path is not None:
-            # If save_path is a filename without a directory, os.path.dirname(save_path) returns ''
-            # In that case, don't try to create a directory
-            if not save_path.lower().endswith('.html'):
-                save_path += '.html'
-            dir_name = os.path.dirname(save_path)
-            if dir_name:
-                os.makedirs(dir_name, exist_ok=True)
-            output_file(save_path)
-        else:
-            output_file("./bokeh_plot.html")
+        if not hasattr(self, '_gif_paths_handled'):
+            if save_path is not None:
+                # Ensure file has .html extension
+                if not save_path.lower().endswith('.html'):
+                    save_path += '.html'
+                dir_name = os.path.dirname(save_path)
+                if dir_name:
+                    os.makedirs(dir_name, exist_ok=True)
+                output_file(save_path)
+
+                # If a save_path is supplied, update gif_path_list paths to be relative from save location.
+                rel_save_path = os.path.relpath(os.path.dirname(save_path) or ".", os.getcwd())
+                if rel_save_path == ".":
+                    n_ups = 0
+                else:
+                    n_ups = len([component for component in rel_save_path.split(os.sep) if component not in (".", "")])
+
+                if hasattr(self, "gif_path_list"):
+                    self.gif_path_list = [os.path.join(*(['..']*(n_ups-1)), *os.path.normpath(gif_path).split(os.sep)[1:])
+                                          if gif_path.startswith(".") else gif_path
+                                          for gif_path in self.gif_path_list]
+            else:
+                output_file("./bokeh_plot.html")
+            self._gif_paths_handled = True
 
 
         metadata = {}
@@ -1228,8 +1243,7 @@ class PatternAnalysis:
 
         return
     
-    def plot_latent_space_overview(self, 
-                                   plot_cluster_centroids = False,
+    def plot_latent_space_overview(self,
                                    custom_labels: np.ndarray | list[int] | None = None,
                                    validation_set: str | list | None = None,
                                    all_labels_in_legend: bool = False,
@@ -1242,7 +1256,6 @@ class PatternAnalysis:
         with each point colored according to its cluster membership.
 
         Args:
-            plot_cluster_centroids (bool): If True, plot geometrical centroids of the original trajectories.
             custom_labels (np.ndarray | list[int] | None): Custom cluster/label assignments to use for coloring points.
             validation_set (str | list | None): Validation set name or indices.  
                                                 If provided as str, use labels for that validation set.
@@ -1254,168 +1267,108 @@ class PatternAnalysis:
         if custom_labels is not None and validation_set is not None:
             raise SyntaxError("Provided both custom_labels and validation_set. Only one of them can be used")
 
-        if not plot_cluster_centroids:
 
-            if isinstance(self.clusterer, GeomClustering):
-                self.trajectory_centroids = self._calculate_trajectory_centroids()  # Geometrical embedding (centroid)
-                traj_embeddings = self.trajectory_centroids
-                frame_to_maze = True
-                xlabel = "X coordinate"
-                ylabel = "Y coordinate"
-            else:
-                traj_embeddings = self.reduced_embeddings
-                frame_to_maze = False
-                xlabel = "Reduced Latent Dimension 1"
-                ylabel = "Reduced Latent Dimension 2"
+        if isinstance(self.clusterer, GeomClustering):
+            self.trajectory_centroids = self._calculate_trajectory_centroids()  # Geometrical embedding (centroid)
+            traj_embeddings = self.trajectory_centroids
+            frame_to_maze = True
+            xlabel = "X coordinate"
+            ylabel = "Y coordinate"
+        else:
+            traj_embeddings = self.reduced_embeddings
+            frame_to_maze = False
+            xlabel = "Reduced Latent Dimension 1"
+            ylabel = "Reduced Latent Dimension 2"
 
+            
+        # Check if validation_set is None or a string (single validation set) One plot
+        if validation_set is None or isinstance(validation_set, str):
+            fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+
+            if validation_set is not None:
+                # Get labels for the specified validation set
+                try:
+                    labels = self.validation_labels[validation_set].to_numpy()
+                except KeyError:
+                    raise KeyError(f"Could not find '{validation_set}'. "
+                        f"Possible validation sets are: {list(self.validation_labels.columns)}")
+                # If all values are None, set labels to None
+                if np.all(pd.isnull(labels)):
+                    labels = None
+                elif np.sum(labels) == 0:
+                    labels = None
+
+            elif custom_labels is not None:
+                # Use custom labels
+                assert len(custom_labels) == len(traj_embeddings)
+                labels = np.array(custom_labels)
+            
+            else: 
+                # Use clustering results
+                labels = np.array(self.labels)
+
+            self.clustervisualizer.plot_trajectories_embedding(
+                traj_embeddings=traj_embeddings,
+                labels=labels,
+                ax=ax,
+                all_labels_in_legend=all_labels_in_legend,
+                frame_to_maze=frame_to_maze
+            )
+            ax.set_xlabel(xlabel)
+            ax.set_ylabel(ylabel)
+
+        elif isinstance(validation_set, (list, tuple)):
+            n_plots = len(validation_set)
+            fig, axs = plt.subplots(1, n_plots, figsize=(n_plots * 6, 6))
+            # Handle multiple validation sets - create subplots for each
+            for i, val_set in enumerate(validation_set):
+                # Get labels for this validation set
+                try:
+                    val_labels = self.validation_labels[val_set].to_numpy()
+                except KeyError:
+                    raise KeyError(f"Could not find '{val_set}'. "
+                        f"Possible validation sets are: {list(self.validation_labels.columns)}")
                 
-            # Check if validation_set is None or a string (single validation set) One plot
-            if validation_set is None or isinstance(validation_set, str):
-                fig, ax = plt.subplots(1, 1, figsize=(6, 6))
-
-                if validation_set is not None:
-                    # Get labels for the specified validation set
-                    try:
-                        labels = self.validation_labels[validation_set].to_numpy()
-                    except KeyError:
-                        raise KeyError(f"Could not find '{validation_set}'. "
-                            f"Possible validation sets are: {list(self.validation_labels.columns)}")
-                    # If all values are None, set labels to None
-                    if np.all(pd.isnull(labels)):
-                        labels = None
-                    elif np.sum(labels) == 0:
-                        labels = None
-
-                elif custom_labels is not None:
-                    # Use custom labels
-                    assert len(custom_labels) == len(traj_embeddings)
-                    labels = np.array(custom_labels)
+                # If all values are None, set labels to None
+                if np.all(pd.isnull(val_labels)):
+                    val_labels = None
+                elif np.sum(val_labels) == 0:
+                    val_labels = None
                 
-                else: 
-                    # Use clustering results
-                    labels = np.array(self.labels)
-
+                # Use the appropriate axis from the subplot array
+                if isinstance(axs, (list, tuple, np.ndarray)):
+                    current_ax = axs[i] if len(axs) > i else axs[-1]
+                else:
+                    current_ax = axs
+                
+                # Plot on the current axis
                 self.clustervisualizer.plot_trajectories_embedding(
                     traj_embeddings=traj_embeddings,
-                    labels=labels,
-                    ax=ax,
+                    labels=val_labels,
+                    ax=current_ax,
                     all_labels_in_legend=all_labels_in_legend,
                     frame_to_maze=frame_to_maze
                 )
-                ax.set_xlabel(xlabel)
-                ax.set_ylabel(ylabel)
+                
+                # Set labels and title for this subplot
+                current_ax.set_xlabel(xlabel)
+                current_ax.set_ylabel(ylabel)
+                current_ax.set_title(f"Validation set: {val_set}")
 
-            elif isinstance(validation_set, (list, tuple)):
-                n_plots = len(validation_set)
-                fig, axs = plt.subplots(1, n_plots, figsize=(n_plots * 6, 6))
-                # Handle multiple validation sets - create subplots for each
-                for i, val_set in enumerate(validation_set):
-                    # Get labels for this validation set
-                    try:
-                        val_labels = self.validation_labels[val_set].to_numpy()
-                    except KeyError:
-                        raise KeyError(f"Could not find '{val_set}'. "
-                            f"Possible validation sets are: {list(self.validation_labels.columns)}")
-                    
-                    # If all values are None, set labels to None
-                    if np.all(pd.isnull(val_labels)):
-                        val_labels = None
-                    elif np.sum(val_labels) == 0:
-                        val_labels = None
-                    
-                    # Use the appropriate axis from the subplot array
-                    if isinstance(axs, (list, tuple, np.ndarray)):
-                        current_ax = axs[i] if len(axs) > i else axs[-1]
-                    else:
-                        current_ax = axs
-                    
-                    # Plot on the current axis
-                    self.clustervisualizer.plot_trajectories_embedding(
-                        traj_embeddings=traj_embeddings,
-                        labels=val_labels,
-                        ax=current_ax,
-                        all_labels_in_legend=all_labels_in_legend,
-                        frame_to_maze=frame_to_maze
-                    )
-                    
-                    # Set labels and title for this subplot
-                    current_ax.set_xlabel(xlabel)
-                    current_ax.set_ylabel(ylabel)
-                    current_ax.set_title(f"Validation set: {val_set}")
-
-            
-            fig.suptitle(
-                f"{self.sequence_type}_"
-                f"f{len(self.features_columns)}_"
-                f"{self.embedder.__class__.__name__}_"
-                f"{self.reducer.__class__.__name__}_"
-                f"{self.clusterer.__class__.__name__}"
-                f"{title_suffix}"
-            )
-            fig.tight_layout()
-
-            
-            plt.show()
         
-        elif plot_cluster_centroids: # Consider removing this, is almost useless and code is disgusting                        
-            
-            fig, axs = plt.subplots(1, 2, figsize=(12, 6))
-            
+        fig.suptitle(
+            f"{self.sequence_type}_"
+            f"f{len(self.features_columns)}_"
+            f"{self.embedder.__class__.__name__}_"
+            f"{self.reducer.__class__.__name__}_"
+            f"{self.clusterer.__class__.__name__}"
+            f"{title_suffix}"
+        )
+        fig.tight_layout()
+
         
-            if isinstance(self.clusterer, GeomClustering):
-                self.trajectory_centroids = self._calculate_trajectory_centroids()
-                self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
-                self.clustervisualizer.plot_trajectories_embedding(
-                    traj_embeddings=self.trajectory_centroids,
-                    labels=labels,
-                    ax=axs[0],
-                    all_labels_in_legend=all_labels_in_legend,
-                    frame_to_maze=True
-                )
-                axs[0].set_title("a) " + axs[0].get_title())
-                axs[0].set_xlabel("X Coordinate")
-                axs[0].set_ylabel("Y Coordinate")
-
-                self.clustervisualizer.plot_clusters_centroids(
-                    cluster_centroids=self.cluster_centroids,
-                    cluster_sizes=self.cluster_sizes,
-                    labels=labels,
-                    ax=axs[1],
-                    frame_to_maze=True
-                )
-                axs[1].set_title("b) " + axs[0].get_title())
-                axs[1].set_xlabel("X Coordinate")
-                axs[1].set_ylabel("Y Coordinate")
-            else:
-                self.cluster_centroids, self.cluster_sizes = self._calculate_cluster_centroids()
-                self.clustervisualizer.plot_trajectories_embedding(
-                    traj_embeddings=self.reduced_embeddings,
-                    labels=labels,
-                    ax=axs[0],
-                    all_labels_in_legend=all_labels_in_legend,
-                    frame_to_maze=False
-                )
-                axs[0].set_title("a) " + axs[0].get_title())
-                axs[0].set_xlabel("Reduced Latent dimension 1")
-                axs[0].set_ylabel("Reduced Latent dimension 2")
-
-                self.clustervisualizer.plot_clusters_centroids(
-                    cluster_centroids=self.cluster_centroids,
-                    cluster_sizes=self.cluster_sizes,
-                    labels=labels,
-                    ax=axs[1],
-                    frame_to_maze=False
-                )
-                axs[1].set_title("b) " + axs[0].get_title())
-                axs[1].set_xlabel("Reduced Latent dimension 1")
-                axs[1].set_ylabel("Reduced Latent dimension 2")
-
-
-            fig.suptitle(f"Latent Space Overview")
-            fig.tight_layout()
-
-            
-            plt.show()
+        plt.show()
+        
 
     def plot_cluster_overview(self, 
                               cluster_id: int, 
@@ -1587,33 +1540,11 @@ class PatternAnalysis:
         return centroids_array
     
     def _get_feature_columns(self, feature_set:str):
-        if feature_set == "Pacman":
-            feature_columns = [
-                "Pacman_X",
-                "Pacman_Y",
-            ]
-        elif feature_set == "Pacman_Ghosts":
-            feature_columns = [
-                "Pacman_X",
-                "Pacman_Y",
-                "Ghost1_X",
-                "Ghost1_Y",
-                "Ghost2_X",
-                "Ghost2_Y",
-                "Ghost3_X",
-                "Ghost3_Y",
-                "Ghost4_X",
-                "Ghost4_Y",
-            ]
-        elif feature_set == "Ghost_Distances":
-            feature_columns=[
-            'Ghost1_distance',
-            'Ghost2_distance', 
-            'Ghost3_distance', 
-            'Ghost4_distance'
-            ]
-        else:
-            raise ValueError(f"Unknown features selection: {feature_set}. Options are (Pacman, Pacman_Ghosts, Ghost_Distances)")
+    
+        try:
+            feature_columns = self.reader.FEATURE_SETS[feature_set]
+        except Exception:
+            raise ValueError(f"Unknown features selection: {feature_set}. Options are {self.reader.FEATURE_SETS.keys()}")
         
         return feature_columns
 
@@ -1627,7 +1558,21 @@ class PatternAnalysis:
         self.filtered_sequence_data, self.validation_labels = load_classification("PenDigits")
         self.filtered_sequence_data = self.filtered_sequence_data.transpose(0,2,1) # [N, seq_length, features]
         self.processed_sequence_data = self.filtered_sequence_data # to accomodate the pipeline
-        # FIXME add normalization for Transformer
+        # Only apply global normalization to PenDigits data
+        if self.embedder_type == "Transformer":
+            from src.datahandlers import FeatureNormalizer
+            logger.info("Normalizing test data for transformer")
+            Normalizer = FeatureNormalizer()
+            shape = self.processed_sequence_data.shape  # (n_samples, seq_len, n_features)
+            flat = self.processed_sequence_data.reshape(-1, shape[-1])
+            # Use Normalizer.minmax, which expects pd.Series input
+            normalized_flat = np.column_stack([
+                Normalizer.minmax(pd.Series(flat[:, 0])).to_numpy(),
+                Normalizer.minmax(pd.Series(flat[:, 1])).to_numpy()
+            ])
+            self.filtered_sequence_data = normalized_flat.reshape(shape)
+            self.processed_sequence_data = self.filtered_sequence_data
+
     
     def _get_wandb_config(self):
 
