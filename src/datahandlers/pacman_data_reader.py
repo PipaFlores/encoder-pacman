@@ -244,7 +244,8 @@ class PacmanDataReader:
         feature_set: str = "Pacman",
         sequence_type: str = "first_5_seconds",
         context: int = 20,
-        rebase_scores: float = "True",
+        rebase_scores: bool = True,
+        filter_by_pill: int | None = None,
         padding_value: float = -999.0,
         sort_ghost_distances: bool = True,
         normalization: str | None = None,
@@ -261,6 +262,9 @@ class PacmanDataReader:
             context (int): Number of timesteps to include before/after the main slicing window, for context.
             padding_value (float): Value used to pad variable-length sequences to uniform length.
             rebase_score (bool): Whether to rebase the score on each sequence so in every one it starts from 0.
+            filter_by_pill (int, optional): If not None, filter by Powerpill idx. I.e., only
+                get slices associated with a particular pill. idxs are from 1 to 4. 1 is upper left, and
+                it follow clockwise.
             sort_ghost_distances (bool): Whether to sort all columns ending in '_distance' for ghosts in ascending order per timestep/sample.
             normalization (str|None): Can be 'global', 'sequence', 'sample', or None. Specifies normalization strategy for features.
             make_gif (bool): If True, generates GIFs (visualizations) for each sequence.
@@ -294,13 +298,21 @@ class PacmanDataReader:
             Normalizer = FeatureNormalizer()
 
         # Slice sequences by type
-        raw_sequences, gif_paths = self._slice_by_sequence_type(seq_type, context, make_gif=make_gif, rebase_scores=rebase_scores)
+        raw_sequences, gif_paths = self._slice_by_sequence_type(sequence_type=seq_type, 
+                                                                context=context, 
+                                                                filter_by_pill=filter_by_pill,
+                                                                make_gif=make_gif, 
+                                                                rebase_scores=rebase_scores)
 
         ## If global normalization, then normalize before slicing
         if normalization == "global": ## full dataset normalization
             non_normalized_gamestate_df = self.gamestate_df.copy()
             self.gamestate_df = Normalizer.normalize(self.gamestate_df) # normalize raw dataframe for slicing method
-            normalized_sequences, _ = self._slice_by_sequence_type(seq_type, context, make_gif=False, rebase_scores=rebase_scores)
+            normalized_sequences, _ = self._slice_by_sequence_type(sequence_type=seq_type, 
+                                                                   context=context, 
+                                                                   filter_by_pill=filter_by_pill,
+                                                                   make_gif=False, 
+                                                                   rebase_scores=rebase_scores)
             self.gamestate_df = non_normalized_gamestate_df # return to original raw dataframe
 
 
@@ -1044,7 +1056,8 @@ class PacmanDataReader:
         self,
         sequence_type: str,
         context: int = 20,
-        rebase_scores: float = True,
+        rebase_scores: bool = True,
+        filter_by_pill: int | None = None,
         make_gif = False,
         videos_directory= "../hpc/videos/",
         gifs_directory = "./Results/subsequences/"
@@ -1065,6 +1078,9 @@ class PacmanDataReader:
             Context window (in steps) for special slicing modes, such as "pacman_attack". Default is 20.
         rebase_score (bool): 
             Whether to rebase the score on each sequence so in every one it starts from 0.
+        filter_by_pill (int, optional): For sequence_type=pacman_attack. If not None, filter by Powerpill idx. I.e., only
+            get slices associated with a particular pill. idxs are from 1 to 4. 1 is upper left, and
+            it follow clockwise.
         make_gif : bool, optional
             Whether to generate GIFs for the sequences. Default is False.
         videos_directory : str, optional
@@ -1108,6 +1124,7 @@ class PacmanDataReader:
             raw_sequences, gif_paths = self.slice_attack_modes(
                 CONTEXT=context,
                 make_gif=make_gif,
+                filter_by_pill = filter_by_pill,
                 videos_directory=videos_directory,
                 gifs_directory=gifs_directory
             )
@@ -1211,6 +1228,7 @@ class PacmanDataReader:
     def slice_attack_modes(self,
                            CONTEXT: int = 20,
                            make_gif: bool=False,
+                           filter_by_pill:int | None = None,
                            videos_directory= "../hpc/videos/",
                            gifs_directory = "./Results/subsequences/"):
         """
@@ -1223,7 +1241,10 @@ class PacmanDataReader:
         Args:
             CONTEXT (int, optional): Number of extra frames to include before and after each
                 attack mode interval. Default is 0 (no extra context).
-
+            filter_by_pill (int, optional): If not None, filter by Powerpill idx. I.e., only
+            get slices associated with a particular pill. idxs are from 1 to 4. 1 is upper left, and
+            it follow clockwise.
+            
         Returns:
             raw_sequences (list): List of DataFrames, each containing a sequence of game states
                 where Pac-Man is in attack mode for a given level.
@@ -1239,6 +1260,113 @@ class PacmanDataReader:
             from tqdm import tqdm
             replayer = GameReplayer()
             logger.info("Using augmented visualization, checking for .gif or creating (can take long if first time)")
+            level_iter = tqdm(self.level_df["level_id"].unique(), desc="Processing levels for GIFs")
+        else:
+            level_iter = self.level_df["level_id"].unique()
+
+        for level_id in level_iter:
+            gamestates = self._filter_gamestate_data(level_id=level_id)[0]
+            # Find indices where "pacman_attack" changes value
+            attack_col = gamestates["pacman_attack"].values
+            change_indices = np.where(attack_col[1:] != attack_col[:-1])[0] + 1  # +1 to get the index where the change happened [if changed to attack, the value at this state, and thereafter, will be 1]
+            
+            # Find (start_index, end_index) tuples where value switches from 1 to 0.
+            # If a 1 is not followed by a 0, use the last index in gamestates as end_index.
+            intervals = []
+            start_index = None
+
+            for idx, value in zip(change_indices, attack_col[change_indices]):
+                if value == 1:
+                    start_index = max(idx - CONTEXT , 0) # Extend with context, if not 0
+                elif value == 0 and start_index is not None:
+                    end_index = min(idx + CONTEXT, len(gamestates) - 1)
+                    intervals.append((start_index, end_index))
+                    start_index = None
+
+            # If we end with a 1 and no following 0, close the interval at the last index
+            if start_index is not None:
+                # end_index = len(gamestates) - 1
+                end_index = gamestates.index[-1]
+                intervals.append((start_index, end_index))
+
+            for (start_index, end_index) in intervals:
+                sliced_sequence = gamestates.iloc[start_index:end_index+1]
+                if filter_by_pill is not None: # if a filter by pill is provided, only append a sequence associated with that powerpellet idx
+                    power_pill_states_cols = [col for col in sliced_sequence.columns if col.startswith("powerpellet")]
+                    # Get the index of the powerpelletstate column (out of the 4 columns) which is the first to change value.
+                    change_indices = [
+                        np.where(sliced_sequence[col].values != sliced_sequence[col].values[0])[0][0]
+                        if np.any(sliced_sequence[col].values != sliced_sequence[col].values[0]) else float('inf')
+                        for col in power_pill_states_cols
+                    ]
+                    first_change_col_idx = int(np.argmin(change_indices))
+                    first_pill_to_change_idx = first_change_col_idx + 1 # to align with 1,2,3,4 og indexs of pills
+                    if first_pill_to_change_idx == filter_by_pill:
+                        raw_sequences.append(sliced_sequence)
+                                            ## and create video_sequence
+                        if make_gif:
+                            gif_path = os.path.join(gifs_directory, f"level_{level_id}_{start_index:06d}_{end_index:06d}.gif")
+                            gif_path_list.append(gif_path)
+                            if not os.path.exists(gif_path):
+                                replayer.extract_gamestate_subsequence_ffmpeg(
+                                    video_path=os.path.join(videos_directory, f"{level_id}.mp4"),
+                                    start_gamestate=start_index, 
+                                    end_gamestate=end_index,
+                                    output_path=gif_path)
+                                
+                            else:
+                                # print(f"sequence for level_id {level_id} already exists, skipping")
+                                pass
+                    else:
+                        pass
+                else: # if no filtering by pill, append all found sequences
+                    raw_sequences.append(sliced_sequence)
+                    ## and create video_sequence
+                    if make_gif:
+                        gif_path = os.path.join(gifs_directory, f"level_{level_id}_{start_index:06d}_{end_index:06d}.gif")
+                        gif_path_list.append(gif_path)
+                        if not os.path.exists(gif_path):
+                            replayer.extract_gamestate_subsequence_ffmpeg(
+                                video_path=os.path.join(videos_directory, f"{level_id}.mp4"),
+                                start_gamestate=start_index, 
+                                end_gamestate=end_index,
+                                output_path=gif_path)
+                            
+                        else:
+                            # print(f"sequence for level_id {level_id} already exists, skipping")
+                            pass
+
+        return raw_sequences, gif_path_list
+
+    # FIXME: Notdone, only copypasted.
+    def slice_instant_event(
+            self,
+            event_col_name:str,
+            CONTEXT: int = 20,
+            make_gif: bool=False,
+            videos_directory= "../hpc/videos/",
+            gifs_directory = "./Results/subsequences/"):
+        """
+        Extracts and slices sequences of game states where event_col_name changes values.
+
+        Args:
+            CONTEXT (int, optional): Number of extra frames to include before and after each
+                attack mode interval. Default is 0 (no extra context).
+
+        Returns:
+            raw_sequences (list): List of DataFrames, each containing a sequence of game states
+                where Pac-Man is in attack mode for a given level.
+            gif_path_list (list): Empty list (reserved for future use, e.g., GIF generation).
+        """
+
+        raw_sequences = []
+        gif_path_list = []
+
+        if make_gif:
+            from src.visualization import GameReplayer
+            from tqdm import tqdm
+            replayer = GameReplayer()
+            logger.info("Using augmented visualization, checking for .gif or creating (can take long)")
             level_iter = tqdm(self.level_df["level_id"].unique(), desc="Processing levels for GIFs")
         else:
             level_iter = self.level_df["level_id"].unique()
@@ -1285,4 +1413,3 @@ class PacmanDataReader:
                         pass
 
         return raw_sequences, gif_path_list
-        
