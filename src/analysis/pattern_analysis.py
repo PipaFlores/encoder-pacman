@@ -83,6 +83,7 @@ class PatternAnalysis:
             sequence_type: str = "first_5_seconds",
             context: int = 20,
             rebase_score: bool = True,
+            filter_by_pill: int | None = None,
             validation_method: str | None = "Behavlets",
             feature_set: str = "Pacman",
             augmented_visualization: bool = False,
@@ -116,6 +117,9 @@ class PatternAnalysis:
             sequence_type (str): Type of sequence to analyze (e.g., "first_5_seconds").
             context (int): Number of steps to be added as context for certain sequence_types.
             rebase_score (bool): Whether to rebase the score on each sequence so in every one it starts from 0.
+            filter_by_pill (int, optional): for seq_type = "pacman_attack" If not None, filter by Powerpill idx. I.e., only
+                get slices associated with a particular pill. idxs are from 1 to 4. 1 is upper left, and
+                it follow clockwise.
             validation (str): Validation method for clusters (e.g., "Behavlets").
             feature_set (str): Name of feature set to be used in analysis
             augmented_visualization (bool): Whether to use augmented visualization.
@@ -143,18 +147,20 @@ class PatternAnalysis:
             logger.setLevel("INFO")
         
         # Configuration
+        # DATA
         self.sequence_type = sequence_type
         self.context = context
-        self.validation_method = validation_method ## What kind of method used to assess cluster validity
         self.augmented_visualization = augmented_visualization
+        self.filter_by_pill = filter_by_pill
+        self.rebase_score = rebase_score
+
+        # VALIDATION
+        self.validation_method = validation_method ## What kind of method used to assess cluster validity
+        
+        # HPC CONFIG
         self.hpc_folder = hpc_folder ## for videos and trained models lookups (wherever videos/ affinity_matrices/ and trained_models/ are)
         self.using_hpc = using_hpc ## For parallel computing of affinity matrix
-        self.random_seed = random_seed
-        if random_seed is not None: # For reproducibility
-            if TORCH_AVAILABLE:
-                torch.manual_seed(random_seed)
-            random.seed(random_seed)
-            np.random.seed(random_seed)
+        
 
             # for deep neural networks
         self.batch_size = batch_size
@@ -167,6 +173,13 @@ class PatternAnalysis:
         self.sort_distances = sort_distances
         self.max_samples = max_samples
 
+        self.random_seed = random_seed
+        if random_seed is not None: # For reproducibility
+            if TORCH_AVAILABLE:
+                torch.manual_seed(random_seed)
+            random.seed(random_seed)
+            np.random.seed(random_seed)
+        
         if TORCH_AVAILABLE:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -359,6 +372,8 @@ class PatternAnalysis:
                     feature_set=self.feature_set,
                     sequence_type=self.sequence_type,
                     context=self.context,
+                    rebase_scores=self.rebase_score,
+                    filter_by_pill=self.filter_by_pill,
                     sort_ghost_distances=self.sort_distances,
                     normalization=self.normalization,
                     make_gif=self.augmented_visualization,
