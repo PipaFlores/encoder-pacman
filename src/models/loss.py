@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 
 
 class MaskedMSELoss(nn.Module):
@@ -21,11 +22,11 @@ class MaskedMSELoss(nn.Module):
         torch.Tensor: The total loss value
     """
     def forward(self, 
-             x_h: torch.Tensor,
-             x: torch.Tensor,
-             padding_mask: torch.Tensor | None = None,
-             obs_mask: torch.Tensor | None = None,
-             loss_mask: torch.Tensor | None = None,
+             x_h: Tensor,
+             x: Tensor,
+             padding_mask: Tensor | None = None,
+             obs_mask: Tensor | None = None,
+             loss_mask: Tensor | None = None,
              reduce_to_mean: bool = True): 
         
         recon_loss = nn.functional.mse_loss(x_h, x, reduction="none")
@@ -78,7 +79,69 @@ class MaskedMSELoss(nn.Module):
                 recon_loss = recon_loss
 
         return recon_loss
+
+
+class VAELoss(nn.Module):
     
+    def __init__(self,
+                 kld_weight: float = 0.00025
+                 ):
+        """
+        Loss class for Variational Autoencoder (VAE) combining reconstruction loss (MSE)
+        and Kullback-Leibler divergence (KLD).
+
+        Args:
+            kld_weight (float): Weight for the KL divergence term relative to the reconstruction loss.
+        """
+        super(VAELoss).__init__()
+
+        self.kld_weight = kld_weight
+
+    def forward(self,
+                recon : Tensor,
+                input: Tensor,
+                mu: Tensor,
+                log_var: Tensor,
+                padding_mask: Tensor | None = None,
+                obs_mask: Tensor | None = None,
+                loss_mask: Tensor | None = None,
+                reduce_to_mean: bool = True):
+        
+        recon_loss = F.mse_loss(recon, input)  # reduced with mean (default)
+
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1) , dim = 0)
+
+        total_loss = recon_loss + kld_loss * self.kld_weight
+
+        return total_loss, kld_loss
+
+
+    # def loss_function(self,
+    #                   *args,
+    #                   **kwargs) -> dict:
+    #     """
+    #     Computes the VAE loss function.
+    #     KL(N(\mu, \sigma), N(0, 1)) = \log \frac{1}{\sigma} + \frac{\sigma^2 + \mu^2}{2} - \frac{1}{2}
+    #     :param args:
+    #     :param kwargs:
+    #     :return:
+    #     """
+    #     recons = args[0]
+    #     input = args[1]
+    #     mu = args[2]
+    #     log_var = args[3]
+
+    #     kld_weight = kwargs['M_N'] # Account for the minibatch samples from the dataset
+    #     recons_loss =F.mse_loss(recons, input)
+
+
+    #     kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1), dim = 0)
+
+    #     loss = recons_loss + kld_weight * kld_loss
+    #     return {'loss': loss, 'Reconstruction_Loss':recons_loss.detach(), 'KLD':-kld_loss.detach()}
+
+
+
 def l2_reg_loss(model):
         """
         L2 norm of output layer weights.
