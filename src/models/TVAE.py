@@ -5,9 +5,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import joblib
 
-from vae.vae_base import BaseVariationalAutoencoder, Sampling
+from torch import Tensor
 
-## from https://github.com/wangyz1999/timeVAE-pytorch
+### Adapted from https://github.com/wangyz1999/timeVAE-pytorch
 
 class TrendLayer(nn.Module):
     def __init__(self, seq_len, feat_dim, latent_dim, trend_poly):
@@ -173,8 +173,7 @@ class TimeVAEEncoder(nn.Module):
         x = self.encoder(x)
         z_mean = self.z_mean(x)
         z_log_var = self.z_log_var(x)
-        z = Sampling()([z_mean, z_log_var])
-        return z_mean, z_log_var, z
+        return z_mean, z_log_var
     
     def _get_last_dense_dim(self, seq_len, feat_dim, hidden_layer_sizes):
         with torch.no_grad():
@@ -217,18 +216,32 @@ class TimeVAEDecoder(nn.Module):
         return outputs
 
 
-class TimeVAE(BaseVariationalAutoencoder):
+class TimeVAE(nn.Module):
     model_name = "TimeVAE"
 
     def __init__(
         self,
-        hidden_layer_sizes=None,
-        trend_poly=0,
-        custom_seas=None,
-        use_residual_conn=True,
+        input_dim : int,
+        seq_len : int,
+        latent_dim : int = 128,
+        batch_size : float = 16,
+        hidden_layer_sizes : list[int] | None = None,
+        trend_poly: int = 0,
+        custom_seas: list[list[int], list[int]]=None,
+        use_residual_conn : bool = True,
         **kwargs,
     ):
-        super(TimeVAE, self).__init__(**kwargs)
+        super().__init__(**kwargs)
+
+        ## Base VAE parameters into class (from og BaseVariationalAutoencoder class). avoids inheritance of og codebase.
+        self.seq_len = seq_len
+        self.input_dim = input_dim
+        self.latent_dim = latent_dim
+        self.batch_size = batch_size
+        self.encoder = None
+        self.decoder = None
+        print("using og imp")
+
 
         if hidden_layer_sizes is None:
             hidden_layer_sizes = [50, 100, 200]
@@ -248,10 +261,37 @@ class TimeVAE(BaseVariationalAutoencoder):
                     nn.init.zeros_(layer.bias)
 
     def _get_encoder(self):
-        return TimeVAEEncoder(self.seq_len, self.feat_dim, self.hidden_layer_sizes, self.latent_dim)
+        return TimeVAEEncoder(self.seq_len, self.input_dim, self.hidden_layer_sizes, self.latent_dim)
 
     def _get_decoder(self):
-        return TimeVAEDecoder(self.seq_len, self.feat_dim, self.hidden_layer_sizes, self.latent_dim, self.trend_poly, self.custom_seas, self.use_residual_conn, self.encoder.encoder_last_dense_dim)
+        return TimeVAEDecoder(self.seq_len, self.input_dim, self.hidden_layer_sizes, self.latent_dim, self.trend_poly, self.custom_seas, self.use_residual_conn, self.encoder.encoder_last_dense_dim)
+
+    
+    def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
+        """
+        Reparameterization trick to sample from N(mu, var) from
+        N(0,1).
+        :param mu: (Tensor) Mean of the latent Gaussian [B x D]
+        :param logvar: (Tensor) Standard deviation of the latent Gaussian [B x D]
+        :return: (Tensor) [B x D]
+        """
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return eps * std + mu
+    
+    def forward(self, X:Tensor):
+        z_mean, z_log_var = self.encoder(X)
+        z = self.reparameterize(z_mean, z_log_var) ## og implementation does not reparametrize for forward pass (only for training step.)
+        
+        x_decoded = self.decoder(z)
+        
+        return [x_decoded, z_mean, z_log_var]
+    
+
+    def encode(self, X:Tensor):
+        X = X.permute(0,2,1)
+
+        return self.encoder(X)
 
     def save(self, model_dir: str):
         os.makedirs(model_dir, exist_ok=True)
@@ -262,7 +302,7 @@ class TimeVAE(BaseVariationalAutoencoder):
 
         dict_params = {
             "seq_len": self.seq_len,
-            "feat_dim": self.feat_dim,
+            "feat_dim": self.input_dim,
             "latent_dim": self.latent_dim,
             "reconstruction_wt": self.reconstruction_wt,
             "hidden_layer_sizes": list(self.hidden_layer_sizes),
