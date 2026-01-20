@@ -13,9 +13,11 @@ class PacmanDataset(Dataset):
         self, 
         gamestates: torch.Tensor | np.ndarray, 
         padding_value=-999,
+        elementwise_masking=True
     ):
         """
-        PacmanDataset handles padded game state sequences for each trajectory.
+        PacmanDataset handles padded game state sequences for each trajectory. Creates padding and obs mask for
+        padded sequences and missing variable observations
 
         Note:
             Any required normalization of the data should be performed before creating this dataset,
@@ -23,8 +25,9 @@ class PacmanDataset(Dataset):
 
         Args:
             gamestates (torch.Tensor or np.ndarray): Array or tensor of shape (n_trajectories, sequence_length, features)
-                containing the padded game state sequences per trajectory.
+                containing the padded, and processed, game state sequences per trajectory.
             padding_value (float, optional): Value used for padding invalid timesteps. Default: -999.
+            elementwise_maskings (bool): Whether or not to use element-wise masking 
 
         Attributes:
             gamestates (torch.Tensor): Tensor of shape (n_trajectories, sequence_length, features), containing the data.
@@ -38,7 +41,11 @@ class PacmanDataset(Dataset):
 
         self.padding_mask = (self.gamestates != padding_value).float()
         self.padding_mask = self.padding_mask.any(dim=-1).float()
-        self.obs_mask = torch.isfinite(self.gamestates).float()
+
+        if elementwise_masking:
+            self.obs_mask = torch.isfinite(self.gamestates).float()
+        else:
+            self.obs_mask = torch.ones_like(self.gamestates, dtype=torch.float) ## obs_mask deactivated (all True)
 
         if torch.isinf(self.gamestates).any():
             self.gamestates = replace_inf(self.gamestates)
@@ -66,7 +73,8 @@ class ImputationDataset(Dataset):
                  mode: str = 'separate', 
                  distribution: str = 'geometric', 
                  exclude_feats: list[int] | None = None,
-                 padding_value: int = -999):
+                 padding_value: int = -999,
+                 elementwise_masking=False):
         """
         A PyTorch Dataset that dynamically generates a random missingness (noise) mask for each sample at retrieval time,
         suitable for self-supervised masked imputation pretraining or evaluation.
@@ -80,6 +88,7 @@ class ImputationDataset(Dataset):
             distribution (str, optional): Distribution to sample mask lengths. Typically "geometric".
             exclude_feats (list[int] or None): Indices of features to exclude from masking.
             padding_value (float, optional): Value denoting padded (invalid) timesteps.
+            elementwise_maskings (bool): Whether or not to use element-wise masking 
 
         Each time an item is sampled, a fresh noise_mask is generated, with 0 indicating masked/missing elements to be imputed, and 1 indicating unmasked elements.
 
@@ -107,7 +116,12 @@ class ImputationDataset(Dataset):
 
         self.padding_mask = (self.gamestates != padding_value).float()
         self.padding_mask = self.padding_mask.any(dim=-1).float()
-        self.obs_mask = torch.isfinite(self.gamestates).float()
+
+        if elementwise_masking:
+            self.obs_mask = torch.isfinite(self.gamestates).float()
+        else:
+            self.obs_mask = torch.ones_like(self.gamestates, dtype=torch.float) ## obs_mask deactivated (all True)
+
 
 
         if torch.isinf(self.gamestates).any():

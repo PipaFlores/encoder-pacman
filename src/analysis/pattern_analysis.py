@@ -93,6 +93,7 @@ class PatternAnalysis:
             max_epochs: int = 500,
             latent_dimension: int = 256,
             validation_data_split: int = 0.3,
+            elementwise_masking: bool = False,
             use_best: bool = True,
             sort_distances: bool = False,
             using_hpc: bool = False,
@@ -129,6 +130,7 @@ class PatternAnalysis:
             max_epochs (int): Maximum number of epochs for training.
             latent_dimension (int): Latent dimension size for embeddings.
             validation_data_split (int): Fraction of data to use for validation.
+            elementwise_masking (bool): Whether or not to use element-wise masking during training (only pytorch models)
             use_best (bool): Whether to use best or last autoencoder model.
             sort_distance (bool): If using Astar distances as features, sort them in ascending order.
             using_hpc (bool): Whether to use HPC for parallel computations.
@@ -172,6 +174,7 @@ class PatternAnalysis:
         self.use_best = use_best
         self.sort_distances = sort_distances
         self.max_samples = max_samples
+        self.elementwise_masking = elementwise_masking
 
         self.random_seed = random_seed
         if random_seed is not None: # For reproducibility
@@ -574,7 +577,7 @@ class PatternAnalysis:
                     last_path=model_path + "_last.pth",
                     wandb_run=self.wandbrun
                     )
-                data_tensor = PacmanDataset(gamestates = padded_sequence_data)
+                data_tensor = PacmanDataset(gamestates = padded_sequence_data, elementwise_masking=self.elementwise_masking)
                 trainer.fit(model= self.embedder, data=data_tensor)
 
             elif isinstance(self.embedder, TSTransformerEncoder):
@@ -596,7 +599,7 @@ class PatternAnalysis:
                     wandb_run = self.wandbrun
                     )
                 
-                data_class = ImputationDataset(gamestates=padded_sequence_data)
+                data_class = ImputationDataset(gamestates=padded_sequence_data, elementwise_masking=self.elementwise_masking)
                 trainer.fit(self.embedder, data_class)
             
         elif self.using_keras:

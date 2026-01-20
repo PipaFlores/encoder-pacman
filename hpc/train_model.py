@@ -42,11 +42,18 @@ def parse_args() -> argparse.Namespace:
         default=20,
         help="Number of frames of context to include for attack-mode slices. (Default to 20)",
     )
+
+    parser.add_argument(
+        "--filter-by-pill",
+        type=lambda x: None if x.lower() == "none" else int(x),
+        default=None,
+        help="If set (1-4), only use sequences associated with this power pill index. 1 is upper left, then clockwise. Use 'none' to disable.",
+    )
+
     parser.add_argument(
         "--feature-set",
         type=str,
         default="Pacman",
-        choices=["Pacman", "Pacman_Ghosts", "Ghost_Distances"],
         help="Feature bundle to feed into the pipeline.",
     )
     parser.add_argument(
@@ -100,6 +107,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.1,
         help="Dropout probability for the autoencoder embedder (default: 0.1).",
+    )
+
+    parser.add_argument(
+        "--elementwise-masking",
+        action="store_true",
+        help="Enable elementwise masking (obs. mask) during training of pytorch models.",
     )
 
     # Reducer -------------------------------------------------------------------
@@ -292,13 +305,10 @@ def main():
     for key, value in vars(args).items():
         print(f"  {key}: {value}")
 
-    embedder = None if args.embedder.lower() == "none" else args.embedder
-    normalization = (
-        None if args.normalization.lower() == "none" else args.normalization
-    )
-    validation_method = (
-        None if args.validation_method.lower() == "none" else args.validation_method
-    )
+    # Iterate over all args fields and transform any that are set to the string "none" (case-insensitive) to None
+    for key, value in vars(args).items():
+        if isinstance(value, str) and value.lower() == "none":
+            setattr(args, key, None)
 
     reducer = build_reducer(args)
     clusterer = build_clusterer(args)
@@ -306,20 +316,22 @@ def main():
     analysis = PatternAnalysis(
         data_folder=args.data_folder,
         hpc_folder=args.hpc_folder,
-        embedder=embedder,
+        embedder=args.embedder,
         reducer=reducer,
         clusterer=clusterer,
         similarity_measure=args.similarity_measure,
         sequence_type=args.sequence_type,
         context=args.context,
-        validation_method=validation_method,
+        filter_by_pill=args.filter_by_pill,
+        validation_method=args.validation_method,
         feature_set=args.feature_set,
         augmented_visualization=False,
         batch_size=args.batch_size,
-        normalization=normalization,
+        normalization=args.normalization,
         max_epochs=args.n_epochs,
         latent_dimension=args.latent_space,
         validation_data_split=args.validation_split,
+        elementwise_masking=args.elementwise_masking,
         dropout=args.dropout,
         sort_distances=args.sort_ghost_distances,
         using_hpc=args.using_hpc,
@@ -344,7 +356,7 @@ def main():
     fig, axs = plt.subplots(1, 1, figsize=(10, 10))
 
     axs.scatter(analysis.reduced_embeddings[:,0], analysis.reduced_embeddings[:,1], s=2, cmap="tab20", c=analysis.labels)
-    axs.set_title(f"{args.sequence_type}_{args.feature_set}_{embedder}_{reducer}_{clusterer}", size=8)
+    axs.set_title(f"{args.sequence_type}_{args.feature_set}_{args.embedder}_{reducer}_{clusterer}", size=8)
 
     if WANDB_AVAILABLE:
         analysis.wandbrun.log({"latent_space_plot": fig})  

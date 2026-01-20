@@ -11,7 +11,7 @@
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 
-module load pytorch
+module load pytorch/2.7
  
 ## ALL OPTIONS
 # FEATURE_SETS=("Pacman" "Pacman_Ghosts" "Ghost_Distances")
@@ -19,13 +19,13 @@ module load pytorch
 
 ## SPECIFIC (COMMENT OUT ABOVE)
 
-FEATURE_SETS=("Pacman" "Pacman_Ghosts")
+FEATURE_SETS=("Experimental2")
+# FEATURE_SETS=("Pacman" "Pacman_Ghosts")
 # FEATURE_SETS=("Pacman_Ghosts")
 # FEATURE_SETS=("Ghost_Distances")
 
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
-SEQUENCE_TYPES=("first_5_seconds")
-# SEQUENCE_TYPES=("pacman_attack")
+SEQUENCE_TYPES=("pacman_attack")
 
 EMBEDDER="LSTM"
 CLUSTERER="hdbscan"
@@ -37,11 +37,13 @@ BATCH_SIZE=32
 VALIDATION_SPLIT=0.3
 DROPOUT=0.1
 CONTEXT=20
-NORMALIZATION="none"
-LOGGING_COMMENT="No normalization"
+FILTER_BY_PILL=3
+NORMALIZATION="global"
+LOGGING_COMMENT="filter by pill 3"
 EXTRA_FLAGS=(
     --using-hpc
     --verbose
+    # --elementwise-masking
 )
 
 
@@ -64,6 +66,7 @@ for FEATURES in "${FEATURE_SETS[@]}"; do
             --validation-split "$VALIDATION_SPLIT" \
             --dropout "$DROPOUT" \
             --context "$CONTEXT" \
+            --filter-by-pill "$FILTER_BY_PILL" \
             --normalization "$NORMALIZATION" \
             --logging-comment "$LOGGING_COMMENT" \
             "${FEATURE_FLAGS[@]}"

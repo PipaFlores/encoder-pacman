@@ -399,8 +399,8 @@ class ClusterVisualizer(BaseVisualizer):
             legend.get_title().set_fontsize(9)
 
         ax.set_title("Reduced latent space, individual data points.")
-        ax.set_xlabel("X Coordinate")
-        ax.set_ylabel("Y Coordinate")
+        ax.set_xlabel("LS 1st axis")
+        ax.set_ylabel("LS 2nd axis")
         if show_plot:
             plt.show()
 
