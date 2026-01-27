@@ -16,7 +16,7 @@ from src.datahandlers import PacmanDataReader
 try:
     import torch
     TORCH_AVAILABLE = True
-    from src.models import LSTM, AE_Trainer, AELSTM, TSTransformerEncoder, Transformer_Trainer
+    from src.models import VAE, VAE_Trainer, AE_Trainer, AELSTM, TSTransformerEncoder, Transformer_Trainer
     from src.datahandlers import PacmanDataset, ImputationDataset
 except ImportError:
     TORCH_AVAILABLE = False
@@ -220,6 +220,7 @@ class PatternAnalysis:
         self.filtered_sequence_data = None
         self.processed_sequence_data = None
         self.trajectory_list = None
+        self.metadata_dictionary = None
         self.gif_path_list = None
         self.embeddings = None
         self.reduced_embeddings = None
@@ -237,7 +238,7 @@ class PatternAnalysis:
 
     def _initialize_deep_embedder(self, embedder:str):
 
-        supported = ["LSTM", "Transformer","DRNN", "DCNN", "ResNet"]
+        supported = ["LSTM", "Transformer","DRNN", "DCNN", "ResNet", "VAE"]
         if embedder not in supported:
             raise ValueError(f"Embedder {embedder} is not one of the supported embedding deep networks ({supported})")
         
@@ -269,6 +270,15 @@ class PatternAnalysis:
                 num_layers=3,
                 dim_feedforward=256
             ) # TODO make this into input arguments
+        
+        if embedder == "VAE":
+            if not TORCH_AVAILABLE:
+                raise ModuleNotFoundError(f"Using VAE requires torch in the environment")
+            
+            self.using_torch = True
+            self.using_keras = False
+            
+            return  VAE
         
         if embedder == "DRNN":
             if not KERAS_AVAILABLE:
@@ -394,9 +404,11 @@ class PatternAnalysis:
             logger.info(f"Using {len(self.features_columns)} features: {self.features_columns}")
                 
             self.trajectory_list = [self.reader.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in self.raw_sequence_data]
-
+            self.metadata_dictionary = {}
+            for key in self.trajectory_list[0].metadata.keys():
+                self.metadata_dictionary[key] = np.array([traj.metadata[key] for traj in self.trajectory_list])
         else:
-            self._load_train_dataset()
+            self._load_test_dataset()
 
         # Step 2a: load or train embedding model. GeomClustering skips this step
         
@@ -1371,7 +1383,17 @@ class PatternAnalysis:
                 # Set labels and title for this subplot
                 current_ax.set_xlabel(xlabel)
                 current_ax.set_ylabel(ylabel)
-                current_ax.set_title(f"Validation set: {val_set}")
+                if self.validation_method == "Behavlets":
+                    try:
+                        from src.analysis.behavlets_config import BEHAVLET_NAME_MAPPING
+                        val_set_prefix = val_set.split("_", 1)[0] if "_" in val_set else val_set
+                        set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
+                    except ImportError:
+                        set_name = val_set
+                else:
+                    set_name = val_set
+
+                current_ax.set_title(f"Validation set: {set_name}")
 
         
         fig.suptitle(
@@ -1567,7 +1589,7 @@ class PatternAnalysis:
         return feature_columns
 
 
-    def _load_train_dataset(self, max_samples:int = None):
+    def _load_test_dataset(self, max_samples:int = None):
 
         from aeon.datasets import load_classification
         logger.info("Loading PenDigits test dataset (10k samples)")

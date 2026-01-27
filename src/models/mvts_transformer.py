@@ -264,8 +264,7 @@ class TransformerBatchNormEncoderLayer(nn.modules.Module):
 class TSTransformerEncoder(nn.Module):
     """
     This is the main class containing the whole model
-    TODO:
-     - Verify and adapt loss function
+    
     
     """
 
@@ -285,7 +284,7 @@ class TSTransformerEncoder(nn.Module):
         """
         Filled with default initialization values
         """
-        super(TSTransformerEncoder, self).__init__()
+        super().__init__()
 
         self.max_len = max_len
         self.d_model = d_model

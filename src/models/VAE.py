@@ -6,6 +6,34 @@ from torch.nn import functional as F
 
 
 class VanillaVAE(nn.Module):
+    """
+    VanillaVAE implements a 1D Convolutional Variational Autoencoder.
+
+    Args:
+        input_dim (int): Number of input features/channels.
+        seq_len (int): Length of input sequences.
+        latent_dim (int, optional): Dimensionality of the latent space. Defaults to 128.
+        hidden_dims (list, optional): List specifying the number of channels for each hidden layer. Defaults to [32, 64, 128, 256, 512].
+        **kwargs: Additional keyword arguments.
+
+    Methods:
+        encode(x: Tensor) -> (Tensor, Tensor):
+            Encodes the input and returns the latent mean and log variance.
+
+        reparameterize(mu: Tensor, logvar: Tensor) -> Tensor:
+            Applies the reparameterization trick to generate a latent sample.
+
+        decode(z: Tensor) -> Tensor:
+            Decodes latent vector z back to the reconstructed input space.
+
+        forward(x: Tensor) -> (Tensor, Tensor, Tensor):
+            Computes forward pass through encoder, sampling, and decoder.
+            Returns reconstruction, mean, and log variance.
+
+        loss_function(recons: Tensor, input: Tensor, mu: Tensor, logvar: Tensor, kld_weight: float = 1.0) -> dict:
+            Computes the VAE loss as the sum of reconstruction loss and Kullback-Leibler divergence.
+
+    """
 
     def __init__(self,
                  input_dim: int,
@@ -14,7 +42,7 @@ class VanillaVAE(nn.Module):
                  hidden_dims: list | None = None,
                  **kwargs) -> None:
         
-        super(VanillaVAE, self).__init__()
+        super().__init__()
 
         self.input_dim = input_dim
         self.latent_dim = latent_dim
@@ -117,6 +145,41 @@ class VanillaVAE(nn.Module):
 
         return result
 
+    def forward(self, input: Tensor, **kwargs) -> list[Tensor, Tensor, Tensor]:
+        """
+        Run the whole encoder-decoder network, returning the reconstructed input 
+        and the mu, log_var parameters of the gaussian distribution
+
+        returns:
+            recon (Tensor): reconstructed inputs
+            mu (Tensor): mean of gaussian distributuion
+            log_var (Tensor): log_var of the gaussian distribution
+
+
+        
+        """
+        mu, log_var = self.encode(input)
+        z = self.reparameterize(mu, log_var)
+        return  [self.decode(z), mu, log_var]
+    
+    def _get_last_dense_dim(self, seq_len, input_dim):
+        """
+        Calculates the size of the flattened vector outputed by encoder's convolution layers.
+        Used to build the final dense layer before the projection to distribution parameters.
+        This acts as a bottleneck so that the number of parameters, and gradients, do not explode
+        when sequence length becomes too big.
+        
+        """
+
+        with torch.no_grad():
+            x = torch.rand(1, input_dim, seq_len)
+            for layer in self.encoder:
+                x = layer(x)
+            
+            assert x.ndim == 2 and (x.shape[0] == 1 or x.shape[0] == x.size(0)), "x should be a flattened vector [batch, features]"
+            return x.numel()
+
+
     def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
         """
         Reparameterization trick to sample from N(mu, var) from
@@ -129,10 +192,6 @@ class VanillaVAE(nn.Module):
         eps = torch.randn_like(std)
         return eps * std + mu
 
-    def forward(self, input: Tensor, **kwargs) -> list[Tensor]:
-        mu, log_var = self.encode(input)
-        z = self.reparameterize(mu, log_var)
-        return  [self.decode(z), mu, log_var]
 
 
     def sample(self,
@@ -162,6 +221,8 @@ class VanillaVAE(nn.Module):
 
         return self.forward(x)[0]
     
+
+
 
 class VAE_Trainer():
     def __init__(self, 
@@ -285,7 +346,7 @@ class VAE_Trainer():
                 batch_loss.backward()
                 # Gradient clipping in case of exploding gradients
                 if self.gradient_clipping is not None:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), self.gradient_clipping)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clipping, error_if_nonfinite=True)
                 optimizer.step()
 
             if self.validation_split > 0:
@@ -342,6 +403,8 @@ class VAE_Trainer():
 
             if self.verbose:
                 print(f"Epoch {epoch + 1}: Train loss={epoch_train_loss}, Val loss={epoch_val_loss if self.validation_split > 0 else ''}")
+            
+            # FIXME setup logging
             # if self.wandb_run and WANDB_AVAILABLE:
             #     self.wandb_run.log(
             #         {

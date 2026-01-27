@@ -107,9 +107,57 @@ class VAELoss(nn.Module):
                 loss_mask: Tensor | None = None,
                 reduce_to_mean: bool = True):
         
-        recon_loss = F.mse_loss(recon, input)  # reduced with mean (default)
+        recon_loss = F.mse_loss(recon, input, reduction="none")
 
-        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp(), dim = 1) , dim = 0)
+        ## kld loss. This one might explode, thats why the clamp on log_var
+        kld_loss = torch.mean(-0.5 * torch.sum(1 + log_var - mu ** 2 - log_var.exp().clamp(max=1e10), dim = 1) , dim = 0)
+
+        if loss_mask is not None:
+            # loss_mask = 1 predict (compute loss), 0 = ignore
+            recon_loss = recon_loss * loss_mask
+
+        if obs_mask is not None:
+            recon_loss = recon_loss * obs_mask  # element-wise masking
+
+        if padding_mask is not None:
+            # [batch, seq_length] -> [batch, seq_length, 1] (broadcast for feature_dim)
+            if padding_mask.ndim == 2 and recon_loss.ndim == 3:
+                padding_mask = padding_mask.unsqueeze(-1)
+            elif padding_mask.ndim == 1 and recon_loss.ndim == 2:
+                padding_mask = padding_mask.unsqueeze(-1)
+            # Combine all masks for correct denominator
+            combined_mask = torch.ones_like(recon_loss)
+            if loss_mask is not None:
+                combined_mask = combined_mask * loss_mask
+            if obs_mask is not None:
+                combined_mask = combined_mask * obs_mask
+            combined_mask = combined_mask * padding_mask
+
+            if reduce_to_mean:
+                numerator = (recon_loss * padding_mask).sum()
+                denominator = combined_mask.sum().clamp_min(1.0)
+                recon_loss = numerator / (denominator + 1e-8)
+            else:
+                # Reduce by sum (no mean): elementwise masked loss, sum over all valid (or keep as is)
+                recon_loss = (recon_loss * padding_mask)
+
+            # No padding mask, just use combined valid-mask
+            # This is in the 'else' path for padding_mask is None
+        else:
+            combined_mask = torch.ones_like(recon_loss)
+            if loss_mask is not None:
+                combined_mask = combined_mask * loss_mask
+            if obs_mask is not None:
+                combined_mask = combined_mask * obs_mask
+
+            if reduce_to_mean:
+                numerator = recon_loss.sum()
+                denominator = combined_mask.sum().clamp_min(1.0)
+                recon_loss = numerator / (denominator + 1e-8)
+            else:
+                # Reduce by sum (no mean): elementwise masked loss
+                # recon_loss stays un-reduced (optionally apply the combined mask)
+                recon_loss = recon_loss
 
         total_loss = recon_loss + kld_loss * self.kld_weight
 

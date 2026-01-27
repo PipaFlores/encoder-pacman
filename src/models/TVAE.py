@@ -289,9 +289,9 @@ class TimeVAE(nn.Module):
     
 
     def encode(self, X:Tensor):
-        X = X.permute(0,2,1)
+        z_mean , z_log_var = self.encoder(X)
 
-        return self.encoder(X)
+        return z_mean, z_log_var
 
     def save(self, model_dir: str):
         os.makedirs(model_dir, exist_ok=True)
