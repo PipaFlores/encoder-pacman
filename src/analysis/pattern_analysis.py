@@ -1559,6 +1559,100 @@ class PatternAnalysis:
         )
 
         return
+    
+    def plot_reconstruction_check(
+        self,
+        sample_id: int | None = None,
+        padding_value: float = -999.0,
+        batch_size: int | None = None,
+        figsize: tuple[int, int] | None = None,
+    ) -> int:
+        """
+        WARNING: THIS WAS FULLY AI GEN. CORROBORATE. It works good and replicats original results 
+        and algorithm used to chech the Transformer model recons. But it has not been tested for others
+        , remember that LSTM uses a different datamodule (without noise masks, etc )
+        Plot true vs reconstructed time series for one sample.
+        Only supported for torch embedders (AELSTM, TSTransformerEncoder).
+        If sample_id is None, a random sample is chosen. Returns the sample_id used.
+        """
+        if not TORCH_AVAILABLE or not self.using_torch:
+            raise RuntimeError("plot_reconstruction_check requires a PyTorch embedder (AELSTM or TSTransformerEncoder).")
+        if self.processed_sequence_data is None:
+            raise ValueError("No processed_sequence_data. Run fit() first.")
+
+        from torch.utils.data import DataLoader
+
+        bs = batch_size if batch_size is not None else self.batch_size
+        data_tensor = (
+            PacmanDataset(gamestates=self.processed_sequence_data)
+            if isinstance(self.embedder, AELSTM)
+            else ImputationDataset(gamestates=self.processed_sequence_data)
+        )
+        loader = DataLoader(data_tensor, batch_size=bs, shuffle=False)
+
+        prediction_list = []
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.embedder.to(device).eval()
+        with torch.no_grad():
+            for batch in loader:
+                if isinstance(self.embedder, AELSTM):
+                    batch_pred = self.embedder.forward(batch["data"].to(device))
+                elif isinstance(self.embedder, TSTransformerEncoder):
+                    batch_pred = self.embedder.forward(
+                        batch["data"].to(device),
+                        batch["padding_mask"].to(device),
+                    )
+                else:
+                    raise TypeError(f"Unknown embedder: {type(self.embedder)}")
+                prediction_list.append(batch_pred.detach().cpu().numpy())
+        prediction_array = np.concatenate(prediction_list, axis=0)
+
+        feature_min, feature_max = self._get_feature_minmax(
+            self.processed_sequence_data, padding_value
+        )
+        n_samples = len(self.processed_sequence_data)
+        if sample_id is None:
+            rng = np.random.default_rng(self.random_seed)
+            sample_id = int(rng.integers(0, n_samples))
+        else:
+            sample_id = int(sample_id)
+        if sample_id < 0 or sample_id >= n_samples:
+            raise ValueError(f"sample_id must be in [0, {n_samples - 1}], got {sample_id}.")
+
+        sample = data_tensor.gamestates[sample_id]
+        if hasattr(sample, "numpy"):
+            sample = sample.numpy()
+        sample = np.asarray(sample)
+        sample_prediction = np.asarray(prediction_array[sample_id])
+
+        true_length = int((sample[:, 0] != padding_value).sum())
+        sample = np.squeeze(sample[:true_length])
+        sample_prediction = np.squeeze(sample_prediction[:true_length])
+
+        num_features = sample.shape[-1]
+        timesteps = np.arange(sample.shape[0])
+        if figsize is None:
+            figsize = (15, num_features * 2)
+
+        plt.figure(figsize=figsize)
+        for feat_idx in range(num_features):
+            plt.subplot(num_features, 1, feat_idx + 1)
+            plt.plot(timesteps, sample[:, feat_idx], label="True", color="blue")
+            plt.plot(
+                timesteps,
+                sample_prediction[:, feat_idx],
+                label="Predicted",
+                color="orange",
+                linestyle="--",
+            )
+            plt.ylabel(f"{self.features_columns[feat_idx]}")
+            plt.ylim(feature_min[feat_idx], feature_max[feat_idx] + 0.1)
+            plt.legend(loc="best")
+            plt.xlabel("Timestep")
+        plt.tight_layout()
+        plt.suptitle(f"sample_id: {sample_id}")
+        plt.show()
+        return sample_id
 
     def _calculate_affinity_matrix(self):
         """
@@ -1677,6 +1771,25 @@ class PatternAnalysis:
             raise ValueError(f"Unknown features selection: {feature_set}. Options are {self.reader.FEATURE_SETS.keys()}")
         
         return feature_columns
+    
+    def _get_feature_minmax(
+        self,
+        processed_sequence_data: np.ndarray,
+        padding_value: float = -999.0,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Get per-feature min and max over non-padding, finite values.
+        Used for consistent y-axis scaling in reconstruction plots.
+        """
+        nonpadding_mask = processed_sequence_data[..., 0] != padding_value
+        min_vals = []
+        max_vals = []
+        for feat_idx in range(processed_sequence_data.shape[-1]):
+            valid = processed_sequence_data[..., feat_idx][nonpadding_mask]
+            valid = valid[np.isfinite(valid)]
+            min_vals.append(np.min(valid))
+            max_vals.append(np.max(valid))
+        return np.array(min_vals), np.array(max_vals)
 
 
     def _load_test_dataset(self, max_samples:int = None):

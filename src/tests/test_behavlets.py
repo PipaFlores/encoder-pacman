@@ -35,7 +35,7 @@ class TestBehavlets:
 
         for level_id in range(400, 800):
             try:
-                Beh_encodings.calculate_behavlets(level_id=level_id)
+                Beh_encodings.calculate_behavlets_level(level_id=level_id)
             except ValueError:
                 continue
 

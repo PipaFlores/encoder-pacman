@@ -261,22 +261,38 @@ class ClusterVisualizer(BaseVisualizer):
         all_labels_in_legend: bool = False,
         ax: plt.Axes | None = None,
         frame_to_maze: bool = False,
+        colormap = None
     ):
         """
         Plot the trajectory embeddings (or geometrical centroids) colored by their cluster assignments.
 
-        This method visualizes the spatial distribution of trajectory centroids,
-        with each point colored according to its cluster membership.
+        This method visualizes the spatial distribution of trajectory centroids or embeddings,
+        with each point colored according to its cluster membership or labels. Supports coloring gray/red for
+        special binary label cases (e.g., anomaly/noise vs. cluster), or categorical colormap for multiple clusters.
+        Handles display in custom axes and allows axis bounds to be set to maze boundaries for contextual visualization.
 
         Args:
-            traj_embeddings (np.ndarray): Array of trajectory centroid coordinates or 2D embedding (n,2)
-            labels (np.ndarray): Labels of the trajectories.
-                For absence/presence labels, provide them as -1 (absence) and >=0 (presence). 
-                This sets them to have gray/red colours.
-            ax (plt.Axes | None, optional): Matplotlib axes to plot on. If None, creates new figure.
-                Defaults to None.
-            show_maze (bool, optional): Whether to set axis limits to maze boundaries.
-                Defaults to True.
+            traj_embeddings (np.ndarray): 
+                Array of shape (n_samples, 2), containing 2D coordinates for each trajectory centroid or embedding.
+            labels (np.ndarray, optional): 
+                Labels (shape: n_samples,) for each trajectory, used for coloring. 
+                If provided and contains -1 (noise/absence) and one other unique label (presence/cluster), will plot -1 as gray and others as red. 
+                For multi-cluster settings, categorical colors are used.
+                If None, all points are plotted in the default color.
+            all_labels_in_legend (bool, optional): 
+                If True, include all cluster labels (including -1) in the plot legend. Defaults to False.
+            ax (plt.Axes | None, optional): 
+                Matplotlib axes object to plot on. If None, a new figure and axes will be created.
+            frame_to_maze (bool, optional): 
+                If True, set axes limits to maze boundaries using MAZE_X_MIN, MAZE_X_MAX, MAZE_Y_MIN, MAZE_Y_MAX class attributes. Defaults to False.
+            colormap (matplotlib.colors.Colormap, optional):
+                Custom colormap to use for cluster plotting. If None, the default self.cmap is used.
+
+        Returns:
+            None. Plots the embeddings (calls plt.show() only if new axes are created).
+
+        Example:
+            >>> visualizer.plot_trajectories_embedding(embeddings, labels=cluster_labels, frame_to_maze=True)
         """
         logger.debug("Plotting trajectories")
         if ax is None:
@@ -299,6 +315,11 @@ class ClusterVisualizer(BaseVisualizer):
         
         # Create a custom colormap that maps -1 to gray
         cmap = self.cmap
+        if colormap:
+            cmap = colormap
+        else:
+            cmap = self.cmap
+        
         cmap.set_under("gray")
 
         if use_red_for_single_cluster:

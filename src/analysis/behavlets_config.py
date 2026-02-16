@@ -2,6 +2,16 @@ from dataclasses import dataclass
 from typing import Dict, Any, Optional, Tuple
 
 
+BEHAVLET_NAME_MAPPING = {
+    "Aggression1": "Hunt close to ghost house",
+    "Aggression3": "Ghost Kills",
+    "Aggression4": "Hunt even after powerpill finishes",
+    "Aggression6": "Chase Ghosts or Collect Dots",
+    "Caution1": "Times trapped by ghost",
+    "Caution3": "Close calls",
+    # Add further mappings as more behavlets are defined
+}
+
 @dataclass
 class Aggression1Config:
     """Hunt close to ghost house
