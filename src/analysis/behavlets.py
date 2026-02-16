@@ -25,14 +25,14 @@ class Behavlets:
     """
 
     NAMES = [
-        "Aggression1",
-        "Aggression3",
-        "Aggression4",
-        "Aggression6",
-        "Caution1",
-        "Caution2a",
-        "Caution2b",
-        "Caution3",
+        "Aggression1", ## Hunt close to ghost house
+        "Aggression3", ## Ghost kills
+        "Aggression4", ## Hunt even after pill finishes
+        "Aggression6", ## Chase ghosts or collect dots
+        "Caution1", ## Times trapped by ghosts
+        "Caution2a", #  Avg distance to ghosts
+        "Caution2b", # Avg distance during hunt
+        "Caution3", # Close calls
     ]
 
     @property
@@ -645,7 +645,7 @@ class Behavlets:
 
         VALUE_THRESHOLD = kwargs.get("VALUE_THRESHOLD", 1)
         GHOST_DISTANCE_THRESHOLD = kwargs.get("GHOST_DISTANCE_THRESHOLD", 5)
-        ONLY_CLOSEST_GHOST = kwargs.get("ONLY_CLOSEST_GHOST", False)
+        ONLY_CLOSEST_GHOST = kwargs.get("ONLY_CLOSEST_GHOST", True)
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
         NORMALIZE_VALUE = kwargs.get("NORMALIZE_VALUE", True)
 
@@ -671,10 +671,15 @@ class Behavlets:
             if i == 0:
                 prev_state = state
                 ghost_distances = [math.inf] * 4
+
+                if prev_state.pacman_attack == 1: ## If gamestates is a slice of the attack mode, this ensures the next condition triggers the start of instance
+                    starts_as_attack = True
+                else:
+                    starts_as_attack = False
             elif i > 0:
                 if (
                     prev_state.pacman_attack == 0 and state.pacman_attack == 1
-                ):  # When powerpill is eaten
+                ) or (starts_as_attack and i == 1):  # When powerpill is eaten
                     pellet_idx = self._get_quadrant_idx(state)
                     starting_gamestep = state.Index
                     starting_timestep = state.time_elapsed
@@ -684,6 +689,8 @@ class Behavlets:
                     ghost_distances = self._get_distance_to_ghosts(
                         pacman_pos, ghost_positions
                     )
+
+                    starts_as_attack = False
 
                 elif state.pacman_attack == 1 and (
                     i != final_state

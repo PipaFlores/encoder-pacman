@@ -346,7 +346,6 @@ class PacmanDataReader:
             raw_sequences = raw_sequences[:max_samples]
             X_padded = X_padded[:max_samples]
             gif_paths = gif_paths[:max_samples]
-            features = features[:max_samples]
 
         if make_gif:
             assert len(raw_sequences) == len(gif_paths)
@@ -1136,6 +1135,14 @@ class PacmanDataReader:
                 videos_directory=videos_directory,
                 gifs_directory=gifs_directory
             )
+        elif sequence_type == "sliding_window":
+            raw_sequences, gif_paths = self.slice_sliding_window(
+            )
+
+        elif sequence_type == "fixed_blocks":
+            raw_sequences, gif_paths = self.slice_fixed_blocks(
+            )
+
         else:    
             raise ValueError(f"Sequence type ({sequence_type}) not valid")
 
@@ -1148,6 +1155,75 @@ class PacmanDataReader:
                         seq["score"] = seq["score"] - seq.iloc[0]["score"]
 
         return raw_sequences, gif_paths
+    
+    def slice_fixed_blocks(self,
+                             make_gif=False,
+                             window_len= 200,
+                             overlapping=True,
+                             stride = 20,
+                             videos_directory="../hpc/videos/",
+                             gifs_directory="../Results/subsequences/"):
+        
+        raw_sequences = []
+        gif_path_list = []
+
+        level_iter = self.level_df["level_id"].unique()
+
+        for level_id in level_iter:
+            gamestates = self.gamestate_df[self.gamestate_df["level_id"] == level_id]
+            total_len = len(gamestates)
+            pointer = 0 
+            while pointer < total_len:
+                slice = gamestates.iloc[pointer:pointer + window_len]
+                raw_sequences.append(slice)
+                if overlapping:
+                    pointer += stride
+                else:
+                    pointer += window_len # non overlapping blocks
+
+                if total_len >= window_len and (total_len - window_len) % stride != 0:
+                    last_slice = gamestates.iloc[-window_len:]
+                    raw_sequences.append(last_slice)
+
+        return raw_sequences, gif_path_list
+    
+    def slice_sliding_window(self,
+                             make_gif=False,
+                             min_len = 100,
+                             stride = 20,
+                             window_growth = 100,
+                             videos_directory="../hpc/videos/",
+                             gifs_directory="../Results/subsequences/"
+                             ):
+        
+        raw_sequences =  []
+        gif_path_list = []
+
+        level_iter = self.level_df["level_id"].unique()
+
+        for level_id in level_iter:
+            gamestates = self.gamestate_df[self.gamestate_df["level_id"] == level_id]
+            
+            window_len = min_len
+            max_len = len(gamestates)
+
+            while window_len < max_len:
+                pointer = 0
+                while pointer < max_len - window_len:
+                    slice = gamestates.iloc[pointer: pointer + window_len]
+                    raw_sequences.append(slice)
+                    pointer += stride
+                
+                if max_len >= window_len and (max_len - window_len) % stride != 0: 
+                    ## When last slice is not possible anymore, instead get a slcie fron the sequence end
+                    last_slice = gamestates.iloc[-window_len:]
+                    raw_sequences.append(last_slice)
+
+                window_len += window_growth
+
+
+        return raw_sequences , gif_path_list
+
 
     def slice_seq_of_each_level(
             self,

@@ -578,3 +578,11 @@ class Transformer_Trainer():
                     }
                 )
         
+        if self.wandb_run:
+            artifact = wandb.Artifact('model', type='model')
+
+            # Add both best and last model files as artifact assets
+            artifact.add_file(self.best_path)
+            artifact.add_file(self.last_path)
+
+            self.wandb_run.log_artifact(artifact)

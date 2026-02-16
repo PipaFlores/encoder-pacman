@@ -261,7 +261,6 @@ class PatternAnalysis:
             self.using_keras = False
             return TSTransformerEncoder(
                 feat_dim= len(self.features_columns),
-                max_len= self.processed_sequence_data.shape[1], # max_sequence_length
                 d_model=self.latent_dimension,
                 dropout=self.dropout,
                 pos_encoding="fixed",
@@ -333,6 +332,7 @@ class PatternAnalysis:
             validation_encodings: pd.DataFrame | None = None,
             force_training: bool = False,
             test_dataset: bool = False,
+            test_run: bool = False,
             close_wandb_logger: bool = True):
         """
         Main fitting method that runs the complete pipeline.
@@ -366,6 +366,8 @@ class PatternAnalysis:
                 If True, trains deep embedding models even if there is an available model (will replace it)
             test_dataset (bool, optional): 
                 If True, uses a built-in test dataset (e.g., PenDigits) for evaluation instead of the main data.
+            test_run (bool, optional):
+                If True, uses only a subset of maximum 500 samples for the pipeline.
             close_wandb_logger (bool, optional):
                 If True, close the wandb logger (if present) after logging validation measures, or training.
                 If False, leaves logger open, useful for logging latent space charts after calling the fit() method.
@@ -381,6 +383,7 @@ class PatternAnalysis:
         if test_dataset == False:
             
             if raw_sequences is None:
+                logger.info(f"Loading sequence type: {self.sequence_type}")
                 self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns = self.reader.make_data(
                     feature_set=self.feature_set,
                     sequence_type=self.sequence_type,
@@ -393,6 +396,12 @@ class PatternAnalysis:
                     return_raw_sequences=True,
                     max_samples=self.max_samples
                 )
+
+                if test_run == True:
+                    self.raw_sequence_data = self.raw_sequence_data[:500]
+                    self.processed_sequence_data = self.processed_sequence_data[:500]
+                    self.gif_path_list = self.gif_path_list[:500]
+
                 logger.info(f"Loaded {len(self.raw_sequence_data)} sequences")
             else:
                 self.raw_sequence_data = raw_sequences
@@ -474,7 +483,7 @@ class PatternAnalysis:
                     logger.info(f"Using preloaded validation encodings")
                     self.validation_encodings = validation_encodings
 
-                self.validation_labels = self.calculate_validation_labels(self.validation_encodings)
+                self.validation_labels = self.recode_validation_labels(self.validation_encodings)
         # Calculate clustering validation measures (ARI, AMI, NMI) for each validation label set
             self.validation_measures =self.calculate_validation_measures(
                 labels = self.labels,
@@ -877,12 +886,15 @@ class PatternAnalysis:
                 verbose=self.verbose
             )
             behavlet_types=[
-                "Aggression1", ## Hunt close to ghost house
-                "Aggression3", ## Ghost kills 
-                "Aggression4", ## Hunt after pill finishes
-                "Caution1", ## Times trapped by ghost
-                "Caution3", ## Close calls
-            ]  # Example behavlets
+        "Aggression1", ## Hunt close to ghost house
+        "Aggression3", ## Ghost kills
+        "Aggression4", ## Hunt even after pill finishes
+        "Aggression6", ## Chase ghosts or collect dots
+        "Caution1", ## Times trapped by ghosts
+        "Caution2a", #  Avg distance to ghosts
+        "Caution2b", # Avg distance during hunt
+        "Caution3", # Close calls
+    ]
                         
             # Get behavlet encodings for validation
             validation_encodings = pd.DataFrame()
@@ -896,8 +908,9 @@ class PatternAnalysis:
                     validation_rows.append(summary_row)
                 except Exception as e:
                     logger.warning(
-                        f"Failed to calculate validation for gamestate idx {idx} (level_id {getattr(gamestate[0], 'level_id', 'unknown')})"
+                        f"Failed to calculate validation for gamestate idx {idx} (level_id {getattr(gamestate.iloc[0], 'level_id', 'unknown')})"
                     )
+                    raise e
                     validation_rows.append(pd.DataFrame())  # Append empty DataFrame to preserve order
 
             # Concatenate all rows in the same order as raw_sequence_list
@@ -912,10 +925,11 @@ class PatternAnalysis:
         else:
             raise NotImplementedError(f"Validation method not supported ({validation_method})")
         
-    def calculate_validation_labels(self, validation_encodings:pd.DataFrame):
+    def recode_validation_labels(self, validation_encodings:pd.DataFrame):
         """
-        Calculates validation labels based on validation encodings.
+        Recodes validation validation encodings as categorical labels.
         It eithers: binarize values to present/not-present, or discretizes into bins or steps.
+        For absence, it recodes them into -1 to align with the clustering algorithms output and visualization methods
         """
         # Binarize each column in validation_encodings: >0 -> 1, <=0 -> -1, unless all zeros (then None)
         # TODO: consider the other behavlets unique nature (as in Aggression3)
@@ -958,7 +972,7 @@ class PatternAnalysis:
             validation_labels (pd.DataFrame): DataFrame where each column is a set of reference/validation labels for the same instances.
 
         Returns:
-            pd.DataFrame: DataFrame indexed by validation_set (column name), with columns 'ARI', 'AMI', and 'NMI'.
+            pd.DataFrame: DataFrame indexed by validation_set (column name), with columns 'ARI', 'AMI', 'NMI'
         """
         
         from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score, normalized_mutual_info_score
@@ -982,9 +996,10 @@ class PatternAnalysis:
                             ami = np.nan
                             nmi = np.nan
                         else:
-                            ari = adjusted_rand_score(labels[mask], val_labels[mask])
-                            ami = adjusted_mutual_info_score(labels[mask], val_labels[mask])
-                            nmi = normalized_mutual_info_score(labels[mask], val_labels[mask])
+                            ari = adjusted_rand_score(val_labels[mask], labels[mask])
+                            ami = adjusted_mutual_info_score(val_labels[mask], labels[mask])
+                            nmi = normalized_mutual_info_score(val_labels[mask], labels[mask])
+
                     validation_measures_rows.append({
                         "validation_set": col,
                         "ARI": ari,
@@ -1278,7 +1293,8 @@ class PatternAnalysis:
                                    validation_set: str | list | None = None,
                                    all_labels_in_legend: bool = False,
                                    title_suffix : str = "",
-                                   save_path:str = None):
+                                   black_background: bool = False,
+                                   colormap = None):
         """
         Plot the trajectory embeddings (or geometrical centroids) colored by their cluster assignments.
         
@@ -1310,9 +1326,70 @@ class PatternAnalysis:
             xlabel = "Reduced Latent Dimension 1"
             ylabel = "Reduced Latent Dimension 2"
 
-            
+        if validation_set == "all":
+            n_of_validation_sets = len(self.validation_labels.columns)
+
+            ncols = 5
+            nrows = (n_of_validation_sets // 6) + 1 # Proper number of rows
+            fig, axs = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows))
+
+            for i, val_set in enumerate(self.validation_labels.columns):
+                # Get labels for this validation set
+                try:
+                    val_labels = self.validation_labels[val_set].to_numpy()
+                except KeyError:
+                    raise KeyError(f"Could not find '{val_set}'. "
+                        f"Possible validation sets are: {list(self.validation_labels.columns)}")
+                
+                # If all values are None, set labels to None
+                if np.all(pd.isnull(val_labels)):
+                    val_labels = None
+                elif np.sum(val_labels) == 0:
+                    val_labels = None
+                
+                # Use the appropriate axis from the subplot array, handling both 1D and 2D cases
+                if isinstance(axs, (list, tuple, np.ndarray)):
+                    if isinstance(axs, np.ndarray) and axs.ndim == 2:
+                        n_cols = axs.shape[1]
+                        row = i // n_cols
+                        col = i % n_cols
+                        current_ax = axs[row, col]
+                    else:
+                        # axs is 1D list or array
+                        current_ax = axs[i] if len(axs) > i else axs[-1]
+                else:
+                    current_ax = axs
+                # Plot on the current axis
+                self.clustervisualizer.plot_trajectories_embedding(
+                    traj_embeddings=traj_embeddings,
+                    labels=val_labels,
+                    ax=current_ax,
+                    all_labels_in_legend=all_labels_in_legend,
+                    frame_to_maze=frame_to_maze,
+                    colormap=colormap
+                )
+                
+                # Set labels and title for this subplot
+                current_ax.set_xlabel(xlabel)
+                current_ax.set_ylabel(ylabel)
+                if val_set.startswith(("Aggression", "Caution")):
+                    try:
+                        from src.analysis.behavlets_config import BEHAVLET_NAME_MAPPING
+                        val_set_prefix = val_set.split("_", 1)[0] if "_" in val_set else val_set
+                        set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
+                    except ImportError:
+                        set_name = val_set
+                else:
+                    set_name = val_set
+
+                current_ax.set_title(f"Validation set: {set_name}")
+
+                if black_background:
+                    current_ax.set_facecolor("black")
+
+
         # Check if validation_set is None or a string (single validation set) One plot
-        if validation_set is None or isinstance(validation_set, str):
+        elif validation_set is None or isinstance(validation_set, str):
             fig, ax = plt.subplots(1, 1, figsize=(6, 6))
 
             if validation_set is not None:
@@ -1342,10 +1419,16 @@ class PatternAnalysis:
                 labels=labels,
                 ax=ax,
                 all_labels_in_legend=all_labels_in_legend,
-                frame_to_maze=frame_to_maze
+                frame_to_maze=frame_to_maze,
+                colormap=colormap
             )
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
+            if validation_set is not None:
+                ax.set_title(f"Validation set: {validation_set}")
+
+            if black_background:
+                ax.set_facecolor("black")
 
         elif isinstance(validation_set, (list, tuple)):
             n_plots = len(validation_set)
@@ -1377,13 +1460,14 @@ class PatternAnalysis:
                     labels=val_labels,
                     ax=current_ax,
                     all_labels_in_legend=all_labels_in_legend,
-                    frame_to_maze=frame_to_maze
+                    frame_to_maze=frame_to_maze,
+                    colormap=colormap
                 )
                 
                 # Set labels and title for this subplot
                 current_ax.set_xlabel(xlabel)
                 current_ax.set_ylabel(ylabel)
-                if self.validation_method == "Behavlets":
+                if val_set.startswith(("Aggression", "Caution")):
                     try:
                         from src.analysis.behavlets_config import BEHAVLET_NAME_MAPPING
                         val_set_prefix = val_set.split("_", 1)[0] if "_" in val_set else val_set
@@ -1395,6 +1479,9 @@ class PatternAnalysis:
 
                 current_ax.set_title(f"Validation set: {set_name}")
 
+                if black_background:
+                    current_ax.set_facecolor("black")
+
         
         fig.suptitle(
             f"{self.sequence_type}_"
@@ -1405,6 +1492,9 @@ class PatternAnalysis:
             f"{title_suffix}"
         )
         fig.tight_layout()
+
+        if black_background:
+            fig.patch.set_facecolor("lightgray")
 
         
         plt.show()
@@ -1630,6 +1720,10 @@ class PatternAnalysis:
             "dropout": self.dropout,
             "latent_dimension": self.latent_dimension,
             "validation_data_split": self.validation_data_split,
+            "elementwise_masking": self.elementwise_masking,
+            "sort_distances": self.sort_distances,
+            "filter_by_pill": self.filter_by_pill,
+            "rebase_score": self.rebase_score,
             # Model architecture
             "embedder_type": self.embedder.__class__.__name__,
 

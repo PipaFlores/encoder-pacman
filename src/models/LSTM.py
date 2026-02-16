@@ -320,6 +320,14 @@ class AE_Trainer():
                     }
                 )
         
+        if self.wandb_run:
+            artifact = wandb.Artifact('model', type='model')
+
+            # Add both best and last model files as artifact assets
+            artifact.add_file(self.best_path)
+            artifact.add_file(self.last_path)
+
+            self.wandb_run.log_artifact(artifact)
         # if self.wandb_run and WANDB_AVAILABLE:
         #     self.wandb_run.finish() ## run is always managed by external calls, so finish it there, after logging other important things (as plots)
 
