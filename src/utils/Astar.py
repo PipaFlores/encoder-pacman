@@ -39,11 +39,16 @@ def generate_squared_walls(wall_positions):
             (0.5, -1),
         ]:  # fill the opposite sides of the square.
             squared_walls.add((wall[0] + direction[0], wall[1] + direction[1]))
+    
+    ## Add the maze ends at -14, -0.5    14.0 , -0.5
+    squared_walls.add((-14.0, -0.5))
+    squared_walls.add((14.0, -0.5) )
     return squared_walls
 
 
 def get_neighbors(pos, wall_positions, step, blocked_positions=None):
     """Get valid neighboring positions (up, right, down, left)."""
+    # print(f"getting neighbor for {pos}")
     TUNNEL_POS = [(-13.5, -0.5), (13.5, -0.5)]
     x, y = pos
     neighbors = [
@@ -89,10 +94,13 @@ def calculate_path_and_distance(start, goal, grid, blocked_positions=None):
     from heapq import heappush, heappop
 
     STEP = 0.5
+    start = transform_to_grid(start)
+    goal = transform_to_grid(goal)
+
+    if goal in grid:
+        return [], math.inf
     if blocked_positions is not None:
-        if (
-            goal in blocked_positions
-        ):  # if the goal is blocked, return an empty path and infinity distance
+        if goal in blocked_positions:
             return [], math.inf
 
     frontier = []
@@ -100,12 +108,16 @@ def calculate_path_and_distance(start, goal, grid, blocked_positions=None):
 
     came_from = {start: None}
     cost_so_far = {start: 0}
+    closed_set = set()
 
     while frontier:
         current = heappop(frontier)[1]
 
+        if current in closed_set:
+            continue
+        closed_set.add(current)
+
         if current == goal:
-            # Reconstruct path
             path = []
             while current is not None:
                 path.append(current)
@@ -114,6 +126,7 @@ def calculate_path_and_distance(start, goal, grid, blocked_positions=None):
             return path, cost_so_far[goal]
 
         for next_pos in get_neighbors(current, grid, STEP, blocked_positions):
+            next_pos = transform_to_grid(next_pos)
             new_cost = cost_so_far[current] + STEP
 
             if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:

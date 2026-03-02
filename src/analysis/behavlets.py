@@ -526,7 +526,7 @@ class Behavlets:
                 ghost_positions = self._get_ghost_pos(state, only_alive=True)
 
                 prev_distance_to_ghosts = self._get_distance_to_ghosts(
-                    pacman_pos, ghost_positions
+                    pacman_pos, ghost_positions, state
                 )
 
             # look gamesteps after pill wears off, within SEARCH_WINDOW, and check if distance to any ghosts diminish
@@ -535,7 +535,7 @@ class Behavlets:
                 ghost_positions = self._get_ghost_pos(state, only_alive=True)
 
                 distance_to_ghosts = self._get_distance_to_ghosts(
-                    pacman_pos, ghost_positions
+                    pacman_pos, ghost_positions, state
                 )
 
                 for i, distance in enumerate(distance_to_ghosts):
@@ -687,7 +687,7 @@ class Behavlets:
                     pacman_pos = (state.Pacman_X, state.Pacman_Y)
                     ghost_positions = self._get_ghost_pos(state, only_alive=True)
                     ghost_distances = self._get_distance_to_ghosts(
-                        pacman_pos, ghost_positions
+                        pacman_pos, ghost_positions, state
                     )
 
                     starts_as_attack = False
@@ -698,7 +698,7 @@ class Behavlets:
                     pacman_pos = (state.Pacman_X, state.Pacman_Y)
                     ghost_positions = self._get_ghost_pos(state, only_alive=True)
                     ghost_distances = self._get_distance_to_ghosts(
-                        pacman_pos, ghost_positions
+                        pacman_pos, ghost_positions, state
                     )
 
                     if not ONLY_CLOSEST_GHOST:  ## Default behavior
@@ -873,30 +873,27 @@ class Behavlets:
                     (state.Pacman_X, state.Pacman_Y)
                 )
                 ghost_positions = self._get_ghost_pos(state, only_alive=True)
-                ghost_positions = [
-                    Astar.transform_to_grid(ghost_pos)
-                    for ghost_pos in ghost_positions
-                    if ghost_pos is not None
-                ]
                 ghost_distances = self._get_distance_to_ghosts(
-                    pacman_pos=pacman_position, ghost_positions=ghost_positions
+                    pacman_pos=pacman_position, ghost_positions=ghost_positions, state=state
                 )
+                logger.debug(f"state {state.Index} ghost distances = {ghost_distances}")
 
+                filtered_grided_ghost_positions = [
+                    Astar.transform_to_grid(ghost_pos) if ghost_pos is not None else None
+                    for ghost_pos in ghost_positions
+                ]
                 # Filter out ghosts based on distance threshold
-                ghost_positions = [
+                # Blocked positions are ghosts within the distance threshold
+                blocked_positions = [
                     position
-                    for idx, position in enumerate(ghost_positions)
-                    if ghost_distances[idx] <= GHOST_DISTANCE_THRESHOLD
+                    for idx, position in enumerate(filtered_grided_ghost_positions)
+                    if ghost_distances[idx] <= GHOST_DISTANCE_THRESHOLD and position is not None
                 ]
-                ghost_distances = [
-                    distance
-                    for distance in ghost_distances
-                    if distance <= GHOST_DISTANCE_THRESHOLD
-                ]
+
                 quadrant = self._get_quadrant_idx(state)
                 opposite_position = OPPOSITE_POSITIONS[quadrant]
 
-                ghosts_in_valid_distance = len(ghost_distances) >= 2
+                ghosts_in_valid_distance = len(blocked_positions) >= 2
 
                 if not ghosts_in_valid_distance:  # Avoid calculating Astar when not necessary, close instance if flagged.
                     if flag:
@@ -926,7 +923,7 @@ class Behavlets:
                     start=pacman_position,
                     goal=opposite_position,
                     grid=wall_grid,
-                    blocked_positions=ghost_positions,
+                    blocked_positions=blocked_positions,
                 )
 
                 blocked_path = astar_to_opposite == math.inf
@@ -1133,7 +1130,7 @@ class Behavlets:
                     )
                 elif DISTANCE_METHOD == "average":
                     ghosts_distances = self._get_distance_to_ghosts(
-                        pacman_pos, ghosts_positions
+                        pacman_pos, ghosts_positions, state
                     )
                     filtered_ghosts_distances = [
                         distance
@@ -1187,7 +1184,7 @@ class Behavlets:
                     )
                 elif DISTANCE_METHOD == "average":
                     ghosts_distances = self._get_distance_to_ghosts(
-                        pacman_pos, ghosts_positions
+                        pacman_pos, ghosts_positions, state
                     )
                     filtered_ghosts_distances = [
                         distance
@@ -1220,7 +1217,7 @@ class Behavlets:
         self.output_attributes = ["value", "instances", "gamesteps", "timesteps"]
 
         CONTEXT_LENGTH = kwargs.get("CONTEXT_LENGTH", None)
-        CLOSE_DISTANCE = kwargs.get("CLOSE_DISTANCE", 1)
+        CLOSE_DISTANCE = kwargs.get("CLOSE_DISTANCE", 2.5)
         SEARCH_WINDOW = kwargs.get("SEARCH_WINDOW", 5)
 
         final_state_idx = len(gamestates) - 1
@@ -1248,7 +1245,7 @@ class Behavlets:
                 pacman_position = (state.Pacman_X, state.Pacman_Y)
                 ghosts_positions = self._get_ghost_pos(state, only_alive=True)
                 ghosts_distances = self._get_distance_to_ghosts(
-                    pacman_position, ghosts_positions
+                    pacman_position, ghosts_positions, state
                 )
                 is_dead = gamestates.iloc[i + 1]["lives"] < state.lives
 
@@ -1260,7 +1257,7 @@ class Behavlets:
                 ## lookout window condition
                 within_lookup_range = i + SEARCH_WINDOW < final_state_idx
 
-                if not flag and (
+                if not flag and ( # Start instance trigger
                     is_any_ghost_close
                     and is_player_alive_after
                     and not is_attacking
@@ -1343,22 +1340,36 @@ class Behavlets:
     def _get_distance_to_ghosts(
         self, 
         pacman_pos: np.ndarray | tuple[float, float],
-        ghost_positions: list[np.ndarray | None]
+        ghost_positions: list[np.ndarray | None],
+        state: NamedTuple,
+        use_precalculated:bool = True
     ) -> list[float]:
         """Get Manhattan distance to ghosts from pacman position.
         inputs a fixed-length list of ghost positions and returns a list of distances to ghosts.
         If ghost position is None, the distance is set to math.inf.
         This is used to avoid calculating distance to ghosts that are not alive or in house.
+        FIXME this is precalculated now based on Astar algorithm. 
         """
-        distance_to_ghosts = [math.inf] * 4
-        for ghost_idx, ghost_pos in enumerate(ghost_positions):
-            if ghost_pos is None:
-                distance_to_ghosts[ghost_idx] = math.inf
-            else:
-                distance_to_ghosts[ghost_idx] = abs(pacman_pos[0] - ghost_pos[0]) + abs(
-                    pacman_pos[1] - ghost_pos[1]
-                )
-        return distance_to_ghosts
+        if use_precalculated == False:
+            distance_to_ghosts = [math.inf] * 4
+            for ghost_idx, ghost_pos in enumerate(ghost_positions):
+                if ghost_pos is None:
+                    distance_to_ghosts[ghost_idx] = math.inf
+                else:
+                    distance_to_ghosts[ghost_idx] = abs(pacman_pos[0] - ghost_pos[0]) + abs(
+                        pacman_pos[1] - ghost_pos[1]
+                    )
+            return distance_to_ghosts
+        
+        elif use_precalculated == True:
+            distance_to_ghosts = []
+            for idx in range(4):
+                dist = getattr(state, f"Ghost{idx+1}_distance")
+                if dist == math.inf:
+                    distance_to_ghosts.append(math.inf)
+                else:
+                    distance_to_ghosts.append(np.float64(dist))
+            return distance_to_ghosts
 
     def _get_quadrant_idx(self, state: NamedTuple) -> int:
         """Get index number based on quadrant position of Pacman.
