@@ -5,7 +5,7 @@ import functools
 import time
 import numpy as np
 import os
-
+from sklearn.neighbors import NearestNeighbors
 
 def timer(func):
     @functools.wraps(func)
@@ -172,3 +172,30 @@ def calculate_velocities(
     dy = np.nan_to_num(dy, nan=0)
 
     return dx, dy
+
+
+
+def neighborhood_hit(X_embedded, labels, n_neighbors=3, metric='euclidean'):
+    """
+    X_embedded : (n_samples, n_components) low-dim embedding
+    labels     : (n_samples,) array-like of class labels
+    n_neighbors: k in the definition
+    """
+    X_embedded = np.asarray(X_embedded)
+    labels = np.asarray(labels)
+    n_samples = X_embedded.shape[0]
+    if labels.shape[0] != n_samples:
+        raise ValueError("labels must have same length as X_embedded")
+
+    # +1 because we get the point itself as neighbor at distance 0
+    nn = NearestNeighbors(n_neighbors=n_neighbors + 1, metric=metric)
+    nn.fit(X_embedded)
+    distances, indices = nn.kneighbors(X_embedded)
+
+    # Exclude self (first column)
+    neighbor_indices = indices[:, 1:]
+    neighbor_labels = labels[neighbor_indices]
+
+    same_label = (neighbor_labels == labels[:, None])
+    # Average fraction of same-labeled neighbors
+    return same_label.mean()
