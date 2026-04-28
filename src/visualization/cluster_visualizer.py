@@ -261,7 +261,8 @@ class ClusterVisualizer(BaseVisualizer):
         all_labels_in_legend: bool = False,
         ax: plt.Axes | None = None,
         frame_to_maze: bool = False,
-        colormap = None
+        colormap = None,
+        dotsize: int | bool = 3,
     ):
         """
         Plot the trajectory embeddings (or geometrical centroids) colored by their cluster assignments.
@@ -335,7 +336,7 @@ class ClusterVisualizer(BaseVisualizer):
                     traj_embeddings[gray_mask, 0],
                     traj_embeddings[gray_mask, 1],
                     c='gray',
-                    s=3,
+                    s=dotsize,
                 )
             
             # Plot red points on top (cluster)
@@ -344,7 +345,7 @@ class ClusterVisualizer(BaseVisualizer):
                     traj_embeddings[red_mask, 0],
                     traj_embeddings[red_mask, 1],
                     c='red',
-                    s=3,
+                    s=dotsize,
                 )
             else:
                 scatter = None
@@ -362,7 +363,7 @@ class ClusterVisualizer(BaseVisualizer):
                 cmap=cmap,
                 vmin=-0.5,
                 vmax=vmax,
-                s=3,
+                s=dotsize,
             )
 
         # Create custom legend with cluster sizes
@@ -412,7 +413,14 @@ class ClusterVisualizer(BaseVisualizer):
             legend_handles.append(handle)
 
         title = "Label" if all_labels_in_legend else "Label (first 8)"
-        legend = ax.legend(handles=legend_handles, title=title, loc="upper left", frameon=True)
+        # legend = ax.legend(handles=legend_handles, title=title, loc="upper left", frameon=True)
+        legend = ax.legend(
+                        handles=legend_handles,
+                        title=title,
+                        loc="upper left",
+                        bbox_to_anchor=(1.02, 1),
+                        frameon=True,
+                    )
         # Make legend font smaller
         for text in legend.get_texts():
             text.set_fontsize(8)
