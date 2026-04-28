@@ -663,9 +663,28 @@ class PatternAnalysis:
         if self.embedder is not None:
             # Deep learning embeddings
             return self._generate_deep_embeddings(padded_data)
-        
         else:
-            self.reader.level_df 
+            # Use UMAP
+            self.wandb_logging = False
+            logger.info("Embedding with self.reducer (e.g., UMAP) from flat raw data to 2 dimensions..")
+            if np.any(np.isinf(padded_data)):  # replace "inf" values with max for each feature
+                X = padded_data.copy()
+                for feat_idx in range(padded_data.shape[-1]):
+                    feat_data = padded_data[..., feat_idx]
+                    finite_max = np.nanmax(feat_data[np.isfinite(feat_data)])
+                    X[..., feat_idx] = np.where(np.isinf(feat_data), finite_max, feat_data)
+                
+                X_flat = X.reshape(len(X), -1)
+            else:
+                X_flat = padded_data.copy().reshape(len(padded_data), -1)
+
+            embeddings = self.reducer.fit_transform(X_flat)
+
+        
+            return embeddings
+
+
+
 
     def _generate_deep_embeddings(self, padded_data: np.ndarray, check_recon_error: bool=True) -> np.ndarray:
         """
@@ -927,11 +946,14 @@ class PatternAnalysis:
         else:
             raise NotImplementedError(f"Validation method not supported ({validation_method})")
         
-    def recode_validation_labels(self, validation_encodings:pd.DataFrame):
+    def recode_validation_labels(self, validation_encodings:pd.DataFrame, use_quantiles_for_bins: bool = False) -> pd.DataFrame:
         """
         Recodes validation validation encodings as categorical labels.
         It eithers: binarize values to present/not-present, or discretizes into bins or steps.
         For absence, it recodes them into -1 to align with the clustering algorithms output and visualization methods
+
+        args:
+            use_quantiles_for_bins: partitions the variable into the 10 deciles of the distribution.
         """
         # Binarize each column in validation_encodings: >0 -> 1, <=0 -> -1, unless all zeros (then None)
         # TODO: consider the other behavlets unique nature (as in Aggression3)
@@ -944,6 +966,21 @@ class PatternAnalysis:
             elif col == "Aggression3_value":
                 # For Aggression3_value (Ghost kills), keep the original value if >0, else set to -1
                 validation_labels[col] = np.where(col_values > 0, col_values, -1)
+            elif col in [
+                # "Aggression1_value",
+                # "Aggression4_value",
+                "Aggression6_value",
+                "Caution2a_value",
+                "Caution2b_value"
+                ]:
+                # Digitize values in Aggression6_value into 10 bins between 
+                #  and 1
+                if use_quantiles_for_bins:
+                    validation_labels[col] = pd.qcut(col_values, q=10, labels=False, duplicates='drop')
+                else:
+                    validation_labels[col] = np.digitize(col_values, np.linspace(min(col_values), max(col_values), 11)[1:-1], right=False)
+
+
             else:
                 validation_labels[col] = np.where(col_values > 0, 1, -1)
 
@@ -954,10 +991,13 @@ class PatternAnalysis:
     def calculate_validation_measures(
             self,
             labels : np.ndarray,
-            validation_labels : pd.DataFrame
+            validation_labels : pd.DataFrame,
+            embeddings: np.ndarray = None,
+            neighborhood_k: int = 3,
+            neighborhood_metric: str = "euclidean"
             ): 
         """
-        Calculates clustering validation measures (ARI, AMI, NMI) between provided cluster labels and validation label sets.
+        Calculates clustering validation measures (ARI, AMI, NMI, neighborhood hit) between provided cluster labels and validation label sets.
 
         This method computes quantitative metrics assessing the match between clustering results and a set of "validation" or reference labels
         (for example, labels derived from domain knowledge or target values such as Behavlet values). For each validation label set (i.e., each column in
@@ -966,21 +1006,25 @@ class PatternAnalysis:
             - ARI (Adjusted Rand Index)
             - AMI (Adjusted Mutual Information)
             - NMI (Normalized Mutual Information)
+            - neighborhood_hit (fraction of same-label neighbors in low-dim embedding, if embeddings is provided)
 
         If the reference labels are all NaN, all zeros, or otherwise degenerate, the metrics are set to NaN for that validation set.
 
         Args:
             labels (np.ndarray): The cluster labels produced by the clustering algorithm.
             validation_labels (pd.DataFrame): DataFrame where each column is a set of reference/validation labels for the same instances.
+            embeddings (np.ndarray, optional): Low-dim embeddings for computing neighborhood hit (optional).
+            neighborhood_k (int, optional): Number of neighbors for neighborhood_hit, default 3.
+            neighborhood_metric (str, optional): Distance metric for neighborhood_hit, default "euclidean".
 
         Returns:
-            pd.DataFrame: DataFrame indexed by validation_set (column name), with columns 'ARI', 'AMI', 'NMI'
+            pd.DataFrame: DataFrame indexed by validation_set (column name), with columns 'ARI', 'AMI', 'NMI', 'neigh_hit'
         """
-        
         from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score, normalized_mutual_info_score
+        from src.utils.utils import neighborhood_hit
+
         if validation_labels is not None:
             validation_measures_rows = []
-
             # If validation_labels is a pandas DataFrame (multiple columns)
             if hasattr(validation_labels, "columns"):
                 for col in validation_labels.columns:
@@ -990,53 +1034,67 @@ class PatternAnalysis:
                         ari = np.nan
                         ami = np.nan
                         nmi = np.nan
+                        neigh_hit = np.nan
                     else:
-                        # Some validation labels may have NaNs, mask those out for fair comparison
                         mask = ~pd.isnull(val_labels)
                         if np.sum(mask) == 0:
                             ari = np.nan
                             ami = np.nan
                             nmi = np.nan
+                            neigh_hit = np.nan
                         else:
                             ari = adjusted_rand_score(val_labels[mask], labels[mask])
                             ami = adjusted_mutual_info_score(val_labels[mask], labels[mask])
                             nmi = normalized_mutual_info_score(val_labels[mask], labels[mask])
+                            if embeddings is not None:
+                                # neighborhood_hit ignores masked (NaN) indices, so mask them out if present
+                                neigh_hit = neighborhood_hit(
+                                    embeddings[mask], val_labels[mask], n_neighbors=neighborhood_k, metric=neighborhood_metric
+                                )
+                            else:
+                                neigh_hit = np.nan
 
                     validation_measures_rows.append({
                         "validation_set": col,
                         "ARI": ari,
                         "AMI": ami,
-                        "NMI": nmi
+                        "NMI": nmi,
+                        "neigh_hit": neigh_hit
                     })
             # If validation_labels is a 1D numpy array or list-like (single label set)
             else:
                 val_labels = np.asarray(validation_labels)
-                # Only compute if val_labels is not all NaN and not all zeros
                 if np.all(pd.isnull(val_labels)) or (np.unique(val_labels).size == 1 and np.unique(val_labels)[0] in [None, np.nan, 0]):
                     ari = np.nan
                     ami = np.nan
                     nmi = np.nan
+                    neigh_hit = np.nan
                 else:
                     mask = ~pd.isnull(val_labels)
                     if np.sum(mask) == 0:
                         ari = np.nan
                         ami = np.nan
                         nmi = np.nan
+                        neigh_hit = np.nan
                     else:
                         ari = adjusted_rand_score(labels[mask], val_labels[mask])
                         ami = adjusted_mutual_info_score(labels[mask], val_labels[mask])
                         nmi = normalized_mutual_info_score(labels[mask], val_labels[mask])
+                        if embeddings is not None:
+                            neigh_hit = neighborhood_hit(
+                                embeddings[mask], val_labels[mask], n_neighbors=neighborhood_k, metric=neighborhood_metric
+                            )
+                        else:
+                            neigh_hit = np.nan
                 validation_measures_rows.append({
                     "validation_set": "validation_labels",
                     "ARI": ari,
                     "AMI": ami,
-                    "NMI": nmi
+                    "NMI": nmi,
+                    "neigh_hit": neigh_hit
                 })
-            
             validation_measures = pd.DataFrame(validation_measures_rows).set_index("validation_set")
-
             return validation_measures
-        
 
     def summarize(self):
         """
