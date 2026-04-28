@@ -231,7 +231,7 @@ class PacmanDataReader:
             )
             self.psychometrics_df = pd.read_csv(
                 os.path.join(
-                    self.data_folder, r"psych\AiPerCogPacman_DATA_2026-01-27_1023.csv"
+                    self.data_folder, r"psych\AiPerCogPacman_DATA_2026-04-16_1052.csv"
                 )
             )
 
@@ -315,7 +315,6 @@ class PacmanDataReader:
                                                                    rebase_scores=rebase_scores)
             self.gamestate_df = non_normalized_gamestate_df # return to original raw dataframe
 
-
         # Local normalizations
         if normalization == "sequence": ## across sequence subset (e.g., across first 5 seconds)
             df = Normalizer.normalize(pd.concat(raw_sequences))
@@ -357,6 +356,107 @@ class PacmanDataReader:
 
         return X_padded, gif_paths, features
     
+    def process_raw_sequences(
+    self,
+    raw_sequences: list[pd.DataFrame],
+    feature_set: str = "Pacman",
+    normalization: str | None = None,
+    rebase_scores: bool = True,
+    padding_value: float = -999.0,
+    sort_ghost_distances: bool = True,
+    max_samples: int | None = None,
+) -> tuple[np.ndarray, list[str]]:
+        """
+        Process pre-sliced raw_sequences similarly to `make_data`, focusing on
+        normalization (global / sequence / sample) and feature filtering.
+
+        Assumes each dataframe in `raw_sequences` is a slice of `self.gamestate_df`
+        and keeps the original index (e.g. game_state_id).
+
+        Returns padded sequences and list of features names
+        """
+        try:
+            features = self.FEATURE_SETS[feature_set]
+        except KeyError as exc:
+            raise ValueError(f"Unknown features selection: {feature_set}") from exc
+
+        # Normalize "none" string to None
+        if isinstance(normalization, str) and normalization.lower() == "none":
+            normalization = None
+
+        # Initialize normalizer if needed
+        if normalization is not None:
+            from src.datahandlers import FeatureNormalizer
+            normalizer = FeatureNormalizer()
+        else:
+            normalizer = None
+
+        # ---- Normalization -------------------------------------------------
+        if normalization == "global":
+            # 1) normalize the full gamestate_df
+            non_normalized_gamestate_df = self.gamestate_df
+            gamestate_norm = normalizer.normalize(non_normalized_gamestate_df)
+
+            # 2) re-create each sequence by looking up the same indices
+            normalized_sequences = [
+                gamestate_norm.loc[seq.index].reset_index(drop=True)
+                for seq in raw_sequences
+            ]
+
+        elif normalization == "sequence":
+            # Normalize across the concatenation of all sequences, then split back
+            df_concat = pd.concat(raw_sequences, ignore_index=True)
+            df_norm = normalizer.normalize(df_concat)
+
+            lengths = [len(seq) for seq in raw_sequences]
+            starts = np.cumsum([0] + lengths[:-1])
+            ends = np.cumsum(lengths)
+            normalized_sequences = [
+                df_norm.iloc[start:end].reset_index(drop=True)
+                for start, end in zip(starts, ends)
+            ]
+
+        elif normalization == "sample":
+            # Per-sequence normalization
+            normalized_sequences = [normalizer.normalize(seq) for seq in raw_sequences]
+
+        else:
+            # No normalization
+            normalized_sequences = raw_sequences
+
+        # Rebase the scores so that each sequence starts at zero
+        if rebase_scores:
+            normalized_sequences = [
+                seq.assign(score=seq["score"] - seq["score"].iloc[0])
+                if "score" in seq.columns and not seq.empty else seq
+                for seq in normalized_sequences
+            ]
+
+        # ---- Feature selection + padding -----------------------------------
+        filtered = [sequence[features].to_numpy() for sequence in normalized_sequences]
+        X_padded = self.padding_sequences(filtered, padding_value=padding_value)
+
+        # Optional ghost-distance sorting
+        if sort_ghost_distances:
+            ghost_idx = [
+                i for i, col in enumerate(features)
+                if col.startswith("Ghost") and col.endswith("_distance")
+            ]
+            if ghost_idx:
+                X_padded[..., ghost_idx] = np.sort(X_padded[..., ghost_idx], axis=-1)
+
+        # Optional truncation
+        if max_samples is not None:
+            raw_sequences = raw_sequences[:max_samples]
+            X_padded = X_padded[:max_samples]
+
+        # Sanity checks
+        assert len(raw_sequences) == len(X_padded)
+        assert X_padded.shape[-1] == len(features)
+
+        return X_padded, features
+
+
     ### PRE-PROCESSING METHODS
     def _calculate_astar_distances(self):
         """
@@ -371,12 +471,12 @@ class PacmanDataReader:
             pd.DataFrame: The updated gamestate DataFrame with Astar distances for each ghost.
         """
         from src.utils import Astar
+        from tqdm import tqdm
 
         gamestate_df = self.gamestate_df.copy()
         wall_grid = Astar.generate_squared_walls(load_maze_data()[0])
 
-
-        for state in gamestate_df.itertuples():
+        for state in tqdm(gamestate_df.itertuples(), total=len(gamestate_df), desc="Calculating A* distances"):
             pac_pos = (state.Pacman_X, state.Pacman_Y)
             ghost_positions = [
                 (getattr(state, f"Ghost{i + 1}_X"), getattr(state, f"Ghost{i + 1}_Y"))
@@ -825,6 +925,8 @@ class PacmanDataReader:
                         gamestate_df.loc[state.Index, "ghost4_state"] = 0
 
         return gamestate_df
+
+    ### DATA HANDLING METHODS
 
     def _filter_gamestate_data(
         self,
