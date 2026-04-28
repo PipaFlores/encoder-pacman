@@ -270,7 +270,7 @@ class TSTransformerEncoder(nn.Module):
 
     def __init__(self, 
                  feat_dim, # Dimensionality of data features
-                 max_len: int | None = None, ## If none, use the max length defined in dataclass  TODO implement 
+                 max_len: int = 1024,
                  d_model: int = 128,  # or 64, 256, 512
                  n_heads: int = 8, # or 16 
                  num_layers: int = 3, # or 1 
@@ -335,7 +335,7 @@ class TSTransformerEncoder(nn.Module):
     def encode(self, 
                X, 
                padding_masks, 
-               pooling = False):
+               pooling = False): ## pooling is True when extracting deep embeddings in pattern analysis
         # permute because pytorch convention for transformers is [seq_length, batch_size, feat_dim]. padding_masks [batch_size, feat_dim]
         inp = X.permute(1, 0, 2)
         
