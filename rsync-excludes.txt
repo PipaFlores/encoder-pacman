@@ -1,7 +1,9 @@
 .git
 credentials.py
 __pycache__/
-data/
+data/*.pkl
+data/MNIST/
+data/pilot/
 playground.*
 .Rproj.user
 .RData

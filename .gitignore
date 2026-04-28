@@ -36,3 +36,5 @@ trained_models/
 hpc/videos/
 *.html
 *.gif
+
+wandb/
