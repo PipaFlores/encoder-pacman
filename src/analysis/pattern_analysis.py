@@ -1291,12 +1291,17 @@ class PatternAnalysis:
         return
     
     def plot_latent_space_overview(self,
+                                   custom_embeddings: np.ndarray | list[float] | None = None,
                                    custom_labels: np.ndarray | list[int] | None = None,
                                    validation_set: str | list | None = None,
+                                   mask: np.ndarray | None = None,
+                                   pretty_val_title: bool = True,
                                    all_labels_in_legend: bool = False,
                                    title_suffix : str = "",
+                                   custom_title : str | None = None,
                                    black_background: bool = False,
-                                   colormap = None):
+                                   colormap = None,
+                                   dotsize: bool | int = 3):
         """
         Plot the trajectory embeddings (or geometrical centroids) colored by their cluster assignments.
         
@@ -1308,22 +1313,28 @@ class PatternAnalysis:
             validation_set (str | list | None): Validation set name or indices.  
                                                 If provided as str, use labels for that validation set.
                                                 If None, use main clustering results.
+            mask (np.ndarray[bool]): Boolean mask of len == self.reduced_embeddings to filter from.
             all_labels_in_legend (bool): If True, show all labels in the legend; otherwise, show only the first 8.
             title_suffix (str): Optional string to append to the plot's title.
             save_path (str): Path to save the plot. If None, the plot is not saved ## FIXME not implemented.
         """
         if custom_labels is not None and validation_set is not None:
             raise SyntaxError("Provided both custom_labels and validation_set. Only one of them can be used")
+        if mask is not None:
+            assert len(mask) == len(self.reduced_embeddings), "mask need to be same len as embeddings/sample size"
+        if custom_embeddings is not None:
+            assert len(custom_embeddings) == len(self.raw_sequence_data), "custom embeddings need to be same len of PA class sample size"
 
-
-        if isinstance(self.clusterer, GeomClustering):
+        if isinstance(self.clusterer, GeomClustering): ## Kind of deprecated, for now
             self.trajectory_centroids = self._calculate_trajectory_centroids()  # Geometrical embedding (centroid)
             traj_embeddings = self.trajectory_centroids
             frame_to_maze = True
             xlabel = "X coordinate"
             ylabel = "Y coordinate"
         else:
-            traj_embeddings = self.reduced_embeddings
+            
+            traj_embeddings = self.reduced_embeddings if custom_embeddings is None else custom_embeddings
+            traj_embeddings = traj_embeddings if mask is None else traj_embeddings[mask]
             frame_to_maze = False
             xlabel = "Reduced Latent Dimension 1"
             ylabel = "Reduced Latent Dimension 2"
@@ -1339,6 +1350,7 @@ class PatternAnalysis:
                 # Get labels for this validation set
                 try:
                     val_labels = self.validation_labels[val_set].to_numpy()
+                    val_labels = val_labels if mask is None else val_labels[mask]
                 except KeyError:
                     raise KeyError(f"Could not find '{val_set}'. "
                         f"Possible validation sets are: {list(self.validation_labels.columns)}")
@@ -1368,19 +1380,21 @@ class PatternAnalysis:
                     ax=current_ax,
                     all_labels_in_legend=all_labels_in_legend,
                     frame_to_maze=frame_to_maze,
-                    colormap=colormap
+                    colormap=colormap,
+                    dotsize=dotsize
                 )
                 
                 # Set labels and title for this subplot
                 current_ax.set_xlabel(xlabel)
                 current_ax.set_ylabel(ylabel)
-                if val_set.startswith(("Aggression", "Caution")):
-                    try:
-                        from src.analysis.behavlets_config import BEHAVLET_NAME_MAPPING
-                        val_set_prefix = val_set.split("_", 1)[0] if "_" in val_set else val_set
-                        set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
-                    except ImportError:
-                        set_name = val_set
+                if pretty_val_title:
+                    if val_set.startswith(("Aggression", "Caution")):
+                        try:
+                            from src.analysis.behavlets_config import BEHAVLET_NAME_MAPPING
+                            val_set_prefix = val_set.split("_", 1)[0] if "_" in val_set else val_set
+                            set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
+                        except ImportError:
+                            set_name = val_set
                 else:
                     set_name = val_set
 
@@ -1409,7 +1423,7 @@ class PatternAnalysis:
 
             elif custom_labels is not None:
                 # Use custom labels
-                assert len(custom_labels) == len(traj_embeddings)
+                assert len(custom_labels) == len(traj_embeddings), (f"custom_labels length ({len(custom_labels)}) must match traj_embeddings length ({len(traj_embeddings)})." )
                 labels = np.array(custom_labels)
             
             else: 
@@ -1422,7 +1436,8 @@ class PatternAnalysis:
                 ax=ax,
                 all_labels_in_legend=all_labels_in_legend,
                 frame_to_maze=frame_to_maze,
-                colormap=colormap
+                colormap=colormap,
+                dotsize=dotsize
             )
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
@@ -1463,19 +1478,21 @@ class PatternAnalysis:
                     ax=current_ax,
                     all_labels_in_legend=all_labels_in_legend,
                     frame_to_maze=frame_to_maze,
-                    colormap=colormap
+                    colormap=colormap,
+                    dotsize=dotsize
                 )
                 
                 # Set labels and title for this subplot
                 current_ax.set_xlabel(xlabel)
                 current_ax.set_ylabel(ylabel)
-                if val_set.startswith(("Aggression", "Caution")):
-                    try:
-                        from src.analysis.behavlets_config import BEHAVLET_NAME_MAPPING
-                        val_set_prefix = val_set.split("_", 1)[0] if "_" in val_set else val_set
-                        set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
-                    except ImportError:
-                        set_name = val_set
+                if pretty_val_title:
+                    if val_set.startswith(("Aggression", "Caution")):
+                        try:
+                            from src.analysis.behavlets_config import BEHAVLET_NAME_MAPPING
+                            val_set_prefix = val_set.split("_", 1)[0] if "_" in val_set else val_set
+                            set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
+                        except ImportError:
+                            set_name = val_set
                 else:
                     set_name = val_set
 
@@ -1484,15 +1501,18 @@ class PatternAnalysis:
                 if black_background:
                     current_ax.set_facecolor("black")
 
-        
-        fig.suptitle(
-            f"{self.sequence_type}_"
-            f"f{len(self.features_columns)}_"
-            f"{self.embedder.__class__.__name__}_"
-            f"{self.reducer.__class__.__name__}_"
-            f"{self.clusterer.__class__.__name__}"
-            f"{title_suffix}"
-        )
+        if custom_title:
+            fig.suptitle(custom_title)
+        else:
+
+            fig.suptitle(
+                f"{self.sequence_type}_"
+                f"f{len(self.features_columns)}_"
+                f"{self.embedder.__class__.__name__}_"
+                f"{self.reducer.__class__.__name__}_"
+                f"{self.clusterer.__class__.__name__}"
+                f"{title_suffix}"
+            )
         fig.tight_layout()
 
         # if black_background:
