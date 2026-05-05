@@ -318,6 +318,8 @@ class ClusterVisualizer(BaseVisualizer):
         cmap = self.cmap
         if colormap:
             cmap = colormap
+        if colormap == "viridis":
+            cmap = plt.cm.viridis
         else:
             cmap = self.cmap
         

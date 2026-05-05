@@ -189,7 +189,7 @@ class FeatureNormalizer:
     def _default_strategies(self) -> Dict[str, Callable[[pd.Series], pd.Series]]:
         strategies: Dict[str, Callable[[pd.Series], pd.Series]] = {}
 
-        counter_columns = ("score", "lives", "pellets")
+        counter_columns = ("score", "lives", "pellets", "powerPellets")
         binary_columns = [
             "pacman_attack",
             "powerpelletstate_1",

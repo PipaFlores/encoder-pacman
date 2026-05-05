@@ -27,7 +27,7 @@ class PacmanDataset(Dataset):
             gamestates (torch.Tensor or np.ndarray): Array or tensor of shape (n_trajectories, sequence_length, features)
                 containing the padded, and processed, game state sequences per trajectory.
             padding_value (float, optional): Value used for padding invalid timesteps. Default: -999.
-            elementwise_maskings (bool): Whether or not to use element-wise masking 
+            elementwise_maskings (bool): Whether or not to use element-wise masking for infinite values (e.g., ghost distances)
 
         Attributes:
             gamestates (torch.Tensor): Tensor of shape (n_trajectories, sequence_length, features), containing the data.
