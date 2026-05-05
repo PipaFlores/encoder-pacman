@@ -382,44 +382,10 @@ class PatternAnalysis:
         
         # Step 1: Load data if not provided
         
-        if test_dataset == False:
-            
-            if raw_sequences is None:
-                logger.info(f"Loading sequence type: {self.sequence_type}")
-                self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns = self.reader.make_data(
-                    feature_set=self.feature_set,
-                    sequence_type=self.sequence_type,
-                    context=self.context,
-                    rebase_scores=self.rebase_score,
-                    filter_by_pill=self.filter_by_pill,
-                    sort_ghost_distances=self.sort_distances,
-                    normalization=self.normalization,
-                    make_gif=self.augmented_visualization,
-                    return_raw_sequences=True,
-                    max_samples=self.max_samples
-                )
-
-                if test_run == True:
-                    self.raw_sequence_data = self.raw_sequence_data[:500]
-                    self.processed_sequence_data = self.processed_sequence_data[:500]
-                    self.gif_path_list = self.gif_path_list[:500]
-
-                logger.info(f"Loaded {len(self.raw_sequence_data)} sequences")
-            else:
-                self.raw_sequence_data = raw_sequences
-                self.processed_sequence_data = processed_sequences
-                self.features_columns = features_columns
-                self.gif_path_list = gif_path_list
-                logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences")
-
-            logger.info(f"Using {len(self.features_columns)} features: {self.features_columns}")
-                
-            self.trajectory_list = [self.reader.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in self.raw_sequence_data]
-            self.metadata_dictionary = {}
-            for key in self.trajectory_list[0].metadata.keys():
-                self.metadata_dictionary[key] = np.array([traj.metadata[key] for traj in self.trajectory_list])
-        else:
-            self._load_test_dataset()
+        self.build_data(raw_sequences=raw_sequences,
+                        processed_sequences=processed_sequences, 
+                        gif_path_list=gif_path_list, 
+                        features_columns=features_columns)
 
         # Step 2a: load or train embedding model. GeomClustering skips this step
         
@@ -501,6 +467,51 @@ class PatternAnalysis:
         
         logger.info("Pipeline completed successfully!")
         return self
+
+    def build_data(self, raw_sequences=None, 
+                   processed_sequences=None, 
+                   gif_path_list=None, 
+                   features_columns=None, 
+                   test_dataset=False, 
+                   test_run=False):
+        
+        if test_dataset == False:
+            if raw_sequences is None:
+                logger.info(f"Loading sequence type: {self.sequence_type}")
+                self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns = self.reader.make_data(
+                    feature_set=self.feature_set,
+                    sequence_type=self.sequence_type,
+                    context=self.context,
+                    rebase_scores=self.rebase_score,
+                    filter_by_pill=self.filter_by_pill,
+                    sort_ghost_distances=self.sort_distances,
+                    normalization=self.normalization,
+                    make_gif=self.augmented_visualization,
+                    return_raw_sequences=True,
+                    max_samples=self.max_samples
+                )
+
+                if test_run == True:
+                    self.raw_sequence_data = self.raw_sequence_data[:500]
+                    self.processed_sequence_data = self.processed_sequence_data[:500]
+                    self.gif_path_list = self.gif_path_list[:500]
+
+                logger.info(f"Loaded {len(self.raw_sequence_data)} sequences")
+            else:
+                self.raw_sequence_data = raw_sequences
+                self.processed_sequence_data = processed_sequences
+                self.features_columns = features_columns
+                self.gif_path_list = gif_path_list
+                logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences")
+
+            logger.info(f"Using {len(self.features_columns)} features: {self.features_columns}")
+                
+            self.trajectory_list = [self.reader.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in self.raw_sequence_data]
+            self.metadata_dictionary = {}
+            for key in self.trajectory_list[0].metadata.keys():
+                self.metadata_dictionary[key] = np.array([traj.metadata[key] for traj in self.trajectory_list])
+        else:
+            self._load_test_dataset()
 
     ### EMBEDDING
 
