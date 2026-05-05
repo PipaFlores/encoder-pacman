@@ -70,16 +70,32 @@ class PacmanDataReader:
         "Ghost3_distance", "Ghost4_distance",
     ],
 
-    "Experimental": [
-        "Ghost1_distance", "Ghost2_distance",
-        "Ghost3_distance", "Ghost4_distance",
-        "score", "lives"
-    ],
     
     "Experimental2": [
         "Ghost1_distance", "Ghost2_distance",
         "Ghost3_distance", "Ghost4_distance",
         "score"
+    ],
+
+    "all_features": [
+        "Pacman_X", "Pacman_Y",
+        "Ghost1_X", "Ghost1_Y",
+        "Ghost2_X", "Ghost2_Y",
+        "Ghost3_X", "Ghost3_Y",
+        "Ghost4_X", "Ghost4_Y",
+        "Ghost1_distance", "Ghost2_distance",
+        "Ghost3_distance", "Ghost4_distance",
+        "score",
+        "powerPellets",
+        "pellets",
+        "available_pellets_states",
+        "powerpelletstate_1",
+        "powerpelletstate_2",
+        "powerpelletstate_3",
+        "powerpelletstate_4",
+        "fruitState_1",
+        "fruitState_2",
+
     ]
     }
 
@@ -284,7 +300,7 @@ class PacmanDataReader:
         
         seq_type = sequence_type
         try:
-            features = self.FEATURE_SETS[feature_set]
+            features = list(self.FEATURE_SETS[feature_set])
         except KeyError as exc:
             raise ValueError(f"Unknown features selection: {feature_set}") from exc
         
@@ -328,8 +344,23 @@ class PacmanDataReader:
         elif normalization is None:
             normalized_sequences = raw_sequences
 
+        if "available_pellets_states" not in features:
+            filtered = [sequence[features].to_numpy() for sequence in normalized_sequences] 
 
-        filtered = [sequence[features].to_numpy() for sequence in normalized_sequences]
+        else:
+            ## Expand the boolean state list into its 244 dimensions for the numpy array and drop the original column
+            logger.info("expanding pellet state features")
+            pellets_stack_list = [np.stack(
+                sequence["available_pellets_states"].to_numpy()) for sequence in normalized_sequences
+            ]
+            filtered = [np.concatenate([sequence[features].drop(columns="available_pellets_states"), pellet_stack], axis=1)
+                         for sequence, pellet_stack in zip(normalized_sequences, pellets_stack_list)]
+            
+            features.remove("available_pellets_states")
+            for i in range(244):
+                features.append(f"pellet{i}_state")
+            
+
         X_padded = self.padding_sequences(filtered, padding_value=padding_value)
 
         if sort_ghost_distances:
@@ -376,7 +407,7 @@ class PacmanDataReader:
         Returns padded sequences and list of features names
         """
         try:
-            features = self.FEATURE_SETS[feature_set]
+            features = list(self.FEATURE_SETS[feature_set])
         except KeyError as exc:
             raise ValueError(f"Unknown features selection: {feature_set}") from exc
 
@@ -431,6 +462,24 @@ class PacmanDataReader:
                 if "score" in seq.columns and not seq.empty else seq
                 for seq in normalized_sequences
             ]
+
+        if "available_pellets_states" not in features:
+            filtered = [sequence[features].to_numpy() for sequence in normalized_sequences] 
+
+        else:
+            ## Expand the boolean state list into its 244 dimensions for the numpy array and drop the original column
+            logger.info("expanding pellet state features")
+            pellets_stack_list = [np.stack(
+                sequence["available_pellets_states"].to_numpy()) for sequence in normalized_sequences
+            ]
+            filtered = [np.concatenate([sequence[features].drop(columns="available_pellets_states"), pellet_stack], axis=1)
+                         for sequence, pellet_stack in zip(normalized_sequences, pellets_stack_list)]
+            
+            features.remove("available_pellets_states")
+            for i in range(244):
+                features.append(f"pellet{i}_state")
+
+
 
         # ---- Feature selection + padding -----------------------------------
         filtered = [sequence[features].to_numpy() for sequence in normalized_sequences]
@@ -512,7 +561,7 @@ class PacmanDataReader:
         return gamestate_df
 
 
-    def _process_pellet_positions(self):
+    def _process_pellet_positions(self, include_binary_states = True):
         """
         Processes and reconstructs the available pellet positions for each game state in the Pacman game.
 
@@ -526,6 +575,7 @@ class PacmanDataReader:
         Returns:
             pd.DataFrame: A copy of the gamestate DataFrame with an added 'available_pellets' column,
                           where each entry is an array of (x, y) positions of remaining pellets for that state.
+                          If include_binary_states, then includes a list of binary values for each pellet state (244 values)
         """
 
         MAZE_X_MIN: int = -13.5
@@ -555,18 +605,27 @@ class PacmanDataReader:
             pellet_states[y_idx, x_idx] = 1
 
         initial_available_pellet_pos = np.array(
+            
             [
                 (x_grid[idx[1]], y_grid[idx[0]])
                 for idx, pellet_state in np.ndenumerate(pellet_states)
                 if pellet_state == 1
             ]
         )
+        initial_available_pellet_state = np.ones(shape=len(initial_available_pellet_pos))
 
-        initial_powerpill_pos = [
-            [12.5, -9.5],
-            [-12.5, -9.5],
-            [-12.5, 10.5],
-            [12.5, 10.5],
+        initial_powerpill_pos = np.array(
+            [
+                [12.5, -9.5],
+                [-12.5, -9.5],
+                [-12.5, 10.5],
+                [12.5, 10.5],
+            ]
+        )
+
+        powerpill_indices = [
+            np.where(np.all(np.isclose(initial_available_pellet_pos, p), axis=1))[0][0]
+            for p in initial_powerpill_pos
         ]
 
         gamestate_df["available_pellets"] = [
@@ -576,78 +635,109 @@ class PacmanDataReader:
             initial_powerpill_pos.copy() for _ in range(len(gamestate_df))
         ]
 
+        gamestate_df["available_pellets_states"] = [
+            initial_available_pellet_state.copy() for _ in range(len(gamestate_df))
+        ]
+
         for level in gamestate_df["level_id"].unique():
             gamestates = gamestate_df.loc[gamestate_df["level_id"] == level]
-            logger.info(f"processing level {level}")
 
             for i, gamestate in enumerate(gamestates.itertuples()):
-                if i == 0:
+                if i == 0: ## Handling the different starting situations (sometimes a game starts fast and one or two pellets are already registered as eaten)
                     pacman_pos = np.array([gamestate.Pacman_X, gamestate.Pacman_Y])
                     distances = np.linalg.norm(
                         gamestate.available_pellets - pacman_pos, axis=1
                     )
                     if gamestate.pellets == 244:
                         available_pellet_pos = initial_available_pellet_pos
+                        available_pellet_state = initial_available_pellet_state
+
                     elif gamestate.pellets == 243:
                         closest_pellet_idx = np.argmin(distances)
                         available_pellet_pos = np.delete(
                             gamestate.available_pellets, closest_pellet_idx, axis=0
                         )
+                        available_pellet_state = gamestate.available_pellets_states.copy()
+                        available_pellet_state[closest_pellet_idx] = 0
 
                     elif gamestate.pellets == 242:
                         closest_pellets_indices = np.argsort(distances)[:2]
                         available_pellet_pos = np.delete(
                             gamestate.available_pellets, closest_pellets_indices, axis=0
                         )
+                        available_pellet_state = gamestate.available_pellets_states.copy()
+                        available_pellet_state[closest_pellets_indices,] = 0
+
 
                     gamestate_df.at[gamestate.Index, "available_pellets"] = (
                         available_pellet_pos
                     )
+                    gamestate_df.at[gamestate.Index, "available_pellets_states"] = (
+                        available_pellet_state
+                    )
 
                 elif i > 0:
                     pacman_pos = np.array([gamestate.Pacman_X, gamestate.Pacman_Y])
-                    prev_pellets = gamestate_df.at[
-                        gamestate.Index - 1, "available_pellets"
+                    prev_pellet_state = gamestate_df.at[
+                        gamestate.Index - 1, "available_pellets_states"
                     ]
-                    if len(prev_pellets) == 0:
-                        break
-                    distances = np.linalg.norm(prev_pellets - pacman_pos, axis=1)
-                    closest_pellet_idx = np.argmin(distances)
+
+                    # prev_pellet = gamestate_df.at[
+                    #     gamestate.Index - 1, "available_pellets"
+                    # ]
+                    
+                    # assert len(prev_pellet) == np.count_nonzero(prev_pellet_state), f"prev_pellet_positions {len(prev_pellet)} and prev_pellet_states {np.count_nonzero(prev_pellet_state)} not equal in state {i} index {gamestate.Index}"
+                    
+                    # distances = np.linalg.norm(prev_pellet - pacman_pos, axis=1)
+
+                    distances = np.zeros(shape=[initial_available_pellet_state.shape[0],]) + 99
+
+                    distances[prev_pellet_state.astype(bool)] = np.linalg.norm(initial_available_pellet_pos[prev_pellet_state.astype(bool), : ] - pacman_pos, axis=1) # Calculating distance, masking for all previously eaten pellets
+
+                    closest_pellet_idx = np.argmin(distances) ## getting the closest pellet (from the active)
+
                     pellet_counter_change = (
                         gamestate.pellets
                         - gamestate_df.at[gamestate.Index - 1, "pellets"]
                     )
 
                     # Double check for distance collision or counter change to be secure.
+                    # If pellet is eaten, switch its boolean value
                     if (
                         distances[closest_pellet_idx] <= 0.50
                         or pellet_counter_change == -1
-                    ):
-                        available_pellet_pos = np.delete(
-                            prev_pellets, closest_pellet_idx, axis=0
-                        )
+                    ): 
 
-                        powerpill_mask = np.any(
-                            np.all(
-                                available_pellet_pos[:, None] == initial_powerpill_pos,
-                                axis=2,
-                            ),
-                            axis=1,
-                        )
-                        available_powerpills = available_pellet_pos[powerpill_mask]
+                        available_pellet_state = prev_pellet_state.copy()
+                        available_pellet_state[closest_pellet_idx] = 0
+
+                        available_pellet_pos = initial_available_pellet_pos[available_pellet_state.astype(bool)]
+
+                        assert len(available_pellet_pos) == np.count_nonzero(available_pellet_state)
+                        
+                        available_powerpills_states = available_pellet_state[powerpill_indices]
+                        available_powerpills_pos = initial_powerpill_pos[available_powerpills_states.astype(bool)]
+
+
 
                         gamestate_df.at[gamestate.Index, "available_pellets"] = (
                             available_pellet_pos
                         )
                         gamestate_df.at[gamestate.Index, "available_powerpills"] = (
-                            available_powerpills
+                            available_powerpills_pos
+                        )
+                        gamestate_df.at[gamestate.Index, "available_pellets_states"] = (
+                            available_pellet_state
                         )
                     else:
                         gamestate_df.at[gamestate.Index, "available_pellets"] = (
-                            prev_pellets
+                            gamestate_df.at[gamestate.Index - 1, "available_pellets"]
                         )
                         gamestate_df.at[gamestate.Index, "available_powerpills"] = (
                             gamestate_df.at[gamestate.Index - 1, "available_powerpills"]
+                        )
+                        gamestate_df.at[gamestate.Index, "available_pellets_states"] = (
+                            gamestate_df.at[gamestate.Index -1, "available_pellets_states"]
                         )
 
         return gamestate_df
@@ -1274,18 +1364,20 @@ class PacmanDataReader:
         for level_id in level_iter:
             gamestates = self.gamestate_df[self.gamestate_df["level_id"] == level_id]
             total_len = len(gamestates)
-            pointer = 0 
-            while pointer < total_len:
-                slice = gamestates.iloc[pointer:pointer + window_len]
-                raw_sequences.append(slice)
-                if overlapping:
-                    pointer += stride
-                else:
-                    pointer += window_len # non overlapping blocks
 
-                if total_len >= window_len and (total_len - window_len) % stride != 0:
-                    last_slice = gamestates.iloc[-window_len:]
-                    raw_sequences.append(last_slice)
+            if total_len <= window_len:
+                raw_sequences.append(gamestates)
+                continue
+
+            step = stride if overlapping else window_len
+            last_start = total_len - window_len
+            start_indices = list(range(0, last_start + 1, step))
+
+            if start_indices[-1] != last_start:
+                start_indices.append(last_start)
+
+            for start in start_indices:
+                raw_sequences.append(gamestates.iloc[start:start + window_len])
 
         return raw_sequences, gif_path_list
     
