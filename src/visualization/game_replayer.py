@@ -810,7 +810,9 @@ class GameReplayer:
             
         except subprocess.CalledProcessError as e:
             self.logger.error(f"FFmpeg failed: {e}")
-            raise ValueError(f"FFmpeg extraction failed. Make sure FFmpeg is installed.")
+            print(f"ffmpeg failed for {video_path}")
+            return None
+            # raise ValueError(f"FFmpeg extraction failed. Make sure FFmpeg is installed.")
         except FileNotFoundError:
             self.logger.error("FFmpeg not found in PATH")
             raise ValueError("FFmpeg not found. Please install FFmpeg or use the OpenCV method.")
