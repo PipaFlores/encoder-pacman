@@ -331,6 +331,8 @@ class PatternAnalysis:
             processed_sequences: np.ndarray[float] = None,
             gif_path_list: list[str] | None = None,
             features_columns: list[str] | None = None,
+            trajectory_list: list | None = None,
+            metadata_dictionary: dict | None = None,
             validation_encodings: pd.DataFrame | None = None,
             force_training: bool = False,
             test_dataset: bool = False,
@@ -362,6 +364,10 @@ class PatternAnalysis:
                 List of feature column names used in the processed data. 
                 Should match the features used to generate processed_sequences. 
                 This is the fourth output of reader.make_data().
+            trajectory_list (list[trajectory], optional):
+                List of trajectories used for aggregated visualization tools. Produced by reader.make_data()
+            metadata_dictionary (dict, optional):
+                Dictionary of sequence higher-level metadata (user_id, level, duration, etc). produced by reader.make_data()
             validation_encodings (pd.DataFrame, optional):
                 Precomputed validation encodings for the raw_sequences (e.g., Behavlet features).
             force_training (bool, optional):
@@ -382,10 +388,20 @@ class PatternAnalysis:
         
         # Step 1: Load data if not provided
         
-        self.build_data(raw_sequences=raw_sequences,
-                        processed_sequences=processed_sequences, 
-                        gif_path_list=gif_path_list, 
-                        features_columns=features_columns)
+        if raw_sequences == None:
+            self.build_data()
+        else:
+            assert len(raw_sequences) == len(processed_sequences) == len(trajectory_list), "provided data does not have equal lengths"
+            assert processed_sequences.shape[-1] == len(features_columns)
+            self.raw_sequence_data = raw_sequences
+            self.processed_sequence_data = processed_sequences
+            self.gif_path_list = gif_path_list
+            self.features_columns = features_columns
+            self.trajectory_list = trajectory_list
+            self.metadata_dictionary = metadata_dictionary
+            logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences")
+
+        logger.info(f"Using {len(self.features_columns)} features: {self.feature_set}")    
 
         # Step 2a: load or train embedding model. GeomClustering skips this step
         
@@ -468,48 +484,33 @@ class PatternAnalysis:
         logger.info("Pipeline completed successfully!")
         return self
 
-    def build_data(self, raw_sequences=None, 
-                   processed_sequences=None, 
-                   gif_path_list=None, 
-                   features_columns=None, 
+    def build_data(self, 
                    test_dataset=False, 
                    test_run=False):
         
         if test_dataset == False:
-            if raw_sequences is None:
-                logger.info(f"Loading sequence type: {self.sequence_type}")
-                self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns = self.reader.make_data(
-                    feature_set=self.feature_set,
-                    sequence_type=self.sequence_type,
-                    context=self.context,
-                    rebase_scores=self.rebase_score,
-                    filter_by_pill=self.filter_by_pill,
-                    sort_ghost_distances=self.sort_distances,
-                    normalization=self.normalization,
-                    make_gif=self.augmented_visualization,
-                    return_raw_sequences=True,
-                    max_samples=self.max_samples
-                )
+            logger.info(f"Loading sequence type: {self.sequence_type}")
+            self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns, self.trajectory_list, self.metadata_dictionary = self.reader.make_data(
+                feature_set=self.feature_set,
+                sequence_type=self.sequence_type,
+                context=self.context,
+                rebase_scores=self.rebase_score,
+                filter_by_pill=self.filter_by_pill,
+                sort_ghost_distances=self.sort_distances,
+                normalization=self.normalization,
+                make_gif=self.augmented_visualization,
+                max_samples=self.max_samples
+            )
 
-                if test_run == True:
-                    self.raw_sequence_data = self.raw_sequence_data[:500]
-                    self.processed_sequence_data = self.processed_sequence_data[:500]
-                    self.gif_path_list = self.gif_path_list[:500]
+            if test_run == True:
+                self.raw_sequence_data = self.raw_sequence_data[:500]
+                self.processed_sequence_data = self.processed_sequence_data[:500]
+                self.gif_path_list = self.gif_path_list[:500]
+                self.trajectory_list = self.trajectory_list[:500]
 
-                logger.info(f"Loaded {len(self.raw_sequence_data)} sequences")
-            else:
-                self.raw_sequence_data = raw_sequences
-                self.processed_sequence_data = processed_sequences
-                self.features_columns = features_columns
-                self.gif_path_list = gif_path_list
-                logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences")
+            logger.info(f"Loaded {len(self.raw_sequence_data)} sequences")
+        
 
-            logger.info(f"Using {len(self.features_columns)} features: {self.features_columns}")
-                
-            self.trajectory_list = [self.reader.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in self.raw_sequence_data]
-            self.metadata_dictionary = {}
-            for key in self.trajectory_list[0].metadata.keys():
-                self.metadata_dictionary[key] = np.array([traj.metadata[key] for traj in self.trajectory_list])
         else:
             self._load_test_dataset()
 
@@ -1285,6 +1286,7 @@ class PatternAnalysis:
         ## TODO change logic to input all available metadata and validation labels as a dictionary to the bokeh visualization.
         if isinstance(validation_set, str):
             # Get labels for the specified validation set
+            raise NotImplementedError
             try:
                 labels = self.validation_labels[validation_set].to_numpy()
             except KeyError:
@@ -1326,12 +1328,6 @@ class PatternAnalysis:
                     )
             
         else:
-            # First calculate affinity_matrix and plot reduced embeddings for dnn based analysis.
-            self.affinity_matrix = self._calculate_affinity_matrix()
-
-            p1 = self.clustervisualizer.plot_affinity_matrix_bokeh(
-                affinity_matrix=self.affinity_matrix, 
-                measure_type=self.similarity_measure)
 
             if self.augmented_visualization:
                 logger.info("plotting augmented")
@@ -1355,6 +1351,12 @@ class PatternAnalysis:
         if plot_only_latent_space:
             show(p2)
         else:
+            # First calculate affinity_matrix and plot reduced embeddings for dnn based analysis.
+            self.affinity_matrix = self._calculate_affinity_matrix()
+
+            p1 = self.clustervisualizer.plot_affinity_matrix_bokeh(
+                affinity_matrix=self.affinity_matrix, 
+                measure_type=self.similarity_measure)
             show(row(p1, p2))
 
         return
