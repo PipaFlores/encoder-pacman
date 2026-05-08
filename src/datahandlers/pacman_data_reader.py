@@ -266,7 +266,6 @@ class PacmanDataReader:
         sort_ghost_distances: bool = True,
         normalization: str | None = None,
         make_gif: bool = False,
-        return_raw_sequences: bool = False,
         max_samples : int | None = None
     ):
         """
@@ -284,7 +283,6 @@ class PacmanDataReader:
             sort_ghost_distances (bool): Whether to sort all columns ending in '_distance' for ghosts in ascending order per timestep/sample.
             normalization (str|None): Can be 'global', 'sequence', 'sample', or None. Specifies normalization strategy for features.
             make_gif (bool): If True, generates GIFs (visualizations) for each sequence.
-            return_raw_sequences (bool): If True, returns raw/from-info dataframes for each sliced sequence. Used in `patern_analysis` for validation
             max_samples (int): Max number of samples to be returnes. For fast debugging purposes
 
         Returns:
@@ -377,15 +375,19 @@ class PacmanDataReader:
             X_padded = X_padded[:max_samples]
             gif_paths = gif_paths[:max_samples]
 
+        trajectory_list = [self.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in raw_sequences]
+        metadata_dictionary = {}
+        for key in trajectory_list[0].metadata.keys():
+            metadata_dictionary[key] = np.array([traj.metadata[key] for traj in trajectory_list])
+
         if make_gif:
             assert len(raw_sequences) == len(gif_paths)
-        assert len(raw_sequences) == len(X_padded)
+        assert len(raw_sequences) == len(X_padded) == len(trajectory_list)
         assert X_padded.shape[-1] == len(features)
+    
 
-        if return_raw_sequences:
-            return raw_sequences, X_padded, gif_paths, features
+        return raw_sequences, X_padded, gif_paths, features, trajectory_list, metadata_dictionary
 
-        return X_padded, gif_paths, features
     
     def process_raw_sequences(
     self,
