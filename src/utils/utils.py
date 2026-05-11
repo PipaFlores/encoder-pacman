@@ -175,12 +175,21 @@ def calculate_velocities(
 
 
 
-def neighborhood_hit(X_embedded, labels, n_neighbors=3, metric='euclidean'):
+def neighborhood_hit(X_embedded, 
+                    labels, 
+                    n_neighbors=5, 
+                    no_null_instances=True,
+                    metric='euclidean'):
     """
     X_embedded : (n_samples, n_components) low-dim embedding
     labels     : (n_samples,) array-like of class labels
     n_neighbors: k in the definition
+    no_null_instances: If True, mask out null instances neighborhood hit ratio(labeled as -1 in our scheme) 
+                        They count, however, when present in labeled data's neighborhood.
     """
+
+    assert len(labels.shape) == 1
+    assert len(X_embedded.shape) == 2
     X_embedded = np.asarray(X_embedded)
     labels = np.asarray(labels)
     n_samples = X_embedded.shape[0]
@@ -197,5 +206,12 @@ def neighborhood_hit(X_embedded, labels, n_neighbors=3, metric='euclidean'):
     neighbor_labels = labels[neighbor_indices]
 
     same_label = (neighbor_labels == labels[:, None])
-    # Average fraction of same-labeled neighbors
-    return same_label.mean()
+
+    if no_null_instances:
+        no_null_mask = labels != -1
+        result = same_label[no_null_mask].mean()
+    else:
+        # Average fraction of same-labeled neighbors
+        result = same_label.mean()
+
+    return result

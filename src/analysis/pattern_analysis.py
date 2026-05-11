@@ -471,7 +471,8 @@ class PatternAnalysis:
         # Calculate clustering validation measures (ARI, AMI, NMI) for each validation label set
             self.validation_measures =self.calculate_validation_measures(
                 labels = self.labels,
-                validation_labels= self.validation_labels
+                validation_labels= self.validation_labels,
+                embeddings = self.reduced_embeddings
                 )
             
         
@@ -910,7 +911,7 @@ class PatternAnalysis:
         
         """
         logger.info(f"Calculating validation encodings ({self.validation_method})...")
-        ## TODO implement self.validation_methos == metadatacolumn (e.g, level, user_id, duration, etc)
+        ## TODO implement self.validation_method == metadatacolumn (e.g, level, user_id, duration, etc)
         
         if validation_method == "Behavlets":
             # Use BehavletsEncoding for validation
@@ -919,15 +920,23 @@ class PatternAnalysis:
                 verbose=self.verbose
             )
             behavlet_types=[
-        "Aggression1", ## Hunt close to ghost house
-        "Aggression3", ## Ghost kills
-        "Aggression4", ## Hunt even after pill finishes
-        "Aggression6", ## Chase ghosts or collect dots
-        "Caution1", ## Times trapped by ghosts
-        "Caution2a", #  Avg distance to ghosts
-        "Caution2b", # Avg distance during hunt
-        "Caution3", # Close calls
-    ]
+                "Aggression1", ## Hunt close to ghost house
+                "Aggression3", ## Ghost kills
+                "Aggression4", ## Hunt even after pill finishes
+                "Aggression6", ## Chase ghosts or collect dots
+                "Caution1", ## Times trapped by ghosts
+                "Caution2a", #  Avg distance to ghosts
+                "Caution2b", # Avg distance during hunt
+                "Caution3", # Close calls
+                ]
+            metadata_features=[
+                "total_levels_played",
+                "duration",
+                "level",
+                "win",
+                # "level_in_session",
+                # "user_id",
+            ]
                         
             # Get behavlet encodings for validation
             validation_encodings = pd.DataFrame()
@@ -938,7 +947,10 @@ class PatternAnalysis:
                     summary_row = behavlets_encoder.calculate_behavlets_gamestate_slice(
                         gamestates=gamestate, behavlet_type=behavlet_types
                     )
+                    for meta_feature in metadata_features:
+                        summary_row[meta_feature] = self.metadata_dictionary[meta_feature][idx]
                     validation_rows.append(summary_row)
+
                 except Exception as e:
                     logger.warning(
                         f"Failed to calculate validation for gamestate idx {idx} (level_id {getattr(gamestate.iloc[0], 'level_id', 'unknown')})"
@@ -950,7 +962,7 @@ class PatternAnalysis:
             validation_encodings = pd.concat(validation_rows, ignore_index=True)
 
             # Only keep columns ending with "_value" if they exist
-            value_cols = [col for col in validation_encodings.columns if col.endswith("_value")]
+            value_cols = [col for col in validation_encodings.columns if col.endswith("_value") or col in metadata_features]
             if value_cols:
                 validation_encodings = validation_encodings[value_cols]
 
@@ -958,7 +970,7 @@ class PatternAnalysis:
         else:
             raise NotImplementedError(f"Validation method not supported ({validation_method})")
         
-    def recode_validation_labels(self, validation_encodings:pd.DataFrame, use_quantiles_for_bins: bool = False) -> pd.DataFrame:
+    def recode_validation_labels(self, validation_encodings:pd.DataFrame, use_quantiles_for_bins: bool = True) -> pd.DataFrame:
         """
         Recodes validation validation encodings as categorical labels.
         It eithers: binarize values to present/not-present, or discretizes into bins or steps.
@@ -968,7 +980,6 @@ class PatternAnalysis:
             use_quantiles_for_bins: partitions the variable into the 10 deciles of the distribution.
         """
         # Binarize each column in validation_encodings: >0 -> 1, <=0 -> -1, unless all zeros (then None)
-        # TODO: consider the other behavlets unique nature (as in Aggression3)
         logger.info(f"Calcuating validation labels")
         validation_labels = pd.DataFrame(index=validation_encodings.index)
         for col in validation_encodings.columns:
@@ -978,14 +989,24 @@ class PatternAnalysis:
             elif col == "Aggression3_value":
                 # For Aggression3_value (Ghost kills), keep the original value if >0, else set to -1
                 validation_labels[col] = np.where(col_values > 0, col_values, -1)
+            
+            elif col in [
+                "level",
+                # "total_levels_played",
+                "win"
+                ]:
+                # Keep these ones as they are
+                validation_labels[col] = col_values
             elif col in [
                 # "Aggression1_value",
                 # "Aggression4_value",
                 "Aggression6_value",
                 "Caution2a_value",
-                "Caution2b_value"
+                "Caution2b_value",
+                "duration",
+                "total_levels_played", # FIXME: Still dont know about this one
                 ]:
-                # Digitize values in Aggression6_value into 10 bins between 
+                # Digitize continuous values into 10 bins between 
                 #  and 1
                 if use_quantiles_for_bins:
                     validation_labels[col] = pd.qcut(col_values, q=10, labels=False, duplicates='drop')
@@ -1005,7 +1026,8 @@ class PatternAnalysis:
             labels : np.ndarray,
             validation_labels : pd.DataFrame,
             embeddings: np.ndarray = None,
-            neighborhood_k: int = 3,
+            no_null_instances:bool = True,
+            neighborhood_k: int = 5,
             neighborhood_metric: str = "euclidean"
             ): 
         """
@@ -1026,6 +1048,8 @@ class PatternAnalysis:
             labels (np.ndarray): The cluster labels produced by the clustering algorithm.
             validation_labels (pd.DataFrame): DataFrame where each column is a set of reference/validation labels for the same instances.
             embeddings (np.ndarray, optional): Low-dim embeddings for computing neighborhood hit (optional).
+            no_null_instances (bool, optional): Wether to discard "-1" labels (no instance observed) for the calculation of validity measures
+                Works to ignore large count of unlabeled data, focusing on the structures present within the available ground truth labels.
             neighborhood_k (int, optional): Number of neighbors for neighborhood_hit, default 3.
             neighborhood_metric (str, optional): Distance metric for neighborhood_hit, default "euclidean".
 
@@ -1041,30 +1065,31 @@ class PatternAnalysis:
             if hasattr(validation_labels, "columns"):
                 for col in validation_labels.columns:
                     val_labels = validation_labels[col].to_numpy()
-                    # Only compute if val_labels is not all NaN and not all zeros
-                    if np.all(pd.isnull(val_labels)) or (np.unique(val_labels).size == 1 and np.unique(val_labels)[0] in [None, np.nan, 0]):
+                    # Only compute if val_labels is no NaN values
+                    assert not pd.isnull(val_labels).any(), f"{col} has missing values, check label encoding"
+
+                    mask = (val_labels != -1) # -1 in validation labels represent null instances (not to confuse with the -1 of clustering labels, which is noise)
+
+                    if np.sum(mask) == 0:
+                        logger.info(f"no valid instances for validation set: {col}")
                         ari = np.nan
                         ami = np.nan
                         nmi = np.nan
                         neigh_hit = np.nan
                     else:
-                        mask = ~pd.isnull(val_labels)
-                        if np.sum(mask) == 0:
-                            ari = np.nan
-                            ami = np.nan
-                            nmi = np.nan
-                            neigh_hit = np.nan
+                        if not no_null_instances:
+                            mask = np.ones_like(mask).astype(bool)
+                        ari = adjusted_rand_score(val_labels[mask], labels[mask])
+                        ami = adjusted_mutual_info_score(val_labels[mask], labels[mask])
+                        nmi = normalized_mutual_info_score(val_labels[mask], labels[mask])
+                        if embeddings is not None:
+                            # neighborhood_hit ignores masked (NaN) indices, so mask them out if present
+                            neigh_hit = neighborhood_hit(
+                                embeddings, val_labels, n_neighbors=neighborhood_k, metric=neighborhood_metric,
+                                no_null_instances=no_null_instances
+                            )
                         else:
-                            ari = adjusted_rand_score(val_labels[mask], labels[mask])
-                            ami = adjusted_mutual_info_score(val_labels[mask], labels[mask])
-                            nmi = normalized_mutual_info_score(val_labels[mask], labels[mask])
-                            if embeddings is not None:
-                                # neighborhood_hit ignores masked (NaN) indices, so mask them out if present
-                                neigh_hit = neighborhood_hit(
-                                    embeddings[mask], val_labels[mask], n_neighbors=neighborhood_k, metric=neighborhood_metric
-                                )
-                            else:
-                                neigh_hit = np.nan
+                            neigh_hit = np.nan
 
                     validation_measures_rows.append({
                         "validation_set": col,
@@ -1076,28 +1101,29 @@ class PatternAnalysis:
             # If validation_labels is a 1D numpy array or list-like (single label set)
             else:
                 val_labels = np.asarray(validation_labels)
-                if np.all(pd.isnull(val_labels)) or (np.unique(val_labels).size == 1 and np.unique(val_labels)[0] in [None, np.nan, 0]):
+                assert not pd.isnull(val_labels).any(), f"validation set has missing values, check label encoding"
+
+                mask = (val_labels != -1)
+                if np.sum(mask) == 0:
+                    logger.info(f"no valid instances for validation set: {validation_labels}")
                     ari = np.nan
                     ami = np.nan
                     nmi = np.nan
                     neigh_hit = np.nan
                 else:
-                    mask = ~pd.isnull(val_labels)
-                    if np.sum(mask) == 0:
-                        ari = np.nan
-                        ami = np.nan
-                        nmi = np.nan
-                        neigh_hit = np.nan
+                    if not no_null_instances:
+                            mask = np.ones_like(mask).astype(bool)
+                    ari = adjusted_rand_score(val_labels[mask], labels[mask])
+                    ami = adjusted_mutual_info_score(val_labels[mask], labels[mask])
+                    nmi = normalized_mutual_info_score(val_labels[mask], labels[mask])
+                    if embeddings is not None:
+                        neigh_hit = neighborhood_hit(
+                            embeddings, val_labels, n_neighbors=neighborhood_k, metric=neighborhood_metric, 
+                            no_null_instances=no_null_instances
+                        )
                     else:
-                        ari = adjusted_rand_score(labels[mask], val_labels[mask])
-                        ami = adjusted_mutual_info_score(labels[mask], val_labels[mask])
-                        nmi = normalized_mutual_info_score(labels[mask], val_labels[mask])
-                        if embeddings is not None:
-                            neigh_hit = neighborhood_hit(
-                                embeddings[mask], val_labels[mask], n_neighbors=neighborhood_k, metric=neighborhood_metric
-                            )
-                        else:
-                            neigh_hit = np.nan
+                        neigh_hit = np.nan
+
                 validation_measures_rows.append({
                     "validation_set": "validation_labels",
                     "ARI": ari,
@@ -1414,7 +1440,7 @@ class PatternAnalysis:
             n_of_validation_sets = len(self.validation_labels.columns)
 
             ncols = 5
-            nrows = (n_of_validation_sets // 6) + 1 # Proper number of rows
+            nrows = (n_of_validation_sets // ncols) + 1 # Proper number of rows
             fig, axs = plt.subplots(nrows, ncols, figsize=(6 * ncols, 6 * nrows))
 
             for i, val_set in enumerate(self.validation_labels.columns):
@@ -1466,6 +1492,8 @@ class PatternAnalysis:
                             set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
                         except ImportError:
                             set_name = val_set
+                    else:
+                        set_name = val_set
                 else:
                     set_name = val_set
 
@@ -1564,6 +1592,8 @@ class PatternAnalysis:
                             set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
                         except ImportError:
                             set_name = val_set
+                    else:
+                        set_name = val_set
                 else:
                     set_name = val_set
 
