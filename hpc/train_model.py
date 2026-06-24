@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
         "--normalization",
         type=str,
         default="none",
-        choices=["global", "sequence", "sample", "none"],
+        choices=["global", "sequence", "sample", "none", "None"],
         help="Normalization strategy to apply before training.",
     )
     parser.add_argument(
@@ -74,8 +74,8 @@ def parse_args() -> argparse.Namespace:
         "--embedder",
         type=str,
         default="LSTM",
-        choices=["LSTM", "DRNN", "DCNN", "ResNet", "Transformer" ,"none"],
-        help="Deep embedder to use. 'none' skips embedding (geom clustering only).",
+        choices=["LSTM", "DRNN", "DCNN", "ResNet", "Transformer" ,"none", "None"],
+        help="Deep embedder to use. 'none' skips embedding and uses Reducer instead(e.g., UMAP).",
     )
     parser.add_argument(
         "--latent-space",
@@ -300,6 +300,7 @@ def main():
             WANDB_AVAILABLE = False
     else:
         WANDB_AVAILABLE = False
+        args.disable_wandb = True
 
     print("Running PatternAnalysis with configuration:")
     for key, value in vars(args).items():
@@ -323,7 +324,7 @@ def main():
         sequence_type=args.sequence_type,
         context=args.context,
         filter_by_pill=args.filter_by_pill,
-        validation_method=args.validation_method,
+        validation_method= args.validation_method,
         feature_set=args.feature_set,
         augmented_visualization=False,
         batch_size=args.batch_size,
@@ -348,40 +349,40 @@ def main():
     )
     analysis.summarize()
 
-    ## VISUALIZE (
-    # With old style way instead of pa.plot_latent_space_overview() to keep current wandb workspace
-    import matplotlib.pyplot as plt
+    ## VISUALIZE
+    
+    # import matplotlib.pyplot as plt
 
 
-    fig, axs = plt.subplots(1, 1, figsize=(10, 10))
+    ## only latent space fig
+    # fig, axs = plt.subplots(1, 1, figsize=(10, 10))
 
-    axs.scatter(analysis.reduced_embeddings[:,0], analysis.reduced_embeddings[:,1], s=2, cmap="tab20", c=analysis.labels)
-    axs.set_title(f"{args.sequence_type}_{args.feature_set}_{args.embedder}_{reducer}_{clusterer}", size=8)
+    # axs.scatter(analysis.reduced_embeddings[:,0], analysis.reduced_embeddings[:,1], s=2, cmap="tab20", c=analysis.labels)
+    # axs.set_title(f"{args.sequence_type}_{args.feature_set}_{args.embedder}_{reducer}_{clusterer}", size=8)
+    try:
+        fig = analysis.plot_latent_space_overview(
+            validation_set = "all",
+            black_background = True,
+            colormap = "viridis",
+            dotsize = 0.2,
+            pretty_val_title = True
+        )
+    except Exception as e:
+        fig = None
+        print(f"Error in creating validation plots: {e}")
 
     if WANDB_AVAILABLE:
-        analysis.wandbrun.log({"latent_space_plot": fig})  
+        # TODO: upload validation measures to wandb (pa.validation_measures)
+        validation_measures = wandb.Table(
+            dataframe = analysis.validation_measures
+        )
+
+        wandb.Image(fig)
+
+        analysis.wandbrun.log({"validation_plot": wandb.Image(fig),
+                               "validation_measures": validation_measures})  
+
         
-        artifact = wandb.Artifact('model', type='model')
-        
-        # Extract dir and filename stem for best/last construction
-        import os
-        model_dir = os.path.dirname(analysis.model_path)
-        model_name = os.path.basename(analysis.model_path)
-
-        if model_name.endswith('_last.pth'):
-            model_base = model_name[:-9]  # Remove '_last.pth'
-        elif model_name.endswith('_best.pth'):
-            model_base = model_name[:-9]  # Remove '_best.pth'
-        else:
-            model_base = os.path.splitext(model_name)[0]
-
-        model_best = os.path.join(model_dir, model_base + '_best.pth')
-        model_last = os.path.join(model_dir, model_base + '_last.pth')
-
-        artifact.add_file(model_best)
-        artifact.add_file(model_last)
-
-        analysis.wandbrun.log_artifact(artifact)
         analysis.wandbrun.finish()
 
 
