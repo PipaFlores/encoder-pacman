@@ -30,7 +30,7 @@ class Behavlets:
         "Aggression4", ## Hunt even after pill finishes
         "Aggression6", ## Chase ghosts or collect dots
         "Caution1", ## Times trapped by ghosts
-        "Caution2a", #  Avg distance to ghosts
+        "Caution2a", #  Avg distance to ghosts, not on hunt
         "Caution2b", # Avg distance during hunt
         "Caution3", # Close calls
     ]
@@ -607,6 +607,7 @@ class Behavlets:
     def _Aggression6(self, gamestates: pd.DataFrame, **kwargs):
         """
         Chase Ghost or Collect Pellet When Hunting
+        TODO: This could be separated into two different behavlets 1- chase ghosts 2- eat pellets
 
         This behavlet measures whether the player actively chases ghosts or continues collecting pellets
         during power pill states. It tracks behavior for each power pill in the map, similar to Aggression4.
