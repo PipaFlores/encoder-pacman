@@ -292,6 +292,8 @@ class PacmanDataReader:
                 - X_padded: np.ndarray, shape (n_sequences, sequence_length, n_features), normalized and padded data.
                 - gif_paths: list[str], paths to any generated GIFs (if make_gif is True).
                 - features: list[str], feature column names used for extraction.
+                - trajectory_list: list, list of trajectories for aggregate visualizations
+                - metadata_dictionary: dict, dictionary of high-level metadata
             Otherwise:
                 (Not used here; function expects return_raw_sequences and will return above tuple.)
         """
@@ -379,6 +381,14 @@ class PacmanDataReader:
         metadata_dictionary = {}
         for key in trajectory_list[0].metadata.keys():
             metadata_dictionary[key] = np.array([traj.metadata[key] for traj in trajectory_list])
+        ## extra metadata
+        scores = []
+        pellet_eaten = []
+        for seq in raw_sequences:
+            scores.append(seq.iloc[-1]["score"] - seq.iloc[0]["score"])
+            pellet_eaten.append(np.abs(seq.iloc[-1]["pellets"] - seq.iloc[0]["pellets"]))
+        metadata_dictionary["score_change"] = np.array(scores)
+        metadata_dictionary["pellet_eaten"] = np.array(pellet_eaten)
 
         if make_gif:
             assert len(raw_sequences) == len(gif_paths)
@@ -867,6 +877,8 @@ class PacmanDataReader:
                 self.game_df[
                     [
                         "user_id",
+                        "game_id",
+                        "level_ids",
                         "total_levels_played",
                         "total_games_played",
                         "max_score",
@@ -877,7 +889,7 @@ class PacmanDataReader:
             )
             .dropna()
             .drop(
-                columns=flow_items + ["total_levels_played", "redcap_repeat_instance"]
+                columns=flow_items + ["redcap_repeat_instance"]
             )
         )
 
@@ -1501,6 +1513,7 @@ class PacmanDataReader:
                            CONTEXT: int = 20,
                            make_gif: bool=False,
                            filter_by_pill:int | None = None,
+                           cut_long_outliers = True,
                            videos_directory= "../hpc/videos/",
                            gifs_directory = "./Results/subsequences/"):
         """
@@ -1514,15 +1527,16 @@ class PacmanDataReader:
             CONTEXT (int, optional): Number of extra frames to include before and after each
                 attack mode interval. Default is 0 (no extra context).
             filter_by_pill (int, optional): If not None, filter by Powerpill idx. I.e., only
-            get slices associated with a particular pill. idxs are from 1 to 4. 1 is upper left, and
-            it follow clockwise.
+                get slices associated with a particular pill. idxs are from 1 to 4. 1 is upper left, and
+                it follow clockwise.
+            cut_long_outliers (bool, optional): Default to True. It removes long sequences that are a
+                combination of two sequential attack modes (less than 2% of the sample).
             
         Returns:
             raw_sequences (list): List of DataFrames, each containing a sequence of game states
                 where Pac-Man is in attack mode for a given level.
             gif_path_list (list): Empty list (reserved for future use, e.g., GIF generation).
         """
-        ## TODO fine-tune and abstact for any binary column event slicing.
 
         raw_sequences = []
         gif_path_list = []
@@ -1607,6 +1621,15 @@ class PacmanDataReader:
                         else:
                             # print(f"sequence for level_id {level_id} already exists, skipping")
                             pass
+            
+        if cut_long_outliers:
+            lengths = [len(seq) for seq in raw_sequences]
+            logger.info("Trimming long sequence outliers (top 5%)")
+            if lengths:
+                lengths_sorted = sorted(lengths)
+                cut_idx = int(0.95 * (len(lengths_sorted) - 1))
+                cut_len = lengths_sorted[cut_idx]
+                raw_sequences = [seq[:cut_len] if len(seq) > cut_len else seq for seq in raw_sequences]
 
         return raw_sequences, gif_path_list
 

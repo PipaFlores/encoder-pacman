@@ -102,7 +102,7 @@ class PatternAnalysis:
             random_seed: int | None = None,
             verbose: bool = False,
             max_samples: int | None = False,
-            wandb_logging: bool = True,
+            wandb_logging: bool = False,
             wandb_logging_comment:str = ""
             ):
         """
@@ -589,17 +589,7 @@ class PatternAnalysis:
             "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
         )
 
-        if WANDB_AVAILABLE and self.wandb_logging:
-            import datetime
-            wandb_config = self._get_wandb_config()
-            self.wandbrun = wandb.init(
-                project = "pacman",
-                config= wandb_config,
-                name=f"{self.sequence_type}_{self.feature_set}_{datetime.datetime.now().strftime('%m_%d_%H_%M')}",
-                tags=[self.sequence_type, self.embedder.__class__.__name__]
-            )
-        else:
-            self.wandbrun = None
+        self._init_wandb_run()
     
         if self.using_torch:
             if isinstance(self.embedder, AELSTM):
@@ -677,8 +667,42 @@ class PatternAnalysis:
             # Deep learning embeddings
             return self._generate_deep_embeddings(padded_data)
         else:
-            # Use UMAP
-            self.wandb_logging = False
+            # Use UMAP (or whatever reducer)
+            if self.embedder == None and self.wandb_logging:
+                    import datetime
+                    # wandb_config = self._get_wandb_config()
+                    wandb_config = {
+                        # Hyperparameters only available in pattern_analysis
+                        "sequence_type": self.sequence_type,
+                        "n_features": len(self.features_columns),
+                        "features_columns": self.features_columns,
+                        "feature_set": self.feature_set,
+                        "normalization_type": self.normalization,
+                        
+                        # Training hyperparameters
+                        "max_epochs": 0,
+                        "batch_size": 0,
+                        "dropout": 0,
+                        "latent_dimension": 2,
+                        "validation_data_split": 0,
+                        "elementwise_masking": False,
+                        "sort_distances": self.sort_distances,
+                        "filter_by_pill": self.filter_by_pill,
+                        "rebase_score": self.rebase_score,
+                        # Model architecture
+                        "embedder_type": self.reducer.__class__.__name__, ## reducer as embedder
+                        "reducer": self.reducer.__class__.__name__,
+                        "comment": self.wandb_logging_comment
+                    }
+                    self.wandbrun = wandb.init(
+                        project = "pacman",
+                        config= wandb_config,
+                        name=f"{self.sequence_type}_{self.feature_set}_{datetime.datetime.now().strftime('%m_%d_%H_%M')}",
+                        tags=[self.sequence_type, self.embedder.__class__.__name__]
+                    )
+            else:
+                self.wandbrun = None
+
             logger.info("Embedding with self.reducer (e.g., UMAP) from flat raw data to 2 dimensions..")
             if np.any(np.isinf(padded_data)):  # replace "inf" values with max for each feature
                 X = padded_data.copy()
@@ -934,6 +958,8 @@ class PatternAnalysis:
                 "duration",
                 "level",
                 "win",
+                "score_change",
+                "pellet_eaten",
                 # "level_in_session",
                 # "user_id",
             ]
@@ -955,7 +981,6 @@ class PatternAnalysis:
                     logger.warning(
                         f"Failed to calculate validation for gamestate idx {idx} (level_id {getattr(gamestate.iloc[0], 'level_id', 'unknown')})"
                     )
-                    raise e
                     validation_rows.append(pd.DataFrame())  # Append empty DataFrame to preserve order
 
             # Concatenate all rows in the same order as raw_sequence_list
@@ -1004,10 +1029,11 @@ class PatternAnalysis:
                 "Caution2a_value",
                 "Caution2b_value",
                 "duration",
-                "total_levels_played", # FIXME: Still dont know about this one
+                "total_levels_played",
+                "score_change",
+                "pellet_eaten",
                 ]:
-                # Digitize continuous values into 10 bins between 
-                #  and 1
+                # Digitize continuous values into 10 decile bins
                 if use_quantiles_for_bins:
                     validation_labels[col] = pd.qcut(col_values, q=10, labels=False, duplicates='drop')
                 else:
@@ -1131,7 +1157,7 @@ class PatternAnalysis:
                     "NMI": nmi,
                     "neigh_hit": neigh_hit
                 })
-            validation_measures = pd.DataFrame(validation_measures_rows).set_index("validation_set")
+            validation_measures = pd.DataFrame(validation_measures_rows)
             return validation_measures
 
     def summarize(self):
@@ -1505,7 +1531,7 @@ class PatternAnalysis:
 
         # Check if validation_set is None or a string (single validation set) One plot
         elif validation_set is None or isinstance(validation_set, str):
-            fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+            fig, ax = plt.subplots(1, 1, figsize=(7, 6))
 
             if validation_set is not None:
                 # Get labels for the specified validation set
@@ -1621,6 +1647,8 @@ class PatternAnalysis:
 
         
         plt.show()
+
+        return fig
         
 
     def plot_cluster_overview(self, 
@@ -1940,6 +1968,20 @@ class PatternAnalysis:
             self.processed_sequence_data = self.filtered_sequence_data
 
     
+    def _init_wandb_run(self):
+        if WANDB_AVAILABLE and self.wandb_logging:
+            import datetime
+            import uuid
+            wandb_config = self._get_wandb_config()
+            self.wandbrun = wandb.init(
+                project = "pacman",
+                config= wandb_config,
+                name=f"{uuid.uuid4().hex[:8]}_{self.sequence_type}_{self.feature_set}_{self.embedder}",
+                tags=[self.sequence_type, self.embedder.__class__.__name__]
+            )
+        else:
+            self.wandbrun = None
+    
     def _get_wandb_config(self):
 
         wandb_config = {
@@ -1962,7 +2004,7 @@ class PatternAnalysis:
             "rebase_score": self.rebase_score,
             # Model architecture
             "embedder_type": self.embedder.__class__.__name__,
-
+            "reducer": self.reducer.__class__.__name__,
             "comment": self.wandb_logging_comment
         }
 

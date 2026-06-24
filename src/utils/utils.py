@@ -181,11 +181,17 @@ def neighborhood_hit(X_embedded,
                     no_null_instances=True,
                     metric='euclidean'):
     """
-    X_embedded : (n_samples, n_components) low-dim embedding
-    labels     : (n_samples,) array-like of class labels
-    n_neighbors: k in the definition
-    no_null_instances: If True, mask out null instances neighborhood hit ratio(labeled as -1 in our scheme) 
-                        They count, however, when present in labeled data's neighborhood.
+    Compute the neighborhood hit ratio for a low-dimensional embedding.
+
+    Args:
+        X_embedded: Array of shape (n_samples, n_components) with embedded points.
+        labels: Array of shape (n_samples,) with class labels.
+        n_neighbors: Number of nearest neighbors to consider.
+        no_null_instances: If True, exclude samples labeled as -1 from the final average.
+        metric: Distance metric used by ``NearestNeighbors``.
+
+    Returns:
+        float: Mean fraction of same-labeled neighbors.
     """
 
     assert len(labels.shape) == 1
@@ -215,3 +221,66 @@ def neighborhood_hit(X_embedded,
         result = same_label.mean()
 
     return result
+
+
+def make_synth_data(n_per_category: int | tuple[int] = (1000, 1000),
+              n_noise: int = 1000,
+              seed = 42):
+    """
+    Generate a synthetic 2D dataset with clustered categories and uniform noise.
+
+    Args:
+        n_per_category: Number of samples per category.
+        n_noise: Number of noise points to generate.
+        seed: Random seed for reproducibility.
+
+    Returns:
+        pandas.DataFrame: DataFrame with columns ``x``, ``y``, and ``label``.
+    """
+
+    np.random.seed(seed) 
+    dataframe_list = []
+
+    for i, cat_size in enumerate(n_per_category):
+        centroid =(np.random.random(size=2) * 20) - 10
+        spread = np.random.random(size=2)
+
+        dataframe_list.append(pd.DataFrame({
+            "x": np.random.normal(loc= centroid[0], scale = spread[0], size= cat_size),
+            "y": np.random.normal(loc= centroid[1], scale = spread[1], size= cat_size),
+            "label": i
+        })
+        )
+
+    df = pd.concat(dataframe_list, ignore_index=True)
+
+    max = (df["x"].max(), df["y"].max())
+    min = (df["x"].min(),df["y"].min())
+
+    noise = pd.DataFrame({
+        "x": np.random.uniform(low= min[0], high = max[0], size= n_noise),
+        "y": np.random.uniform(low= min[1], high = max[1], size= n_noise),
+        "label" : -1
+    })
+    
+    df = pd.concat([df, noise], ignore_index=True)
+
+
+    return df
+
+
+def random_projection_measures(processed_sequence_data):
+    ## Create random projection from the numpy array [n_samples, seq_len, features]
+    random_embeddings = np.random.random(size=(len(processed_sequence_data), 2)) # Random projection to 2D
+    from hdbscan import HDBSCAN
+    random_labels = HDBSCAN().fit_predict(random_embeddings)
+
+    # res_ran = pa.calculate_validation_measures(
+    #     random_labels,
+    #     pa.validation_labels,
+    #     embeddings=random_embeddings,
+    #     no_null_instances=True,
+    #     neighborhood_k=5
+    # )
+
+    return random_embeddings, random_labels
