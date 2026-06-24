@@ -1,18 +1,21 @@
 #!/bin/bash
 #SBATCH --partition=gpu
+#SBATCH --array=1-5 ## Sweeping over different latent dimensions (5 for transformer, 7 for LSTM)
 #SBATCH --account=project_2012947   # replace <project> with your CSC project, e.g. project_2001234
 #SBATCH --nodes=1            # replace <N> with the number of nodes to run on
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1  # Mahti has 128 CPU cores per node, Puhti has 40
-#SBATCH --mem-per-cpu=32000 # 8000 is enough but generalist models might need much more (64gb)
+#SBATCH --mem-per-cpu=32000 # 8000 is enough but generalist models might need much more (used 64 gb before)
 #SBATCH --gres=gpu:v100:1
-#SBATCH --time=3:00:00
+#SBATCH --time=4:00:00
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 
 module load pytorch/2.7
- 
+############################################################## NOTES ###################################################
+LOGGING_COMMENT="latent dimension sweep -- all features" 
+########################################################################################################################
 ## ALL OPTIONS
 # FEATURE_SETS=("Pacman" "Pacman_Ghosts" "Ghost_Distances" "Experimental2")
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds" "pacman_attack")
@@ -21,21 +24,36 @@ module load pytorch/2.7
 
 # FEATURE_SETS=("Experimental2")
 # FEATURE_SETS=("Experimental2" "Pacman_Ghosts")
-FEATURE_SETS=("Experimental2")
+# FEATURE_SETS=("Experimental2")
 # FEATURE_SETS=("Pacman_Ghosts")
 # FEATURE_SETS=("Ghost_Distances")
+FEATURE_SETS=("all_features")
 
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
 SEQUENCE_TYPES=("pacman_attack")
 # SEQUENCE_TYPES=("sliding_window")
 # SEQUENCE_TYPES=("fixed_blocks")
+# SEQUENCE_TYPES=("first_5_seconds" "pacman_attack")
 
-EMBEDDER="Transformer"
+EMBEDDER="Transformer" # Or "Transformer", or "None"
 CLUSTERER="hdbscan"
 REDUCER="umap"
 
 N_EPOCHS=100
-LATENT_SPACE=64
+# LATENT_SPACE=32
+# LATENT_SPACE_LIST=(2 16 32 64 128 256 512) # for LSTM
+LATENT_SPACE_LIST=(32 64 128 256 512) # for transformer
+
+## Select latent space size based on SLURM array task id (array indices start at 1)
+if [[ -n "$SLURM_ARRAY_TASK_ID" ]]; then
+    # convert to zero-based index
+    idx=$((SLURM_ARRAY_TASK_ID-1))
+    LATENT_SPACE=${LATENT_SPACE_LIST[$idx]}
+else
+    # fallback to first element if not running under SLURM
+    LATENT_SPACE=${LATENT_SPACE_LIST[0]}
+fi
+
 BATCH_SIZE=32
 VALIDATION_SPLIT=0.3
 CONTEXT=20
@@ -44,11 +62,9 @@ NORMALIZATION="global"
 EXTRA_FLAGS=(
     --using-hpc
     --verbose
-    # --elementwise-masking
+    # --elementwise-masking   # Always use for LSTM (or better said, for first 5 seconds where there is a LOT of infs)
 )
 
-#### NOTES ####
-LOGGING_COMMENT="ghost distances, 64 dim transformer"
 
 # Test run
 # srun python train_model.py \

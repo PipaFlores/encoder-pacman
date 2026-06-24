@@ -4,9 +4,9 @@
 #SBATCH --nodes=1            # replace <N> with the number of nodes to run on
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1  # Mahti has 128 CPU cores per node, Puhti has 40
-#SBATCH --mem-per-cpu=32000 # 8000 is enough but generalist models might need much more (64gb)
+#SBATCH --mem-per-cpu=32000
 #SBATCH --gres=gpu:v100:1
-#SBATCH --time=3:00:00
+#SBATCH --time=01:00:00
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
@@ -14,52 +14,41 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 module load pytorch/2.7
  
 ## ALL OPTIONS
-# FEATURE_SETS=("Pacman" "Pacman_Ghosts" "Ghost_Distances" "Experimental2")
+# FEATURE_SETS=("Pacman" "Pacman_Ghosts" "Ghost_Distances")
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds" "pacman_attack")
 
 ## SPECIFIC (COMMENT OUT ABOVE)
 
-# FEATURE_SETS=("Experimental2")
-# FEATURE_SETS=("Experimental2" "Pacman_Ghosts")
 FEATURE_SETS=("Experimental2")
+# FEATURE_SETS=("all_features")
+# FEATURE_SETS=("Pacman" "Pacman_Ghosts")
 # FEATURE_SETS=("Pacman_Ghosts")
 # FEATURE_SETS=("Ghost_Distances")
 
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
 SEQUENCE_TYPES=("pacman_attack")
-# SEQUENCE_TYPES=("sliding_window")
 # SEQUENCE_TYPES=("fixed_blocks")
 
-EMBEDDER="Transformer"
+EMBEDDER="None"
 CLUSTERER="hdbscan"
 REDUCER="umap"
 
-N_EPOCHS=100
-LATENT_SPACE=64
-BATCH_SIZE=32
-VALIDATION_SPLIT=0.3
 CONTEXT=20
-FILTER_BY_PILL="None"  # or "None"
+FILTER_BY_PILL="None"
+
+REDUCER_COMPONENTS=2
+UMAP_NEIGHBORS=15
+UMAP_MIN_DIST=0.1
+UMAP_METRIC="euclidean"
+
 NORMALIZATION="global"
+LOGGING_COMMENT="testing Umap embedding"
 EXTRA_FLAGS=(
     --using-hpc
     --verbose
-    # --elementwise-masking
+    --elementwise-masking
 )
 
-#### NOTES ####
-LOGGING_COMMENT="ghost distances, 64 dim transformer"
-
-# Test run
-# srun python train_model.py \
-#     --test-dataset \
-#     --embedder Transformer \
-#     --latent-space 128 \
-#     --validation-split 0.3 \
-#     --normalization "global" \
-#     --logging-comment "TestDataset" \
-#     --using-hpc \
-#     --verbose
 
 for FEATURES in "${FEATURE_SETS[@]}"; do
     for SEQ_TYPE in "${SEQUENCE_TYPES[@]}"; do
@@ -74,10 +63,10 @@ for FEATURES in "${FEATURE_SETS[@]}"; do
             --embedder "$EMBEDDER" \
             --clusterer "$CLUSTERER" \
             --reducer "$REDUCER" \
-            --n-epochs "$N_EPOCHS" \
-            --latent-space "$LATENT_SPACE" \
-            --batch-size "$BATCH_SIZE" \
-            --validation-split "$VALIDATION_SPLIT" \
+            --reducer-components "$REDUCER_COMPONENTS" \
+            --umap-neighbors "$UMAP_NEIGHBORS" \
+            --umap-min-dist "$UMAP_MIN_DIST" \
+            --umap-metric "$UMAP_METRIC" \
             --context "$CONTEXT" \
             --filter-by-pill "$FILTER_BY_PILL" \
             --normalization "$NORMALIZATION" \

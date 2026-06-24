@@ -3,10 +3,10 @@
 #SBATCH --account=project_2012947   # replace <project> with your CSC project, e.g. project_2001234
 #SBATCH --nodes=1            # replace <N> with the number of nodes to run on
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2  # Mahti has 128 CPU cores per node, Puhti has 40
-#SBATCH --mem-per-cpu=8000
+#SBATCH --cpus-per-task=1  # Mahti has 128 CPU cores per node, Puhti has 40
+#SBATCH --mem-per-cpu=32000 # (64gb for generalist models)
 #SBATCH --gres=gpu:v100:1
-#SBATCH --time=05:00:00
+#SBATCH --time=03:00:00
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
@@ -20,30 +20,32 @@ module load pytorch/2.7
 ## SPECIFIC (COMMENT OUT ABOVE)
 
 FEATURE_SETS=("Experimental2")
+# FEATURE_SETS=("all_features")
 # FEATURE_SETS=("Pacman" "Pacman_Ghosts")
 # FEATURE_SETS=("Pacman_Ghosts")
 # FEATURE_SETS=("Ghost_Distances")
 
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
 SEQUENCE_TYPES=("pacman_attack")
+# SEQUENCE_TYPES=("fixed_blocks")
 
 EMBEDDER="LSTM"
 CLUSTERER="hdbscan"
 REDUCER="umap"
 
-N_EPOCHS=500
-LATENT_SPACE=256
+N_EPOCHS=100
+LATENT_SPACE=128
 BATCH_SIZE=32
 VALIDATION_SPLIT=0.3
 DROPOUT=0.1
 CONTEXT=20
-FILTER_BY_PILL=3
+FILTER_BY_PILL="None"
 NORMALIZATION="global"
-LOGGING_COMMENT="filter by pill 3"
+LOGGING_COMMENT="ghost distances, 64 dimensions LSTM, pacman attack"
 EXTRA_FLAGS=(
     --using-hpc
     --verbose
-    # --elementwise-masking
+    --elementwise-masking
 )
 
 
