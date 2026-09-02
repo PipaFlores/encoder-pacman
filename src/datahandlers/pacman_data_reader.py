@@ -50,7 +50,7 @@ class PacmanDataReader:
     """
 
     _instance = None
-    BANNED_USERS = [42]
+    BANNED_USERS = [42, 41] # Test accounts
     BANNED_GAMES = [419]  ## Game with 600 second idle duration (bug)
 
     FEATURE_SETS: dict[str, list[str]] = {
@@ -784,6 +784,7 @@ class PacmanDataReader:
 
         # Create game_df starting from lost levels (win=0)
         game_df = level_df.loc[level_df["win"] == 0].copy()
+        game_df["is_synthetic"] = False
 
         # Calculate game counts
         game_df["total_games_played"] = game_df.groupby("user_id").cumcount() + 1
@@ -809,38 +810,137 @@ class PacmanDataReader:
 
         # # Cross-reference between dataframes
         game_df["level_ids"] = None
-        # Add game_id column to level_df
-        level_df["game_id"] = None
 
-        # For each game, collect all related level IDs and update game_id in level_df
-        for _, game in game_df.iterrows():
-            level_ids = []
-            n_levels = game["max_level"]
-            game_id = game.name
-            user_id = game["user_id"]
-            level_ids.append(game_id)
-            level_df.at[game.name, "game_id"] = game_id
-            game_duration = game["game_duration"]
+        # Use nullable integer dtype so we can detect missing IDs explicitly
+        level_df["game_id"] = pd.Series(pd.NA, index=level_df.index, dtype="Int64")
 
-            # Search for previous levels by the same user
-            search = 1
-            while len(level_ids) < n_levels:
-                row_search = level_df.loc[game_id - search]
-                if row_search["user_id"] == user_id:
-                    level_ids.append(int(row_search.name))
-                    game_duration += row_search["duration"]
+        # Deterministic assignment:
+        # each terminal game (loss row) at total_levels_played=t with max_level=n
+        # owns levels [t-n+1, ..., t] for that same user.
+        for game_id, game in game_df.sort_values(["user_id", "total_levels_played"]).iterrows():
+            user_id = int(game["user_id"])
+            end_t = int(game["total_levels_played"])
+            n_levels = int(game["max_level"])
+            start_t = end_t - n_levels + 1
 
-                    level_df.at[game_id - search, "game_id"] = game_id
+            mask = (
+                (level_df["user_id"] == user_id)
+                & (level_df["total_levels_played"] >= start_t)
+                & (level_df["total_levels_played"] <= end_t)
+            )
+            levels = level_df.loc[mask].sort_values("total_levels_played")
 
-                search += 1
+            # Fallback constrained to same session if needed
+            if len(levels) != n_levels:
+                mask_session = (
+                    (level_df["user_id"] == user_id)
+                    & (level_df["session_number"] == game["session_number"])
+                    & (level_df["total_levels_played"] <= end_t)
+                )
+                levels = (
+                    level_df.loc[mask_session]
+                    .sort_values("total_levels_played")
+                    .tail(n_levels)
+                )
 
-            # Sort level IDs and update game metadata
-            level_ids.sort()
-            game_df.at[game.name, "date_played"] = level_df.loc[
-                level_ids[0], "date_played"
-            ]
-            game_df.at[game.name, "game_duration"] = game_duration
-            game_df.at[game.name, "level_ids"] = level_ids
+            if len(levels) != n_levels:
+                raise ValueError(
+                    f"Could not map all levels to game_id={game_id} "
+                    f"(user_id={user_id}, expected {n_levels}, found {len(levels)})."
+                )
+
+            level_ids = levels["level_id"].astype(int).tolist()
+            level_df.loc[levels.index, "game_id"] = int(game_id)
+
+            game_df.at[game_id, "level_ids"] = level_ids
+            game_df.at[game_id, "date_played"] = level_df.loc[level_ids[0], "date_played"]
+            game_df.at[game_id, "game_duration"] = level_df.loc[level_ids, "duration"].sum()
+
+        # Final integrity check + fallback:
+        # Some sessions end with only wins (no terminal loss row), so those levels never map above.
+        missing_mask = level_df["game_id"].isna()
+        if missing_mask.any():
+            logger.warning(
+                "Found %d unassigned levels after deterministic mapping (Players stopped playing after a win). "
+                "Creating synthetic game rows for orphan level runs.",
+                int(missing_mask.sum()),
+            )
+
+            unassigned = level_df.loc[missing_mask].copy()
+            # Avoid ambiguity: level_id is both index and column
+            unassigned = unassigned.sort_values(
+                ["user_id", "session_number", "total_levels_played"]
+            ).sort_index()
+
+            next_game_id = (
+                int(np.max(game_df.index.astype(int))) + 1 if len(game_df) > 0 else 1
+            )
+            synthetic_rows: list[dict] = []
+
+            for (user_id, session_number), grp in unassigned.groupby(
+                ["user_id", "session_number"], sort=False
+            ):
+                grp = grp.sort_values(["total_levels_played"]).sort_index()
+
+                boundary = (
+                    grp["total_levels_played"].diff().fillna(1).ne(1)
+                    | grp["level"].diff().fillna(1).lt(0)
+                )
+                run_id = boundary.cumsum()
+
+                for _, run in grp.groupby(run_id):
+                    gid = next_game_id
+                    next_game_id += 1
+
+                    idx = run.index
+                    level_df.loc[idx, "game_id"] = gid
+
+                    level_ids = run["level_id"].astype(int).tolist()
+                    synthetic_rows.append(
+                        {
+                            "game_id": gid,
+                            "user_id": int(user_id),
+                            "session_number": int(session_number),
+                            "total_levels_played": int(run["total_levels_played"].max()),
+                            "max_level": int(run["level"].max()),
+                            "max_score": float(run["max_score"].max()),
+                            "date_played": run["date_played"].iloc[0],
+                            "game_duration": float(run["duration"].sum()),
+                            "level_ids": level_ids,
+                            "is_synthetic": True,
+                        }
+                    )
+
+            if synthetic_rows:
+                synthetic_df = pd.DataFrame(synthetic_rows).set_index("game_id", drop=False)
+
+                for col in game_df.columns:
+                    if col not in synthetic_df.columns:
+                        synthetic_df[col] = pd.NA
+                for col in synthetic_df.columns:
+                    if col not in game_df.columns:
+                        game_df[col] = pd.NA
+
+                game_df = pd.concat([game_df, synthetic_df[game_df.columns]], axis=0)
+                game_df = game_df.sort_values(["user_id", "total_levels_played"]).sort_index()
+
+                game_df["total_games_played"] = game_df.groupby("user_id").cumcount() + 1
+                if "session_number" in game_df.columns:
+                    game_df["game_in_session"] = (
+                        game_df.groupby(["user_id", "session_number"]).cumcount() + 1
+                    )
+
+        # Ensure boolean dtype
+        if "is_synthetic" not in game_df.columns:
+            game_df["is_synthetic"] = False
+        game_df["is_synthetic"] = game_df["is_synthetic"].fillna(False).astype(bool)
+
+        level_df["game_id"] = level_df["game_id"].astype(int)
+
+        # Alignment checks
+        self._assert_index_matches_column(level_df, index_name="level_id", col_name="level_id")
+        self._assert_index_matches_column(game_df, index_name="game_id", col_name="game_id")
+        self._assert_index_matches_column(gamestate_df, index_name="game_state_id", col_name="game_state_id")
 
         return game_df, level_df, gamestate_df
 
@@ -871,27 +971,57 @@ class PacmanDataReader:
 
         flow["FLOW"] = flow.iloc[:, 3:].sum(axis=1)
 
-        game_psych_df = (
-            pd.merge(
-                flow,
-                self.game_df[
-                    [
-                        "user_id",
-                        "game_id",
-                        "level_ids",
-                        "total_levels_played",
-                        "total_games_played",
-                        "max_score",
-                    ]
-                ],
-                on=["user_id", "total_levels_played"],
-                how="right",
+        # Ensure one flow row per (user_id, total_levels_played)
+        dup_mask = flow.duplicated(subset=["user_id", "total_levels_played"], keep=False)
+        if dup_mask.any():
+            logger.warning(
+                "Found duplicate flow entries for %d (user_id, total_levels_played) keys. "
+                "Keeping the highest redcap_repeat_instance. (Redcap glitch, reviewed - DON'T WORRY)",
+                flow.loc[dup_mask, ["user_id", "total_levels_played"]].drop_duplicates().shape[0],
             )
-            .dropna()
-            .drop(
-                columns=flow_items + ["redcap_repeat_instance"]
-            )
+
+        flow = (
+            flow.sort_values(["user_id", "total_levels_played", "redcap_repeat_instance"])
+                .drop_duplicates(subset=["user_id", "total_levels_played"], keep="last")
         )
+
+        # Keep only games that have flow data
+        game_psych_df = pd.merge(
+            self.game_df[
+                [
+                    "user_id",
+                    "game_id",
+                    "level_ids",
+                    "total_levels_played",
+                    "total_games_played",
+                    "max_score",
+                ]
+            ],
+            flow[["user_id", "total_levels_played", "FLOW"]],
+            on=["user_id", "total_levels_played"],
+            how="inner",
+            validate="one_to_one",
+        )
+
+        # Persist a per-game flag indicating if a flow measure exists.
+        self.game_df["has_flow"] = self.game_df["game_id"].isin(
+            game_psych_df["game_id"]
+        )
+
+        # Propagate game-level flow availability to every associated level row.
+        self.level_df["has_flow"] = (
+            self.level_df["game_id"].map(
+                self.game_df.set_index("game_id")["has_flow"]
+            ).fillna(False).astype(bool)
+        )
+
+        # Each game_id should appear only once
+        assert game_psych_df["game_id"].is_unique, (
+            "Duplicate game_id rows found in game_flow_df after merge."
+        )
+
+        # Stable order before cumulative operations
+        game_psych_df = game_psych_df.sort_values(["user_id", "total_games_played"]).reset_index(drop=True)
 
         game_psych_df["log(max_score)"] = np.log(game_psych_df["max_score"])
         game_psych_df["inv(max_score)"] = (
@@ -903,13 +1033,11 @@ class PacmanDataReader:
             game_psych_df["total_games_played"]
         )  ## i.e., cum trials
 
-        game_psych_df["flow_z_score"] = game_psych_df.groupby("user_id")[
-            "FLOW"
-        ].transform(lambda x: (x - x.mean()) / x.std())
+        game_psych_df["flow_z_score"] = game_psych_df.groupby("user_id")["FLOW"].transform(
+            lambda x: (x - x.mean()) / x.std()
+        )
 
-        game_psych_df["cum_score"] = game_psych_df.groupby("user_id")[
-            "max_score"
-        ].cumsum()
+        game_psych_df["cum_score"] = game_psych_df.groupby("user_id")["max_score"].cumsum()
         game_psych_df["log(cum_score)"] = np.log(game_psych_df["cum_score"])
 
         # Calculate deviation from linear regression for each participant
@@ -1708,3 +1836,28 @@ class PacmanDataReader:
                         pass
 
         return raw_sequences, gif_path_list
+
+
+    @staticmethod
+    def _assert_index_matches_column(df: pd.DataFrame, index_name: str, col_name: str) -> None:
+        if df.index.name != index_name:
+            raise AssertionError(f"Expected index name '{index_name}', got '{df.index.name}'.")
+
+        if col_name not in df.columns:
+            raise AssertionError(f"Missing required ID column '{col_name}'.")
+
+        if df.index.hasnans or df[col_name].isna().any():
+            raise AssertionError(f"NaN detected in index/column for '{col_name}'.")
+
+        if not df.index.is_unique:
+            raise AssertionError(f"Non-unique index detected for '{index_name}'.")
+        if not df[col_name].is_unique:
+            raise AssertionError(f"Non-unique values detected in '{col_name}'.")
+
+        idx_vals = pd.Index(df.index)
+        col_vals = pd.Index(df[col_name].values)
+        if not idx_vals.equals(col_vals):
+            mismatch_n = int((idx_vals != col_vals).sum())
+            raise AssertionError(
+                f"Index and column are not aligned for '{col_name}'. Mismatched rows: {mismatch_n}."
+            )
