@@ -1458,6 +1458,8 @@ class PatternAnalysis:
             
             traj_embeddings = self.reduced_embeddings if custom_embeddings is None else custom_embeddings
             traj_embeddings = traj_embeddings if mask is None else traj_embeddings[mask]
+            if custom_labels is not None:
+                custom_labels = custom_labels if mask is None else custom_labels[mask]
             frame_to_maze = False
             xlabel = "Reduced Latent Dimension 1"
             ylabel = "Reduced Latent Dimension 2"
