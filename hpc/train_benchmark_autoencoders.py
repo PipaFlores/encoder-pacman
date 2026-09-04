@@ -239,7 +239,8 @@ def evaluate_torch_model(model, X_test: np.ndarray, args: argparse.Namespace) ->
                 loss_mask = 1 - noise_mask
                 loss = mse_loss(recon, x, padding_mask=padding_mask, obs_mask=obs_mask, loss_mask=loss_mask)
             elif isinstance(model, AELSTM):
-                recon = model(x)
+                lengths = batch["lengths"].to(device)
+                recon = model(x, lengths=lengths)
                 loss = mse_loss(recon, x, padding_mask=padding_mask, obs_mask=obs_mask)
             else:
                 recon, mu, log_var = model(x)
@@ -379,7 +380,8 @@ def extract_torch_embeddings(name: str, model, X: np.ndarray, args: argparse.Nam
                 padding_mask = batch["padding_mask"].to(device)
                 batch_z = model.encode(batch_x, padding_mask, pooling=True)
             elif name == "LSTM":
-                batch_z = model.encode(batch_x)
+                batch_lengths = batch["lengths"].to(device)
+                batch_z = model.encode(batch_x, lengths=batch_lengths)
             else:
                 encoded = model.encode(batch_x)
                 batch_z = encoded[0] if isinstance(encoded, (list, tuple)) else encoded

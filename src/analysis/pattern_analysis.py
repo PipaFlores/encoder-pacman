@@ -750,10 +750,11 @@ class PatternAnalysis:
             with torch.no_grad():
                 for batch in data_loader:
                     batch_data = batch["data"].to(device)
-                    
+
                     if isinstance(self.embedder, AELSTM):
                         # For AELSTM and similar torch models
-                        batch_embeddings = self.embedder.encode(batch_data)
+                        batch_lengths = batch["lengths"].to(device)
+                        batch_embeddings = self.embedder.encode(batch_data, lengths=batch_lengths)
                     elif isinstance(self.embedder, TSTransformerEncoder):
                         batch_padding_masks = batch["padding_mask"].to(device)
                         batch_embeddings = self.embedder.encode(batch_data, batch_padding_masks, pooling=True)
@@ -777,12 +778,13 @@ class PatternAnalysis:
                 sample_batch = torch.stack([data_tensor[i]["data"] for i in sample_indices]).to(device)
                 padding_mask = torch.stack([data_tensor[i]["padding_mask"] for i in sample_indices]).to(device)
                 obs_mask = torch.stack([data_tensor[i]["obs_mask"] for i in sample_indices]).to(device)
+                sample_lengths = torch.stack([data_tensor[i]["lengths"] for i in sample_indices]).to(device)
 
 
                 # Forward pass to get reconstruction
                 with torch.no_grad():
                     if isinstance(self.embedder, AELSTM):
-                        recon = self.embedder(sample_batch)
+                        recon = self.embedder(sample_batch, lengths=sample_lengths)
                     elif isinstance(self.embedder, TSTransformerEncoder):
                         recon = self.embedder(sample_batch, padding_mask)
                 # Compute reconstruction error (MSE per sample)
