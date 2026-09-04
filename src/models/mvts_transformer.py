@@ -290,8 +290,6 @@ class TSTransformerEncoder(nn.Module):
         self.d_model = d_model
         self.n_heads = n_heads
 
-        self.mask_token = nn.Parameter(torch.randn(1, 1, feat_dim))
-
         self.project_inp = nn.Linear(feat_dim, d_model)
         self.pos_enc = get_pos_encoder(pos_encoding)(d_model, dropout=dropout*(1.0 - freeze), max_len=max_len)
 
@@ -469,9 +467,8 @@ class Transformer_Trainer():
                 noise_mask = None
                 if self.use_imputation:
                     noise_mask = batch["noise_mask"].to(self.device)
-                    # mask the input: 0 = masked (set to model.mask_token), 1 = keep original
-                    mask_token = self.model.mask_token.expand(x.size(0), x.size(1), -1)
-                    x_masked = x * noise_mask + (1 - noise_mask) * mask_token
+                    # mask the input: 0 = masked (zeroed out, per Zerveas et al. 2020), 1 = keep original
+                    x_masked = x * noise_mask
                 else:
                     x_masked = x
 
@@ -520,8 +517,7 @@ class Transformer_Trainer():
                         noise_mask = None
                         if self.use_imputation:
                             noise_mask = batch["noise_mask"].to(self.device)
-                            mask_token = self.model.mask_token.expand(x.size(0), x.size(1), -1)
-                            x_masked = x * noise_mask + (1 - noise_mask) * mask_token
+                            x_masked = x * noise_mask
                         else:
                             x_masked = x
                         
