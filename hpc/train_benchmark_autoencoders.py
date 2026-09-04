@@ -233,8 +233,8 @@ def evaluate_torch_model(model, X_test: np.ndarray, args: argparse.Namespace) ->
 
             if isinstance(model, TSTransformerEncoder):
                 noise_mask = batch["noise_mask"].to(device)
-                mask_token = model.mask_token.expand(x.size(0), x.size(1), -1)
-                x_masked = x * noise_mask + (1 - noise_mask) * mask_token
+                # Zero out masked positions, per Zerveas et al. 2020, rather than a learned mask token.
+                x_masked = x * noise_mask
                 recon = model(x_masked, padding_mask.bool())
                 loss_mask = 1 - noise_mask
                 loss = mse_loss(recon, x, padding_mask=padding_mask, obs_mask=obs_mask, loss_mask=loss_mask)
