@@ -18,7 +18,7 @@ from src.datahandlers import PacmanDataReader
 try:
     import torch
     TORCH_AVAILABLE = True
-    from src.models import VAE, VAE_Trainer, AE_Trainer, AELSTM, TSTransformerEncoder, Transformer_Trainer
+    from src.models import VanillaVAE, VAE_Trainer, AE_Trainer, AELSTM, TSTransformerEncoder, Transformer_Trainer
     from src.datahandlers import PacmanDataset, ImputationDataset
 except ImportError:
     TORCH_AVAILABLE = False
@@ -279,7 +279,11 @@ class PatternAnalysis:
             self.using_torch = True
             self.using_keras = False
             
-            return  VAE
+            return VanillaVAE(
+                input_dim=len(self.features_columns),
+                seq_len=self.processed_sequence_data.shape[1],
+                latent_dim=self.latent_dimension,
+            )
         
         if embedder == "DRNN":
             if not KERAS_AVAILABLE:

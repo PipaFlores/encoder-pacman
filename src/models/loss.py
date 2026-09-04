@@ -93,7 +93,7 @@ class VAELoss(nn.Module):
         Args:
             kld_weight (float): Weight for the KL divergence term relative to the reconstruction loss.
         """
-        super(VAELoss).__init__()
+        super().__init__()
 
         self.kld_weight = kld_weight
 
