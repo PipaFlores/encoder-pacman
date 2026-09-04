@@ -7,9 +7,15 @@
 #SBATCH --mem-per-cpu=32000
 #SBATCH --time=02:00:00
 
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+# Set the number of threads based on cpus-per-task
+# export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1} # This is for OpemMP multiprocessing but I use multiprocessing.Pool in python
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
 
-module load pytorch/2.7
+module load python-pytorch/2.13
 
 srun python init_data_reader.py

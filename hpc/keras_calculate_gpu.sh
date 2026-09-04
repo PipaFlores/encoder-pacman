@@ -8,7 +8,13 @@
 #SBATCH --gres=gpu:v100:1
 #SBATCH --time=05:00:00
 
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+# Set the number of threads based on cpus-per-task
+# export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1} # This is for OpemMP multiprocessing but I use multiprocessing.Pool in python
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
 ### AEON/KERAS MODELS
 module load tensorflow
