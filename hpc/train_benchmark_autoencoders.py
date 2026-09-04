@@ -11,8 +11,11 @@ benchmark datasets with known labels:
    against the dataset labels with ARI/AMI/NMI plus neighborhood hit.
 5. Save a two-panel latent-space plot colored by HDBSCAN labels and true labels.
 
-`UMAP` and `RandomProjection` are baselines: they do not train a reconstruction
-model, so their reconstruction losses are recorded as NA.
+`UMAP`, `RandomProjection`, and `RandomNoise` are baselines: they do not train
+a reconstruction model, so their reconstruction losses are recorded as NA.
+`RandomProjection` is a genuine (if crude) Gaussian random projection of the
+data, while `RandomNoise` is a null baseline of uniform noise unrelated to
+the data, matching `src.utils.utils.random_projection_measures`.
 """
 
 import argparse
@@ -72,8 +75,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--architectures",
         nargs="+",
-        default=["LSTM", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection"],
-        choices=["LSTM", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection"],
+        default=["LSTM", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection", "RandomNoise"],
+        choices=["LSTM", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection", "RandomNoise"],
         help="Architectures to run.",
     )
     parser.add_argument("--output-dir", default=os.path.join("benchmark_results", "autoencoders"))
@@ -397,7 +400,7 @@ def extract_aeon_embeddings(model, X: np.ndarray) -> np.ndarray:
 
 def extract_embeddings(name: str, model, X: np.ndarray, args: argparse.Namespace) -> np.ndarray:
     """Dispatch latent extraction for trained models and no-training baselines."""
-    if name in {"UMAP", "RandomProjection"}:
+    if name in {"UMAP", "RandomProjection", "RandomNoise"}:
         return model.transform(X)
     if name in {"LSTM", "Transformer", "VanillaVAE", "TimeVAE"}:
         return extract_torch_embeddings(name, model, X, args)
@@ -470,8 +473,8 @@ def latent_title(architecture: str, args: argparse.Namespace) -> str:
     """Build the plot title with architecture, latent dimensionality, and epochs."""
     if architecture == "UMAP":
         return f"UMAP latent dim={args.clustering_dim}, epochs=0"
-    if architecture == "RandomProjection":
-        return f"RandomProjection latent dim={args.clustering_dim}, epochs=0"
+    if architecture in {"RandomProjection", "RandomNoise"}:
+        return f"{architecture} latent dim={args.clustering_dim}, epochs=0"
     return f"{architecture} latent h={args.latent_space}, epochs={args.n_epochs}"
 
 
@@ -479,8 +482,8 @@ def plot_filename(architecture: str, args: argparse.Namespace) -> str:
     """Use stable plot filenames that encode the architecture configuration."""
     if architecture == "UMAP":
         return f"UMAP_d{args.clustering_dim}.png"
-    if architecture == "RandomProjection":
-        return f"RandomProjection_d{args.clustering_dim}.png"
+    if architecture in {"RandomProjection", "RandomNoise"}:
+        return f"{architecture}_d{args.clustering_dim}.png"
     return f"{architecture}_h{args.latent_space}_e{args.n_epochs}.png"
 
 
@@ -525,7 +528,7 @@ def score_latent_space(
     from src.utils.utils import neighborhood_hit
 
     labels = np.asarray(labels)
-    if architecture in {"UMAP", "RandomProjection"}:
+    if architecture in {"UMAP", "RandomProjection", "RandomNoise"}:
         clustering_embeddings = embeddings
     else:
         clustering_embeddings = reduce_for_clustering(embeddings, args)
@@ -559,7 +562,25 @@ def score_latent_space(
 
 
 class RandomProjectionBaseline:
-    """Seeded Gaussian random projection over flattened time series."""
+    """Seeded Gaussian random projection over flattened time series.
+
+    Unlike `RandomNoiseBaseline`, this is a genuine (if crude) linear
+    dimensionality reduction of the input: by the Johnson-Lindenstrauss
+    lemma it approximately preserves pairwise distances, so it can surface
+    real cluster structure correlated with the true labels.
+
+    References:
+        Johnson, W. B., & Lindenstrauss, J. (1984). Extensions of Lipschitz
+            mappings into a Hilbert space. Contemporary Mathematics, 26, 189-206.
+        Achlioptas, D. (2003). Database-friendly random projections:
+            Johnson-Lindenstrauss with binary coins. Journal of Computer and
+            System Sciences, 66(4), 671-687. (Source of the 1/sqrt(k) Gaussian
+            scaling used below.)
+        Bingham, E., & Mannila, H. (2001). Random projection in dimensionality
+            reduction: Applications to image and text data. Proceedings of the
+            7th ACM SIGKDD International Conference on Knowledge Discovery and
+            Data Mining, 245-250.
+    """
     def __init__(self, args: argparse.Namespace):
         self.args = args
         self.projection: np.ndarray | None = None
@@ -586,6 +607,28 @@ class RandomProjectionBaseline:
 
 def train_random_projection_baseline(X_train: np.ndarray, X_test: np.ndarray, args: argparse.Namespace):
     model = RandomProjectionBaseline(args).fit(X_train)
+    return model, None, None, None
+
+
+class RandomNoiseBaseline:
+    """Pure random-noise null baseline, matching
+    `src.utils.utils.random_projection_measures`: embeddings are uniform
+    noise independent of the input values (only their sample count is
+    used), so they carry no signal about the true labels. Useful as a
+    lower-bound sanity check against `RandomProjectionBaseline`.
+    """
+    def __init__(self, args: argparse.Namespace):
+        self.args = args
+
+    def fit(self, X: np.ndarray):
+        return self
+
+    def transform(self, X: np.ndarray) -> np.ndarray:
+        return np.random.random(size=(len(X), self.args.clustering_dim))
+
+
+def train_random_noise_baseline(X_train: np.ndarray, X_test: np.ndarray, args: argparse.Namespace):
+    model = RandomNoiseBaseline(args).fit(X_train)
     return model, None, None, None
 
 
@@ -668,6 +711,7 @@ def run_architecture(name: str, X_train: np.ndarray, X_test: np.ndarray, args: a
         "TimeVAE": train_time_vae,
         "UMAP": train_umap_baseline,
         "RandomProjection": train_random_projection_baseline,
+        "RandomNoise": train_random_noise_baseline,
     }
     if name in trainers:
         return trainers[name](X_train, X_test, args)
