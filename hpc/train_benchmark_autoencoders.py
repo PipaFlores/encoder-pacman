@@ -350,10 +350,15 @@ def train_time_vae(X_train: np.ndarray, X_test: np.ndarray, args: argparse.Names
     from src.datahandlers import PacmanDataset
     from src.models import TimeVAE, VAE_Trainer
 
+    dataset = PacmanDataset(X_train, elementwise_masking=args.elementwise_masking)
+    # Same rationale as train_vanilla_vae: only pool when this dataset is actually padded.
+    has_padding = bool(dataset.lengths.min().item() < X_train.shape[1])
+
     model = TimeVAE(
         input_dim=X_train.shape[-1],
         seq_len=X_train.shape[1],
         latent_dim=args.latent_space,
+        pooling=has_padding,
     )
     trainer = VAE_Trainer(
         max_epochs=args.n_epochs,
@@ -363,7 +368,7 @@ def train_time_vae(X_train: np.ndarray, X_test: np.ndarray, args: argparse.Names
         kld_weight=args.kld_weight,
         verbose=args.verbose,
     )
-    trainer.fit(model, PacmanDataset(X_train, elementwise_masking=args.elementwise_masking))
+    trainer.fit(model, dataset)
     return model, trainer.train_loss_list[-1], trainer.val_loss_list[-1], evaluate_torch_model(model, X_test, args)
 
 

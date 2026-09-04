@@ -18,7 +18,7 @@ from src.datahandlers import PacmanDataReader
 try:
     import torch
     TORCH_AVAILABLE = True
-    from src.models import VanillaVAE, VAE_Trainer, AE_Trainer, AELSTM, TSTransformerEncoder, Transformer_Trainer
+    from src.models import VanillaVAE, TimeVAE, VAE_Trainer, AE_Trainer, AELSTM, TSTransformerEncoder, Transformer_Trainer
     from src.datahandlers import PacmanDataset, ImputationDataset, collate_dynamic_padding
 except ImportError:
     TORCH_AVAILABLE = False
@@ -238,9 +238,29 @@ class PatternAnalysis:
         self.wandb_logging_comment = wandb_logging_comment
 
 
+    def _sequences_have_padding(self, embedder: str) -> bool:
+        """
+        Whether processed_sequence_data contains any padded samples (shorter than
+        seq_len). Used to decide whether a VAE-family embedder should masked-mean-pool
+        its encoder instead of the reference flatten+Linear projection - see
+        VanillaVAE/TimeVAE's `pooling` argument. Logs a warning when padding is found,
+        since it changes which encoder architecture gets built.
+        """
+        padding_value = -999.0
+        valid_lengths = (self.processed_sequence_data != padding_value).any(axis=-1).sum(axis=1)
+        has_padding = bool(valid_lengths.min() < self.processed_sequence_data.shape[1])
+        if has_padding:
+            logger.warning(
+                "Padded sequences detected (shortest valid length %d < seq_len %d); "
+                "%s will use masked-mean pooling in its encoder instead of the reference "
+                "flatten+Linear projection, to avoid mixing padding into the latent space.",
+                int(valid_lengths.min()), self.processed_sequence_data.shape[1], embedder
+            )
+        return has_padding
+
     def _initialize_deep_embedder(self, embedder:str):
 
-        supported = ["LSTM", "Transformer","DRNN", "DCNN", "ResNet", "VAE"]
+        supported = ["LSTM", "Transformer","DRNN", "DCNN", "ResNet", "VAE", "TimeVAE"]
         if embedder not in supported:
             raise ValueError(f"Embedder {embedder} is not one of the supported embedding deep networks ({supported})")
         
@@ -275,16 +295,40 @@ class PatternAnalysis:
         if embedder == "VAE":
             if not TORCH_AVAILABLE:
                 raise ModuleNotFoundError(f"Using VAE requires torch in the environment")
-            
+
             self.using_torch = True
             self.using_keras = False
-            
+
+            # Only pool (padding-safe, position-agnostic) when sequences are actually
+            # padded; a genuinely fixed-length sequence_type keeps the reference
+            # flatten+Linear encoder, which is strictly more expressive without padding
+            # to protect against. See collate_dynamic_padding/lengths for the same check
+            # elsewhere.
+            has_padding = self._sequences_have_padding(embedder)
+
             return VanillaVAE(
                 input_dim=len(self.features_columns),
                 seq_len=self.processed_sequence_data.shape[1],
                 latent_dim=self.latent_dimension,
+                pooling=has_padding,
             )
-        
+
+        if embedder == "TimeVAE":
+            if not TORCH_AVAILABLE:
+                raise ModuleNotFoundError(f"Using TimeVAE requires torch in the environment")
+
+            self.using_torch = True
+            self.using_keras = False
+
+            has_padding = self._sequences_have_padding(embedder)
+
+            return TimeVAE(
+                input_dim=len(self.features_columns),
+                seq_len=self.processed_sequence_data.shape[1],
+                latent_dim=self.latent_dimension,
+                pooling=has_padding,
+            )
+
         if embedder == "DRNN":
             if not KERAS_AVAILABLE:
                 raise ModuleNotFoundError(f"using DRNN requires aeon/tensorflow/keras in the environment")
