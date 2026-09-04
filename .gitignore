@@ -9,6 +9,7 @@ playground.*
 .vscode/
 checkpoints/
 lightning_logs/
+benchmark_results/
 
 encoder_pacman.egg-info/*
 notebooks/profile.html
