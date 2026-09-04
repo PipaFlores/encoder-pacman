@@ -12,7 +12,8 @@ lightning_logs/
 benchmark_results/
 
 encoder_pacman.egg-info/*
-notebooks/*
+notebooks/
+
 README_files/
 README.html
 playground/dtw_affinity_matrix.csv
