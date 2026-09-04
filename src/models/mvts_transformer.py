@@ -264,8 +264,13 @@ class TransformerBatchNormEncoderLayer(nn.modules.Module):
 class TSTransformerEncoder(nn.Module):
     """
     This is the main class containing the whole model
-    
-    
+
+    References:
+        Zerveas, G., Jayaraman, S., Patel, D., Bhamidipaty, A., & Eickhoff, C.
+            (2021). A Transformer-based Framework for Multivariate Time
+            Series Representation Learning. Proceedings of the 27th ACM
+            SIGKDD Conference on Knowledge Discovery & Data Mining, 2114-2124.
+            https://github.com/gzerveas/mvts_transformer
     """
 
     def __init__(self, 
@@ -446,13 +451,17 @@ class Transformer_Trainer():
         loss = MaskedMSELoss()
         
         ### Data split
-        ## FIXME there is a missing collation function used by the og pipeline
+        # Dynamic per-batch padding (as in the og pipeline's collate_unsuperv): trims each
+        # batch down to its own longest valid sequence instead of the dataset-wide max_len,
+        # so BatchNorm inside the encoder sees far less padding-derived signal.
+        from src.datahandlers import collate_dynamic_padding
+
         if self.validation_split > 0:
             train_set, val_set = torch.utils.data.random_split(data, [1 - self.validation_split, self.validation_split])
-            val_iter = torch.utils.data.DataLoader(val_set, batch_size=self.batch_size, shuffle=True)
+            val_iter = torch.utils.data.DataLoader(val_set, batch_size=self.batch_size, shuffle=True, collate_fn=collate_dynamic_padding)
         else:
             train_set = data
-        train_iter = torch.utils.data.DataLoader(train_set, batch_size=self.batch_size, shuffle=True)
+        train_iter = torch.utils.data.DataLoader(train_set, batch_size=self.batch_size, shuffle=True, collate_fn=collate_dynamic_padding)
 
         self.train_loss_list, self.val_loss_list = [], []
         best_loss = math.inf
