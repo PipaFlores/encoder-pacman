@@ -41,6 +41,7 @@ class PacmanDataset(Dataset):
 
         self.padding_mask = (self.gamestates != padding_value).float()
         self.padding_mask = self.padding_mask.any(dim=-1).float()
+        self.lengths = self.padding_mask.sum(dim=1).long().clamp(min=1)
 
         if elementwise_masking:
             self.obs_mask = torch.isfinite(self.gamestates).float()
@@ -50,6 +51,12 @@ class PacmanDataset(Dataset):
         if torch.isinf(self.gamestates).any():
             self.gamestates = replace_inf(self.gamestates)
 
+        # Padded timesteps still hold the raw padding_value sentinel at this point.
+        # Zero them out so no model ever sees that out-of-distribution value directly;
+        # 0 is the same "no information" placeholder used by feature normalization
+        # and by the transformer's masked-imputation objective.
+        self.gamestates = self.gamestates * self.padding_mask.unsqueeze(-1)
+
     def __len__(self):
         return len(self.gamestates)
 
@@ -57,7 +64,8 @@ class PacmanDataset(Dataset):
         return {
             "data": self.gamestates[idx],
             "padding_mask": self.padding_mask[idx],
-            "obs_mask": self.obs_mask[idx]
+            "obs_mask": self.obs_mask[idx],
+            "lengths": self.lengths[idx]
         }
     
 
@@ -116,6 +124,7 @@ class ImputationDataset(Dataset):
 
         self.padding_mask = (self.gamestates != padding_value).float()
         self.padding_mask = self.padding_mask.any(dim=-1).float()
+        self.lengths = self.padding_mask.sum(dim=1).long().clamp(min=1)
 
         if elementwise_masking:
             self.obs_mask = torch.isfinite(self.gamestates).float()
@@ -126,7 +135,12 @@ class ImputationDataset(Dataset):
 
         if torch.isinf(self.gamestates).any():
             self.gamestates = replace_inf(self.gamestates)
-    
+
+        # Padded timesteps still hold the raw padding_value sentinel at this point.
+        # Zero them out so no model ever sees that out-of-distribution value directly;
+        # 0 is the same "no information" placeholder used by feature normalization
+        # and by the transformer's masked-imputation objective.
+        self.gamestates = self.gamestates * self.padding_mask.unsqueeze(-1)
 
 
     def __getitem__(self, ind):
@@ -163,7 +177,8 @@ class ImputationDataset(Dataset):
             "data": X,
             "noise_mask": torch.from_numpy(noise_mask).float(),
             "padding_mask": self.padding_mask[ind],
-            "obs_mask": self.obs_mask[ind]
+            "obs_mask": self.obs_mask[ind],
+            "lengths": self.lengths[ind]
         }
 
     def update(self):
@@ -177,6 +192,34 @@ class ImputationDataset(Dataset):
 
     def __len__(self):
         return len(self.gamestates)
+
+
+def collate_dynamic_padding(batch: list[dict]) -> dict:
+    """
+    DataLoader collate_fn that trims a batch of globally max-length-padded samples
+    down to the longest *valid* sequence length within that batch, rather than the
+    dataset-wide max_len. Mirrors the per-batch dynamic padding used in Zerveas et al.
+    2020's reference implementation (`collate_unsuperv`), which reduces how much of
+    each batch is padding versus this repo's fixed global-length padding, in turn
+    reducing padding's contamination of the transformer's BatchNorm statistics.
+
+    Requires every sample dict to include a "lengths" entry (as returned by
+    PacmanDataset/ImputationDataset) and trims any "data"/"padding_mask"/"obs_mask"/
+    "noise_mask" entries present along their leading (sequence) dimension before
+    handing off to the default collation.
+    """
+    from torch.utils.data import default_collate
+
+    batch_max_len = int(max(int(sample["lengths"]) for sample in batch))
+    trimmed = []
+    for sample in batch:
+        trimmed_sample = dict(sample)
+        for key in ("data", "padding_mask", "obs_mask", "noise_mask"):
+            if key in sample:
+                trimmed_sample[key] = sample[key][:batch_max_len]
+        trimmed.append(trimmed_sample)
+    return default_collate(trimmed)
+
 
 def replace_inf(array: np.ndarray):
     """
