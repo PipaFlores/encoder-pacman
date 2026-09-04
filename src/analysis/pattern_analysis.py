@@ -19,7 +19,7 @@ try:
     import torch
     TORCH_AVAILABLE = True
     from src.models import VanillaVAE, VAE_Trainer, AE_Trainer, AELSTM, TSTransformerEncoder, Transformer_Trainer
-    from src.datahandlers import PacmanDataset, ImputationDataset
+    from src.datahandlers import PacmanDataset, ImputationDataset, collate_dynamic_padding
 except ImportError:
     TORCH_AVAILABLE = False
 
@@ -744,7 +744,8 @@ class PatternAnalysis:
             from torch.utils.data import DataLoader
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             data_tensor = PacmanDataset(gamestates=padded_data) if isinstance(self.embedder, AELSTM) else ImputationDataset(gamestates=padded_data)
-            data_loader = DataLoader(data_tensor, batch_size=self.batch_size, shuffle=False)
+            collate_fn = collate_dynamic_padding if isinstance(self.embedder, TSTransformerEncoder) else None
+            data_loader = DataLoader(data_tensor, batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
 
             self.embedder.to(device).eval()
             with torch.no_grad():

@@ -197,7 +197,7 @@ def evaluate_torch_model(model, X_test: np.ndarray, args: argparse.Namespace) ->
     """
     import torch
     from torch.utils.data import DataLoader
-    from src.datahandlers import ImputationDataset, PacmanDataset
+    from src.datahandlers import ImputationDataset, PacmanDataset, collate_dynamic_padding
     from src.models import AELSTM, TSTransformerEncoder
     from src.models.loss import MaskedMSELoss, VAELoss
 
@@ -215,7 +215,7 @@ def evaluate_torch_model(model, X_test: np.ndarray, args: argparse.Namespace) ->
     else:
         dataset = PacmanDataset(X_test, elementwise_masking=args.elementwise_masking)
 
-    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+    loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_dynamic_padding)
     mse_loss = MaskedMSELoss()
     vae_loss = VAELoss(kld_weight=0.0)
     total = 0.0
@@ -362,7 +362,7 @@ def extract_torch_embeddings(name: str, model, X: np.ndarray, args: argparse.Nam
     """Extract one latent vector per sample from torch-backed architectures."""
     import torch
     from torch.utils.data import DataLoader
-    from src.datahandlers import ImputationDataset, PacmanDataset
+    from src.datahandlers import ImputationDataset, PacmanDataset, collate_dynamic_padding
     from src.models import TSTransformerEncoder
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -374,7 +374,7 @@ def extract_torch_embeddings(name: str, model, X: np.ndarray, args: argparse.Nam
 
     embeddings = []
     with torch.no_grad():
-        for batch in DataLoader(dataset, batch_size=args.batch_size, shuffle=False):
+        for batch in DataLoader(dataset, batch_size=args.batch_size, shuffle=False, collate_fn=collate_dynamic_padding):
             batch_x = batch["data"].to(device)
             if isinstance(model, TSTransformerEncoder):
                 padding_mask = batch["padding_mask"].to(device)
