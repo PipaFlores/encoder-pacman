@@ -25,10 +25,29 @@ class Encoder(nn.Module):
         self.lstm = nn.LSTM(input_size=input_size, hidden_size=hidden_size, dropout=dropout, batch_first=True)
         self.input_dropout = nn.Dropout(p=dropout)
 
-    def forward(self, X: torch.Tensor):
+    def forward(self, X: torch.Tensor, lengths: torch.Tensor | None = None):
+        """
+        Args:
+            X: (batch_size, seq_length, input_size) padded input.
+            lengths: (batch_size,) number of valid (non-padded) timesteps per sample. When
+                given, padded timesteps are excluded from the recurrence via
+                pack_padded_sequence, so the returned final hidden state (h) reflects each
+                sample's true last timestep instead of however much trailing padding follows it.
+        """
 
         X = self.input_dropout(X)
-        out, (h, c) = self.lstm(X) # output hidden_state vector for each timestep, (last h, last c)
+
+        if lengths is not None:
+            packed = nn.utils.rnn.pack_padded_sequence(
+                X, lengths.cpu(), batch_first=True, enforce_sorted=False
+            )
+            packed_out, (h, c) = self.lstm(packed)
+            out, _ = nn.utils.rnn.pad_packed_sequence(
+                packed_out, batch_first=True, total_length=X.size(1)
+            )
+        else:
+            out, (h, c) = self.lstm(X) # output hidden_state vector for each timestep, (last h, last c)
+
         x_encoding = h.squeeze(dim=0) #  [1, batch_size, hidden_size] -> [batch_size, hidden_size]
         ## Implementation from Matan Levi repeats the hidden vector to the seq_length here, but I will do it at the AE forward step.
         return x_encoding, out, (h, c)
@@ -94,6 +113,15 @@ class AELSTM(nn.Module):
         The decoder reconstructs the input sequence from the latent representation. If `forced_teacher` is True, the decoder receives the original
         input at each time step (teacher forcing); otherwise, it receives the repeated encoded vector.
 
+        References:
+            Srivastava, N., Mansimov, E., & Salakhutdinov, R. (2015).
+                Unsupervised Learning of Video Representations using LSTMs.
+                Proceedings of the 32nd International Conference on Machine
+                Learning (ICML), 843-852. (General LSTM encoder-decoder
+                autoencoder pattern this class follows; not the video-specific
+                model itself.)
+            The repeated-hidden-vector decoding step follows an implementation
+                by Matan Levi.
         """
         super(AELSTM, self).__init__()
         self.input_size = input_size
@@ -124,18 +152,18 @@ class AELSTM(nn.Module):
                                    forced_teacher=forced_teacher)
         
         
-    def forward(self, X: torch.Tensor, return_encoding= False):
+    def forward(self, X: torch.Tensor, lengths: torch.Tensor | None = None, return_encoding= False):
 
-        x_encoding, _, (h, c)= self.encoder(X)
+        x_encoding, _, (h, c)= self.encoder(X, lengths=lengths)
         z = x_encoding.unsqueeze(1).repeat(1, X.shape[1] , 1) # [batch_dize, hidden_size] -> [batch_size, seq_length, hidden_size]
         reconstruction = self.decoder(z = z, HC = [h, c] )
 
         if return_encoding:
             return reconstruction, x_encoding
         return reconstruction
-    
-    def encode(self, X: torch.Tensor):
-        x_encoding, _, (__, ___)= self.encoder(X)
+
+    def encode(self, X: torch.Tensor, lengths: torch.Tensor | None = None):
+        x_encoding, _, (__, ___)= self.encoder(X, lengths=lengths)
 
         return x_encoding
 
@@ -239,7 +267,10 @@ class AE_Trainer():
 
             for batch in train_iter:
                 x = batch["data"].to(self.device)
-                x_h = self.model(x)
+                lengths = batch.get("lengths", None)
+                if lengths is not None:
+                    lengths = lengths.to(self.device)
+                x_h = self.model(x, lengths=lengths)
 
                 # masked loss for variable seq_lengths
                 padding_mask = batch.get("padding_mask", None)
@@ -269,7 +300,10 @@ class AE_Trainer():
                 for batch in val_iter:
                     with torch.no_grad():
                         x = batch["data"].to(self.device)
-                        x_h = self.model(x)
+                        lengths = batch.get("lengths", None)
+                        if lengths is not None:
+                            lengths = lengths.to(self.device)
+                        x_h = self.model(x, lengths=lengths)
                         padding_mask = batch.get("padding_mask", None)
                         if padding_mask is not None:
                             padding_mask = batch["padding_mask"].to(self.device)
