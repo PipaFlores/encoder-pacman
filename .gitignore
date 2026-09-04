@@ -12,14 +12,8 @@ lightning_logs/
 benchmark_results/
 
 encoder_pacman.egg-info/*
-notebooks/profile.html
-notebooks/profile.json
-notebooks/_ipython-input-5-profile
-notebooks/_ipython-input-17-profile
-notebooks/subsequences/
+notebooks/*
 README_files/
-notebooks/test_partial_trajectories.json
-notebooks/test_partial_trajectories.npz
 README.html
 playground/dtw_affinity_matrix.csv
 
