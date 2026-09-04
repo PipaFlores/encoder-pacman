@@ -141,18 +141,19 @@ class FeatureNormalizer:
         return normalized.fillna(0.0)
 
     def normalize_counter(self, series: pd.Series) -> pd.Series:
-        return self.minmax(series)
+        return self.standardize(series)
 
     def normalize_binary_flag(self, series: pd.Series) -> pd.Series:
         values = pd.to_numeric(series, errors="coerce").fillna(0.0)
-        return values.clip(lower=0.0, upper=1.0)
+        values = values.clip(lower=0.0, upper=1.0)
+        return self.standardize(values)
 
     def normalize_multistate_flag(
         self, series: pd.Series, max_state: int = 3
     ) -> pd.Series:
         values = pd.to_numeric(series, errors="coerce").fillna(0.0)
         values = values.clip(lower=0.0, upper=max_state)
-        return values / max(max_state, 1)
+        return self.standardize(values)
 
     def normalize_position(
         self,
@@ -164,7 +165,13 @@ class FeatureNormalizer:
             if axis not in self.POSITION_BOUNDS:
                 raise ValueError(f"Unsupported axis '{axis}'. Expected one of x/y.")
             bounds = self.POSITION_BOUNDS[axis]
-        return self.minmax(series, min_val=bounds[0], max_val=bounds[1])
+        # Center/scale from the known map bounds rather than empirical mean/std, so
+        # position normalization stays fixed and reproducible across different
+        # sequence-type/feature-set subsets instead of shifting with whatever
+        # positions happen to be in a given run.
+        center = (bounds[0] + bounds[1]) / 2
+        half_range = (bounds[1] - bounds[0]) / 2
+        return self.standardize(series, mean=center, std=half_range)
 
     def normalize_distance(self, series: pd.Series) -> pd.Series:
         values = pd.to_numeric(series, errors="coerce")
@@ -175,7 +182,7 @@ class FeatureNormalizer:
         if finite_values.empty:
             return values  # nothing finite to normalize
 
-        normalized = self.minmax(finite_values)
+        normalized = self.standardize(finite_values)
 
         result = pd.Series(index=series.index, dtype=float)
         result[finite_mask] = normalized
