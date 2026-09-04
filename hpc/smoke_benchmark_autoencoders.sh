@@ -17,7 +17,7 @@ export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
 # Keep the dataset list small enough for one scheduled job, or split it into arrays.
-DATASETS=("BasicMotions" "PenDigits")
+DATASETS=("PenDigits" "NATOPS" "Worms")
 
 for DATASET in "${DATASETS[@]}"; do
     # Shared across both passes so their results land in the same results.csv/json.
