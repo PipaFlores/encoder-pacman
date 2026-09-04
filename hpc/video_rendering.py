@@ -69,12 +69,13 @@ if __name__ == "__main__":
     if args.test:
         level_ids = level_ids[:45]
     
-    N_JOBS = multiprocessing.cpu_count()
+    # N_JOBS = multiprocessing.cpu_count()
+    N_JOBS = int(os.environ.get("SLURM_CPUS_PER_TASK",1))
+    print(f"detected CPUs for multiprocess {N_JOBS}")  
     
     # Use initializer to set up data in each worker process
     with Pool(N_JOBS, initializer=init_worker) as pool:
         pool.map(render_video_for_level, level_ids)
-
 
 
 
