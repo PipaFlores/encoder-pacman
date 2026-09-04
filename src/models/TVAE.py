@@ -146,12 +146,27 @@ class ResidualConnection(nn.Module):
     
 
 class TimeVAEEncoder(nn.Module):
-    def __init__(self, seq_len, feat_dim, hidden_layer_sizes, latent_dim):
+    def __init__(self, seq_len, feat_dim, hidden_layer_sizes, latent_dim, pooling: bool = False):
+        """
+        Args:
+            pooling (bool): If False (default), matches the reference architecture: flatten
+                the full conv-output feature map and project with one
+                Linear(encoder_last_dense_dim, latent_dim) per distribution parameter -
+                correct and fully expressive when every sample truly has `seq_len` valid
+                timesteps. If True, masked-mean-pool the final conv layer's output over time
+                (ignoring padded timesteps) before a Linear(hidden_layer_sizes[-1], latent_dim)
+                projection instead - needed when samples are padded to `seq_len` rather than
+                genuinely all being that length. Unlike VanillaVAE, these conv layers use
+                stride=2, so the time axis is downsampled at every layer; forward() downsamples
+                `padding_mask` in lockstep with max_pool1d using the same kernel/stride/padding
+                as each conv layer, so it stays aligned with the shrinking feature map.
+        """
         super(TimeVAEEncoder, self).__init__()
         self.seq_len = seq_len
         self.feat_dim = feat_dim
         self.latent_dim = latent_dim
         self.hidden_layer_sizes = hidden_layer_sizes
+        self.pooling = pooling
         self.layers = []
         self.layers.append(nn.Conv1d(feat_dim, hidden_layer_sizes[0], kernel_size=3, stride=2, padding=1))
         self.layers.append(nn.ReLU())
@@ -161,20 +176,36 @@ class TimeVAEEncoder(nn.Module):
             self.layers.append(nn.ReLU())
 
         self.layers.append(nn.Flatten())
-        
+
         self.encoder_last_dense_dim = self._get_last_dense_dim(seq_len, feat_dim, hidden_layer_sizes)
 
         self.encoder = nn.Sequential(*self.layers)
-        self.z_mean = nn.Linear(self.encoder_last_dense_dim, latent_dim)
-        self.z_log_var = nn.Linear(self.encoder_last_dense_dim, latent_dim)
+        z_mean_in_dim = hidden_layer_sizes[-1] if pooling else self.encoder_last_dense_dim
+        self.z_mean = nn.Linear(z_mean_in_dim, latent_dim)
+        self.z_log_var = nn.Linear(z_mean_in_dim, latent_dim)
 
-    def forward(self, x):
+    def forward(self, x, padding_mask=None):
         x = x.transpose(1, 2)
-        x = self.encoder(x)
+
+        if self.pooling:
+            mask = padding_mask.unsqueeze(1) if padding_mask is not None else None  # [batch, 1, seq_len]
+            for layer in self.layers[:-1]:  # every Conv1d/ReLU pair, skip the trailing Flatten
+                x = layer(x)
+                if isinstance(layer, nn.Conv1d) and mask is not None:
+                    mask = F.max_pool1d(
+                        mask, kernel_size=layer.kernel_size[0], stride=layer.stride[0], padding=layer.padding[0]
+                    )
+            if mask is not None:
+                x = (x * mask).sum(dim=2) / mask.sum(dim=2).clamp(min=1e-6)
+            else:
+                x = x.mean(dim=2)
+        else:
+            x = self.encoder(x)
+
         z_mean = self.z_mean(x)
         z_log_var = self.z_log_var(x)
         return z_mean, z_log_var
-    
+
     def _get_last_dense_dim(self, seq_len, feat_dim, hidden_layer_sizes):
         with torch.no_grad():
             x = torch.randn(1, feat_dim, seq_len)
@@ -217,6 +248,16 @@ class TimeVAEDecoder(nn.Module):
 
 
 class TimeVAE(nn.Module):
+    """
+    Variational autoencoder with interpretable trend/seasonality/residual
+    decoder components for multivariate time series.
+
+    References:
+        Desai, A., Freeman, C., Wang, Z., & Beaver, I. (2021). TimeVAE: A
+            Variational Auto-Encoder For Multivariate Time Series Generation.
+            arXiv:2111.08095. https://github.com/wangyz1999/timeVAE-pytorch
+    """
+
     model_name = "TimeVAE"
 
     def __init__(
@@ -229,6 +270,7 @@ class TimeVAE(nn.Module):
         trend_poly: int = 0,
         custom_seas: list[list[int], list[int]]=None,
         use_residual_conn : bool = True,
+        pooling: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -240,6 +282,7 @@ class TimeVAE(nn.Module):
         self.batch_size = batch_size
         self.encoder = None
         self.decoder = None
+        self.pooling = pooling
         print("using og imp")
 
 
@@ -261,7 +304,7 @@ class TimeVAE(nn.Module):
                     nn.init.zeros_(layer.bias)
 
     def _get_encoder(self):
-        return TimeVAEEncoder(self.seq_len, self.input_dim, self.hidden_layer_sizes, self.latent_dim)
+        return TimeVAEEncoder(self.seq_len, self.input_dim, self.hidden_layer_sizes, self.latent_dim, pooling=self.pooling)
 
     def _get_decoder(self):
         return TimeVAEDecoder(self.seq_len, self.input_dim, self.hidden_layer_sizes, self.latent_dim, self.trend_poly, self.custom_seas, self.use_residual_conn, self.encoder.encoder_last_dense_dim)
@@ -279,17 +322,17 @@ class TimeVAE(nn.Module):
         eps = torch.randn_like(std)
         return eps * std + mu
     
-    def forward(self, X:Tensor):
-        z_mean, z_log_var = self.encoder(X)
+    def forward(self, X:Tensor, padding_mask: Tensor | None = None):
+        z_mean, z_log_var = self.encoder(X, padding_mask=padding_mask)
         z = self.reparameterize(z_mean, z_log_var) ## og implementation does not reparametrize for forward pass (only for training step.)
-        
-        x_decoded = self.decoder(z)
-        
-        return [x_decoded, z_mean, z_log_var]
-    
 
-    def encode(self, X:Tensor):
-        z_mean , z_log_var = self.encoder(X)
+        x_decoded = self.decoder(z)
+
+        return [x_decoded, z_mean, z_log_var]
+
+
+    def encode(self, X:Tensor, padding_mask: Tensor | None = None):
+        z_mean , z_log_var = self.encoder(X, padding_mask=padding_mask)
 
         return z_mean, z_log_var
 
@@ -309,6 +352,7 @@ class TimeVAE(nn.Module):
             "trend_poly": self.trend_poly,
             "custom_seas": self.custom_seas,
             "use_residual_conn": self.use_residual_conn,
+            "pooling": self.pooling,
         }
         params_file = os.path.join(model_dir, f"{self.model_name}_parameters.pkl")
         joblib.dump(dict_params, params_file)
