@@ -33,6 +33,12 @@ class VanillaVAE(nn.Module):
         loss_function(recons: Tensor, input: Tensor, mu: Tensor, logvar: Tensor, kld_weight: float = 1.0) -> dict:
             Computes the VAE loss as the sum of reconstruction loss and Kullback-Leibler divergence.
 
+    References:
+        Kingma, D. P., & Welling, M. (2014). Auto-Encoding Variational Bayes.
+            arXiv:1312.6114.
+        Architecture (hidden_dims, fc_mu/fc_var, encode/decode/sample/generate)
+            follows AntixK's PyTorch-VAE reference implementation:
+            https://github.com/AntixK/PyTorch-VAE
     """
 
     def __init__(self,
@@ -40,13 +46,33 @@ class VanillaVAE(nn.Module):
                  seq_len : int,
                  latent_dim: int = 128,
                  hidden_dims: list | None = None,
+                 pooling: bool = False,
                  **kwargs) -> None:
-        
+        """
+        Args (in addition to the class docstring):
+            pooling (bool): If False (default), matches the reference architecture exactly:
+                flatten the encoder's full [hidden_dims[-1], seq_len] output and project with
+                one Linear(hidden_dims[-1]*seq_len, latent_dim) per distribution parameter. This
+                lets each timestep contribute through its own learned weights, which is correct
+                and fully expressive when every sample truly has `seq_len` valid timesteps.
+                If True, masked-mean-pool the encoder output over time (ignoring padded
+                timesteps via the `padding_mask` passed to encode()/forward()) before a
+                Linear(hidden_dims[-1], latent_dim) projection. Needed whenever samples are
+                padded to `seq_len` rather than genuinely all being that length: with a fixed
+                per-position weight matrix, flattening otherwise mixes an arbitrary amount of
+                the raw padding sentinel into the latent distribution, with no way for a fixed
+                weight to tell, per sample, which positions were actually padding. Since
+                encoder convolutions here all use stride=1 (padding='same'), the encoder output
+                keeps the same time resolution as the input, so padding_mask (at [batch, seq_len])
+                aligns directly with the encoder output's time axis with no resampling needed.
+        """
+
         super().__init__()
 
         self.input_dim = input_dim
         self.latent_dim = latent_dim
         self.seq_len = seq_len
+        self.pooling = pooling
 
         modules = []
         if hidden_dims is None:
@@ -65,8 +91,9 @@ class VanillaVAE(nn.Module):
 
         self.encoder = nn.Sequential(*modules)
 
-        self.fc_mu = nn.Linear(hidden_dims[-1]* seq_len, latent_dim) # Linear proj to gaussian mean
-        self.fc_var = nn.Linear(hidden_dims[-1]* seq_len, latent_dim) # Same to variance
+        fc_in_features = hidden_dims[-1] if pooling else hidden_dims[-1] * seq_len
+        self.fc_mu = nn.Linear(fc_in_features, latent_dim) # Linear proj to gaussian mean
+        self.fc_var = nn.Linear(fc_in_features, latent_dim) # Same to variance
 
 
         # Build Decoder
@@ -110,17 +137,27 @@ class VanillaVAE(nn.Module):
         #               )
         # )
 
-    def encode(self, input: Tensor) -> list[Tensor]:
+    def encode(self, input: Tensor, padding_mask: Tensor | None = None) -> list[Tensor]:
         """
         Encodes the input by passing through the encoder network
         and returns the latent codes.
         :param input: (Tensor) Input tensor to encoder [batch, seq_len, features]
+        :param padding_mask: (Tensor, optional) [batch, seq_len], 1 for valid timesteps,
+            0 for padding. Only used when pooling=True (see __init__); ignored otherwise.
         :return: (Tensor) List of latent codes
         """
         input = input.permute(0,2,1) # Conv layers expect [batch, feats, seq_len]
 
-        result = self.encoder(input)
-        result = torch.flatten(result, start_dim=1)
+        result = self.encoder(input) # [batch, hidden_dims[-1], seq_len] (stride=1: time axis preserved)
+
+        if self.pooling:
+            if padding_mask is not None:
+                mask = padding_mask.unsqueeze(1) # [batch, 1, seq_len]
+                result = (result * mask).sum(dim=2) / mask.sum(dim=2).clamp(min=1e-6)
+            else:
+                result = result.mean(dim=2)
+        else:
+            result = torch.flatten(result, start_dim=1)
 
         # Split the result into mu and var components
         # of the latent Gaussian distribution
@@ -145,9 +182,9 @@ class VanillaVAE(nn.Module):
 
         return result
 
-    def forward(self, input: Tensor, **kwargs) -> list[Tensor, Tensor, Tensor]:
+    def forward(self, input: Tensor, padding_mask: Tensor | None = None, **kwargs) -> list[Tensor, Tensor, Tensor]:
         """
-        Run the whole encoder-decoder network, returning the reconstructed input 
+        Run the whole encoder-decoder network, returning the reconstructed input
         and the mu, log_var parameters of the gaussian distribution
 
         returns:
@@ -156,9 +193,9 @@ class VanillaVAE(nn.Module):
             log_var (Tensor): log_var of the gaussian distribution
 
 
-        
+
         """
-        mu, log_var = self.encode(input)
+        mu, log_var = self.encode(input, padding_mask=padding_mask)
         z = self.reparameterize(mu, log_var)
         return  [self.decode(z), mu, log_var]
     
@@ -321,12 +358,12 @@ class VAE_Trainer():
 
             for batch in train_iter:
                 x = batch["data"].to(self.device)
-                x_h, mu, log_var = self.model(x)
 
                 # masked loss for variable seq_lengths
                 padding_mask = batch.get("padding_mask", None)
-                if padding_mask is not None: 
+                if padding_mask is not None:
                     padding_mask = batch["padding_mask"].to(self.device)
+                x_h, mu, log_var = self.model(x, padding_mask=padding_mask)
 
                 # Observation masked loss for missing elements
                 # e.g., astar distance = inf when ghosts in house 
@@ -356,10 +393,10 @@ class VAE_Trainer():
                 for batch in val_iter:
                     with torch.no_grad():
                         x = batch["data"].to(self.device)
-                        x_h, mu, log_var = self.model(x)
                         padding_mask = batch.get("padding_mask", None)
                         if padding_mask is not None:
                             padding_mask = batch["padding_mask"].to(self.device)
+                        x_h, mu, log_var = self.model(x, padding_mask=padding_mask)
 
                         obs_mask = batch.get("obs_mask", None) 
                         if obs_mask is not None:

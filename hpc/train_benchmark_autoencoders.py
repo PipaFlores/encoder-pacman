@@ -246,7 +246,7 @@ def evaluate_torch_model(model, X_test: np.ndarray, args: argparse.Namespace) ->
                 recon = model(x, lengths=lengths)
                 loss = mse_loss(recon, x, padding_mask=padding_mask, obs_mask=obs_mask)
             else:
-                recon, mu, log_var = model(x)
+                recon, mu, log_var = model(x, padding_mask=padding_mask)
                 loss, _ = vae_loss(recon, x, mu, log_var, padding_mask=padding_mask, obs_mask=obs_mask)
 
             total += float(loss.item()) * len(x)
@@ -321,10 +321,17 @@ def train_vanilla_vae(X_train: np.ndarray, X_test: np.ndarray, args: argparse.Na
     from src.datahandlers import PacmanDataset
     from src.models import VanillaVAE, VAE_Trainer
 
+    dataset = PacmanDataset(X_train, elementwise_masking=args.elementwise_masking)
+    # Only pool (padding-safe, position-agnostic) when this dataset actually has padded
+    # samples; a genuinely fixed-length dataset keeps the reference flatten+Linear encoder,
+    # which is strictly more expressive when there's no padding to protect against.
+    has_padding = bool(dataset.lengths.min().item() < X_train.shape[1])
+
     model = VanillaVAE(
         input_dim=X_train.shape[-1],
         seq_len=X_train.shape[1],
         latent_dim=args.latent_space,
+        pooling=has_padding,
     )
     trainer = VAE_Trainer(
         max_epochs=args.n_epochs,
@@ -334,7 +341,7 @@ def train_vanilla_vae(X_train: np.ndarray, X_test: np.ndarray, args: argparse.Na
         kld_weight=args.kld_weight,
         verbose=args.verbose,
     )
-    trainer.fit(model, PacmanDataset(X_train, elementwise_masking=args.elementwise_masking))
+    trainer.fit(model, dataset)
     return model, trainer.train_loss_list[-1], trainer.val_loss_list[-1], evaluate_torch_model(model, X_test, args)
 
 
@@ -386,7 +393,8 @@ def extract_torch_embeddings(name: str, model, X: np.ndarray, args: argparse.Nam
                 batch_lengths = batch["lengths"].to(device)
                 batch_z = model.encode(batch_x, lengths=batch_lengths)
             else:
-                encoded = model.encode(batch_x)
+                batch_padding_mask = batch["padding_mask"].to(device)
+                encoded = model.encode(batch_x, padding_mask=batch_padding_mask)
                 batch_z = encoded[0] if isinstance(encoded, (list, tuple)) else encoded
             embeddings.append(batch_z.detach().cpu().numpy())
     return np.concatenate(embeddings, axis=0)
