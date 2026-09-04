@@ -255,6 +255,68 @@ class PacmanDataReader:
             self.game_flow_df = self._process_flow()
             self.bisbas_df = self._process_bisbas()
 
+    def _add_flow_and_bisbas_metadata(self, metadata_dictionary: dict) -> None:
+        """
+        Enriches metadata_dictionary in-place with per-sequence performance (flow) and
+        psychological (BISBAS + demographics) values, looked up from `game_flow_df` and
+        `bisbas_df` (only available when the reader was loaded with read_games_only=False).
+        Sequences without a matching row (e.g. games without a flow measure) are filled with NaN.
+        """
+        if not hasattr(self, "game_flow_df") or not hasattr(self, "bisbas_df"):
+            logger.warning(
+                "game_flow_df/bisbas_df not available (reader initialized with read_games_only=True). "
+                "Skipping performance/psychological metadata."
+            )
+            return
+
+        # Performance: flow score, per game_id
+        flow_scores = []
+        flow_z_scores = []
+        for game_id in metadata_dictionary["game_id"]:
+            matching_rows = self.game_flow_df[self.game_flow_df["game_id"] == game_id]
+            if len(matching_rows) != 1:
+                flow_scores.append(np.nan)
+                flow_z_scores.append(np.nan)
+                continue
+
+            row = matching_rows.iloc[0]
+            flow_scores.append(row["FLOW"])
+            flow_z_scores.append(row["flow_z_score"] if pd.notna(row["flow_z_score"]) else np.nan)
+
+        metadata_dictionary["flow_score"] = np.asarray(flow_scores, dtype=float)
+        metadata_dictionary["flow_z_score"] = np.asarray(flow_z_scores, dtype=float)
+
+        # Psychological: BISBAS traits + demographics, per user_id
+        psych_columns = {
+            "gender": "gender",
+            "nationality": "nationality",
+            "age": "age",
+            "education": "edu",
+            "bis": "BIS",
+            "reward": "REW",
+            "drive": "DRIVE",
+            "fun": "FUN",
+        }
+        psych_values = {key: [] for key in psych_columns}
+        for user_id in metadata_dictionary["user_id"]:
+            matching_rows = self.bisbas_df[self.bisbas_df["user_id"] == user_id]
+            if len(matching_rows) != 1:
+                if len(matching_rows) == 0:
+                    logger.warning(f"No bisbas info for user_id {user_id}")
+                else:
+                    logger.warning(f"Duplicate bisbas rows for user_id {user_id}")
+                for key in psych_columns:
+                    psych_values[key].append(np.nan)
+                continue
+
+            row = matching_rows.iloc[0]
+            for key, col in psych_columns.items():
+                value = row[col]
+                psych_values[key].append(value if pd.notna(value) else np.nan)
+
+        for key, values in psych_values.items():
+            metadata_dictionary[key] = np.asarray(values)
+
     def make_data(
         self,
         feature_set: str = "Pacman",
@@ -293,7 +355,10 @@ class PacmanDataReader:
                 - gif_paths: list[str], paths to any generated GIFs (if make_gif is True).
                 - features: list[str], feature column names used for extraction.
                 - trajectory_list: list, list of trajectories for aggregate visualizations
-                - metadata_dictionary: dict, dictionary of high-level metadata
+                - metadata_dictionary: dict, dictionary of high-level metadata. Includes per-sequence
+                    performance ("flow_score", "flow_z_score") and psychological ("gender", "nationality",
+                    "age", "education", "bis", "reward", "drive", "fun") values when the reader was
+                    initialized with read_games_only=False; otherwise these keys are omitted.
             Otherwise:
                 (Not used here; function expects return_raw_sequences and will return above tuple.)
         """
@@ -389,6 +454,9 @@ class PacmanDataReader:
             pellet_eaten.append(np.abs(seq.iloc[-1]["pellets"] - seq.iloc[0]["pellets"]))
         metadata_dictionary["score_change"] = np.array(scores)
         metadata_dictionary["pellet_eaten"] = np.array(pellet_eaten)
+
+        ## performance (flow) and psychological (bisbas) metadata, only available if read_games_only=False
+        self._add_flow_and_bisbas_metadata(metadata_dictionary)
 
         if make_gif:
             assert len(raw_sequences) == len(gif_paths)
