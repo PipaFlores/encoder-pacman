@@ -1748,27 +1748,32 @@ class PacmanDataReader:
 
         for level_id in level_iter:
             gamestates = self._filter_gamestate_data(level_id=level_id)[0]
-            # Find indices where "pacman_attack" changes value
+            # Find indices where "pacman_attack" changes value. Thresholded at the column's own
+            # midpoint rather than compared to literal 0/1, so this still works when self.gamestate_df
+            # has been globally normalized (e.g. z-scored) before slicing (see make_data()'s
+            # normalization="global" branch) - in that case the flag's on/off values are no longer
+            # exactly 1/0, and an exact-equality check would silently find zero intervals.
             attack_col = gamestates["pacman_attack"].values
-            change_indices = np.where(attack_col[1:] != attack_col[:-1])[0] + 1  # +1 to get the index where the change happened [if changed to attack, the value at this state, and thereafter, will be 1]
-            
+            attack_threshold = (np.nanmax(attack_col) + np.nanmin(attack_col)) / 2
+            is_attacking = attack_col > attack_threshold
+            change_indices = np.where(is_attacking[1:] != is_attacking[:-1])[0] + 1  # +1 to get the index where the change happened [if changed to attack, the value at this state, and thereafter, will be 1]
+
             # Find (start_index, end_index) tuples where value switches from 1 to 0.
             # If a 1 is not followed by a 0, use the last index in gamestates as end_index.
             intervals = []
             start_index = None
 
-            for idx, value in zip(change_indices, attack_col[change_indices]):
-                if value == 1:
+            for idx, value in zip(change_indices, is_attacking[change_indices]):
+                if value:
                     start_index = max(idx - CONTEXT , 0) # Extend with context, if not 0
-                elif value == 0 and start_index is not None:
+                elif start_index is not None:
                     end_index = min(idx + CONTEXT, len(gamestates) - 1)
                     intervals.append((start_index, end_index))
                     start_index = None
 
             # If we end with a 1 and no following 0, close the interval at the last index
             if start_index is not None:
-                # end_index = len(gamestates) - 1
-                end_index = gamestates.index[-1]
+                end_index = len(gamestates) - 1
                 intervals.append((start_index, end_index))
 
             for (start_index, end_index) in intervals:
