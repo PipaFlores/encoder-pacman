@@ -406,9 +406,17 @@ def extract_torch_embeddings(name: str, model, X: np.ndarray, args: argparse.Nam
 
 
 def extract_aeon_embeddings(model, X: np.ndarray) -> np.ndarray:
-    """Extract latent vectors from aeon/Keras clusterer internals."""
-    X_channels_first = np.transpose(X, (0, 2, 1))
-    return model.model_.layers[1].predict(X_channels_first)
+    """Extract latent vectors from aeon/Keras clusterer internals.
+
+    `model.fit`/`model.predict` (the aeon/sklearn API) take channels-first X
+    ([samples, channels, time], aeon's own array convention) and transpose it
+    to channels-last internally before feeding the actual Keras graph - see
+    `train_aeon`. `model_.layers[1]` bypasses that preprocessing and talks to
+    the raw (already-transposed) Keras graph directly, so it needs the
+    channels-last shape fed to it as-is: X here is already [samples, time,
+    features] (see `to_repo_shape`), so no further transpose is needed.
+    """
+    return model.model_.layers[1].predict(X)
 
 
 def extract_embeddings(name: str, model, X: np.ndarray, args: argparse.Namespace) -> np.ndarray:
@@ -703,12 +711,19 @@ def train_aeon(name: str, X_train: np.ndarray, X_test: np.ndarray, args: argpars
         ),
     }
     model = constructors[name]()
+    # X_train/X_test are channels-last ([samples, time, features], see
+    # to_repo_shape). model.fit() (the aeon/sklearn API) instead wants
+    # channels-first X ([samples, channels, time], aeon's own array
+    # convention) and transposes it back to channels-last internally before
+    # building/feeding the actual Keras graph. Calling model.model_ directly
+    # bypasses that preprocessing, so it needs X fed to it in that
+    # already-channels-last shape as-is - see extract_aeon_embeddings for the
+    # same caveat.
     X_train_channels_first = np.transpose(X_train, (0, 2, 1))
-    X_test_channels_first = np.transpose(X_test, (0, 2, 1))
     model.fit(X_train_channels_first)
 
-    recon = model.model_(X_test_channels_first, training=False).numpy()
-    test_loss = float(np.mean((recon - X_test_channels_first) ** 2))
+    recon = model.model_(X_test, training=False).numpy()
+    test_loss = float(np.mean((recon - X_test) ** 2))
     summary = model.summary()
     train_loss = float(summary["loss"][-1]) if "loss" in summary else None
     val_loss = float(summary["val_loss"][-1]) if "val_loss" in summary else None
