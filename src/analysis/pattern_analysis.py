@@ -1,4 +1,7 @@
 import os
+import hashlib
+import json
+import pickle
 
 import numpy as np
 import pandas as pd
@@ -18,7 +21,7 @@ from src.datahandlers import PacmanDataReader
 try:
     import torch
     TORCH_AVAILABLE = True
-    from src.models import VanillaVAE, TimeVAE, VAE_Trainer, AE_Trainer, AELSTM, TSTransformerEncoder, Transformer_Trainer
+    from src.models import VanillaVAE, TimeVAE, VAE_Trainer, AE_Trainer, AELSTM, MLPAutoencoder, TSTransformerEncoder, Transformer_Trainer
     from src.datahandlers import PacmanDataset, ImputationDataset, collate_dynamic_padding
 except ImportError:
     TORCH_AVAILABLE = False
@@ -78,6 +81,7 @@ class PatternAnalysis:
             reader: PacmanDataReader = None,
             data_folder: str = "../data",
             hpc_folder: str = "../hpc",
+            cache_folder: str = "../cache",
             embedder: str | None = "LSTM",
             reducer: UMAP | PCA | None = None,
             clusterer: HDBSCAN | KMeans | GeomClustering = None,
@@ -112,6 +116,10 @@ class PatternAnalysis:
             reader (PacmanDataReader, optional): Data reader object for loading Pacman data. If None, a new reader is created.
             data_folder (str): Path to the data directory.
             hpc_folder (str): Path to the HPC directory for videos, affinity matrices, and trained models.
+            cache_folder (str): Path to the directory for caching pipeline intermediates (make_data,
+                validation encodings). Kept separate from hpc_folder since it's typically local to
+                each machine/environment (the source dataset it's fingerprinted against may differ
+                between them), unlike hpc_folder which may be shared/synced.
             embedder (str | None): Type of embedder to use "LSTM", "DRNN", "DCNN", "ResNet" or None to skip embedding.
             reducer (UMAP | PCA | None): Dimensionality reduction method. If None, defaults to UMAP.
             clusterer (HDBSCAN | KMeans | GeomClustering): Clustering algorithm to use.
@@ -164,6 +172,9 @@ class PatternAnalysis:
         # HPC CONFIG
         self.hpc_folder = hpc_folder ## for videos and trained models lookups (wherever videos/ affinity_matrices/ and trained_models/ are)
         self.using_hpc = using_hpc ## For parallel computing of affinity matrix
+
+        # CACHE CONFIG
+        self.cache_folder = cache_folder ## for cached pipeline intermediates (make_data, validation encodings). Local per environment, kept separate from hpc_folder.
         
 
             # for deep neural networks
@@ -224,6 +235,7 @@ class PatternAnalysis:
         self.trajectory_list = None
         self.metadata_dictionary = None
         self.gif_path_list = None
+        self._data_fingerprint = None
         self.embeddings = None
         self.reduced_embeddings = None
         self.affinity_matrix = None
@@ -241,10 +253,10 @@ class PatternAnalysis:
     def _sequences_have_padding(self, embedder: str) -> bool:
         """
         Whether processed_sequence_data contains any padded samples (shorter than
-        seq_len). Used to decide whether a VAE-family embedder should masked-mean-pool
-        its encoder instead of the reference flatten+Linear projection - see
-        VanillaVAE/TimeVAE's `pooling` argument. Logs a warning when padding is found,
-        since it changes which encoder architecture gets built.
+        seq_len). Used to decide whether a VAE-family embedder (or MLPAutoencoder)
+        should masked-mean-pool its encoder instead of the reference flatten+Linear
+        projection - see VanillaVAE/TimeVAE/MLPAutoencoder's `pooling` argument. Logs a
+        warning when padding is found, since it changes which encoder architecture gets built.
         """
         padding_value = -999.0
         valid_lengths = (self.processed_sequence_data != padding_value).any(axis=-1).sum(axis=1)
@@ -260,7 +272,7 @@ class PatternAnalysis:
 
     def _initialize_deep_embedder(self, embedder:str):
 
-        supported = ["LSTM", "Transformer","DRNN", "DCNN", "ResNet", "VAE", "TimeVAE"]
+        supported = ["LSTM", "MLP", "Transformer","DRNN", "DCNN", "ResNet", "VAE", "TimeVAE"]
         if embedder not in supported:
             raise ValueError(f"Embedder {embedder} is not one of the supported embedding deep networks ({supported})")
         
@@ -275,6 +287,23 @@ class PatternAnalysis:
                 hidden_size=self.latent_dimension,
                 dropout=self.dropout
             ) # other params defined in trainer during fitting stage.
+        if embedder == "MLP":
+            if not TORCH_AVAILABLE:
+                raise ModuleNotFoundError(f"Using MLP requires torch in the environment")
+
+            self.using_torch = True
+            self.using_keras = False
+
+            # Same padding-aware pooling decision as VAE/TimeVAE - see _sequences_have_padding.
+            has_padding = self._sequences_have_padding(embedder)
+
+            return MLPAutoencoder(
+                input_dim=len(self.features_columns),
+                seq_len=self.processed_sequence_data.shape[1],
+                latent_dim=self.latent_dimension,
+                dropout=self.dropout,
+                pooling=has_padding,
+            )
         if embedder == "Transformer":
             if not TORCH_AVAILABLE:
                 raise ModuleNotFoundError(f"Using LSTM requires torch in the environment")
@@ -383,6 +412,7 @@ class PatternAnalysis:
             metadata_dictionary: dict | None = None,
             validation_encodings: pd.DataFrame | None = None,
             force_training: bool = False,
+            ignore_cache: bool = False,
             test_dataset: bool = False,
             test_run: bool = False,
             close_wandb_logger: bool = True):
@@ -420,7 +450,10 @@ class PatternAnalysis:
                 Precomputed validation encodings for the raw_sequences (e.g., Behavlet features).
             force_training (bool, optional):
                 If True, trains deep embedding models even if there is an available model (will replace it)
-            test_dataset (bool, optional): 
+            ignore_cache (bool, optional):
+                If True, bypasses the on-disk cache for make_data() and validation encodings and
+                recomputes both from scratch (still overwrites the cache with the fresh result).
+            test_dataset (bool, optional):
                 If True, uses a built-in test dataset (e.g., PenDigits) for evaluation instead of the main data.
             test_run (bool, optional):
                 If True, uses only a subset of maximum 500 samples for the pipeline.
@@ -437,7 +470,7 @@ class PatternAnalysis:
         # Step 1: Load data if not provided
         
         if raw_sequences == None:
-            self.build_data()
+            self.build_data(ignore_cache=ignore_cache)
         else:
             assert len(raw_sequences) == len(processed_sequences) == len(trajectory_list), "provided data does not have equal lengths"
             assert processed_sequences.shape[-1] == len(features_columns)
@@ -445,6 +478,7 @@ class PatternAnalysis:
             self.processed_sequence_data = processed_sequences
             self.gif_path_list = gif_path_list
             self.features_columns = features_columns
+            self._data_fingerprint = None  # preloaded data has no known cache key
             self.trajectory_list = trajectory_list
             self.metadata_dictionary = metadata_dictionary
             logger.info(f"Using pre-loaded data. Loaded {len(self.raw_sequence_data)} sequences")
@@ -510,7 +544,7 @@ class PatternAnalysis:
         if self.validation_method:
             if test_dataset == False:
                 if validation_encodings is None:
-                    self.validation_encodings = self.calculate_validation_encodings(self.raw_sequence_data, self.validation_method)
+                    self.validation_encodings = self.calculate_validation_encodings(self.raw_sequence_data, self.validation_method, ignore_cache=ignore_cache)
                 else:
                     logger.info(f"Using preloaded validation encodings")
                     self.validation_encodings = validation_encodings
@@ -533,23 +567,43 @@ class PatternAnalysis:
         logger.info("Pipeline completed successfully!")
         return self
 
-    def build_data(self, 
-                   test_dataset=False, 
-                   test_run=False):
-        
+    def build_data(self,
+                   test_dataset=False,
+                   test_run=False,
+                   ignore_cache=False):
+
         if test_dataset == False:
             logger.info(f"Loading sequence type: {self.sequence_type}")
-            self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns, self.trajectory_list, self.metadata_dictionary = self.reader.make_data(
-                feature_set=self.feature_set,
-                sequence_type=self.sequence_type,
-                context=self.context,
-                rebase_scores=self.rebase_score,
-                filter_by_pill=self.filter_by_pill,
-                sort_ghost_distances=self.sort_distances,
-                normalization=self.normalization,
-                make_gif=self.augmented_visualization,
-                max_samples=self.max_samples
-            )
+            if ignore_cache:
+                logger.info("ignore_cache=True, bypassing data cache and recomputing")
+
+            fingerprint = self._compute_data_fingerprint()
+            cache_path = self._data_cache_path(fingerprint)
+            cached = None if ignore_cache else self._load_cache(cache_path, fingerprint)
+
+            if cached is not None:
+                logger.info(f"Using cached data ({cache_path})")
+                (self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list,
+                 self.features_columns, self.trajectory_list, self.metadata_dictionary) = cached
+            else:
+                self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns, self.trajectory_list, self.metadata_dictionary = self.reader.make_data(
+                    feature_set=self.feature_set,
+                    sequence_type=self.sequence_type,
+                    context=self.context,
+                    rebase_scores=self.rebase_score,
+                    filter_by_pill=self.filter_by_pill,
+                    sort_ghost_distances=self.sort_distances,
+                    normalization=self.normalization,
+                    make_gif=self.augmented_visualization,
+                    max_samples=self.max_samples
+                )
+                self._save_cache(cache_path, fingerprint, (
+                    self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list,
+                    self.features_columns, self.trajectory_list, self.metadata_dictionary
+                ))
+                logger.info(f"Cached data at {cache_path}")
+
+            self._data_fingerprint = fingerprint
 
             if test_run == True:
                 self.raw_sequence_data = self.raw_sequence_data[:500]
@@ -558,10 +612,88 @@ class PatternAnalysis:
                 self.trajectory_list = self.trajectory_list[:500]
 
             logger.info(f"Loaded {len(self.raw_sequence_data)} sequences")
-        
+
 
         else:
             self._load_test_dataset()
+            self._data_fingerprint = None
+
+    ### CACHING
+
+    def _source_data_fingerprint(self) -> dict:
+        """
+        Identity of the on-disk dataset backing self.reader (path/size/mtime of whichever
+        gamestate file was loaded), so a changed dataset invalidates any cache keyed on it.
+        """
+        gamestate_pkl = os.path.join(self.reader.data_folder, "gamestate.pkl")
+        gamestate_csv = os.path.join(self.reader.data_folder, "gamestate.csv")
+        source_path = gamestate_pkl if os.path.exists(gamestate_pkl) else gamestate_csv
+
+        if os.path.exists(source_path):
+            stat = os.stat(source_path)
+            return {"path": source_path, "size": stat.st_size, "mtime": stat.st_mtime}
+        return {"path": source_path}
+
+    def _compute_data_fingerprint(self) -> str:
+        """
+        Fingerprint of every input that determines reader.make_data()'s output for the
+        current configuration. Used to key the on-disk data cache and to invalidate it
+        automatically when the config or the source dataset changes.
+        """
+        config = {
+            "feature_set": self.feature_set,
+            "sequence_type": self.sequence_type,
+            "context": self.context,
+            "rebase_score": self.rebase_score,
+            "filter_by_pill": self.filter_by_pill,
+            "sort_distances": self.sort_distances,
+            "normalization": self.normalization,
+            "augmented_visualization": self.augmented_visualization,
+            "max_samples": self.max_samples,
+            "read_games_only": self.reader.read_games_only,
+            "source_data": self._source_data_fingerprint(),
+        }
+        fingerprint_json = json.dumps(config, sort_keys=True, default=str)
+        return hashlib.md5(fingerprint_json.encode()).hexdigest()[:16]
+
+    def _data_cache_path(self, fingerprint: str) -> str:
+        return os.path.join(
+            self.cache_folder,
+            "data",
+            self.sequence_type,
+            f"{self.feature_set}_{fingerprint}.pkl"
+        )
+
+    def _validation_cache_path(self, fingerprint: str, validation_method: str) -> str:
+        return os.path.join(
+            self.cache_folder,
+            "validation",
+            self.sequence_type,
+            f"{self.feature_set}_{validation_method}_{fingerprint}.pkl"
+        )
+
+    @staticmethod
+    def _load_cache(cache_path: str, fingerprint: str):
+        """Load a cached object if present and its stored fingerprint still matches."""
+        if not os.path.exists(cache_path):
+            return None
+        try:
+            with open(cache_path, "rb") as f:
+                cached = pickle.load(f)
+        except (pickle.UnpicklingError, EOFError, OSError) as e:
+            logger.warning(f"Failed to read cache at {cache_path} ({e}), recomputing")
+            return None
+
+        if cached.get("fingerprint") != fingerprint:
+            logger.info(f"Cache at {cache_path} is stale, recomputing")
+            return None
+        return cached["data"]
+
+    @staticmethod
+    def _save_cache(cache_path: str, fingerprint: str, data) -> None:
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "wb") as f:
+            pickle.dump({"fingerprint": fingerprint, "data": data}, f)
 
     ### EMBEDDING
 
@@ -640,8 +772,22 @@ class PatternAnalysis:
         self._init_wandb_run()
     
         if self.using_torch:
-            if isinstance(self.embedder, AELSTM):
+            if isinstance(self.embedder, (AELSTM, MLPAutoencoder)):
                 trainer = AE_Trainer(
+                    max_epochs= self.max_epochs,
+                    batch_size=self.batch_size,
+                    validation_split=self.validation_data_split,
+                    verbose=self.verbose,
+                    save_model=True,
+                    best_path=model_path + "_best.pth",
+                    last_path=model_path + "_last.pth",
+                    wandb_run=self.wandbrun
+                    )
+                data_tensor = PacmanDataset(gamestates = padded_sequence_data, elementwise_masking=self.elementwise_masking)
+                trainer.fit(model= self.embedder, data=data_tensor)
+
+            elif isinstance(self.embedder, (VanillaVAE, TimeVAE)):
+                trainer = VAE_Trainer(
                     max_epochs= self.max_epochs,
                     batch_size=self.batch_size,
                     validation_split=self.validation_data_split,
@@ -787,7 +933,7 @@ class PatternAnalysis:
         if self.using_torch:
             from torch.utils.data import DataLoader
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            data_tensor = PacmanDataset(gamestates=padded_data) if isinstance(self.embedder, AELSTM) else ImputationDataset(gamestates=padded_data)
+            data_tensor = PacmanDataset(gamestates=padded_data) if isinstance(self.embedder, (AELSTM, MLPAutoencoder, VanillaVAE, TimeVAE)) else ImputationDataset(gamestates=padded_data)
             collate_fn = collate_dynamic_padding if isinstance(self.embedder, TSTransformerEncoder) else None
             data_loader = DataLoader(data_tensor, batch_size=self.batch_size, shuffle=False, collate_fn=collate_fn)
 
@@ -796,10 +942,15 @@ class PatternAnalysis:
                 for batch in data_loader:
                     batch_data = batch["data"].to(device)
 
-                    if isinstance(self.embedder, AELSTM):
-                        # For AELSTM and similar torch models
+                    if isinstance(self.embedder, (AELSTM, MLPAutoencoder)):
+                        # For AELSTM, MLPAutoencoder and similar torch models
                         batch_lengths = batch["lengths"].to(device)
                         batch_embeddings = self.embedder.encode(batch_data, lengths=batch_lengths)
+                    elif isinstance(self.embedder, (VanillaVAE, TimeVAE)):
+                        # Use the mean of the latent Gaussian as the (deterministic) embedding
+                        batch_padding_masks = batch["padding_mask"].to(device)
+                        mu, log_var = self.embedder.encode(batch_data, padding_mask=batch_padding_masks)
+                        batch_embeddings = mu
                     elif isinstance(self.embedder, TSTransformerEncoder):
                         batch_padding_masks = batch["padding_mask"].to(device)
                         batch_embeddings = self.embedder.encode(batch_data, batch_padding_masks, pooling=True)
@@ -828,8 +979,10 @@ class PatternAnalysis:
 
                 # Forward pass to get reconstruction
                 with torch.no_grad():
-                    if isinstance(self.embedder, AELSTM):
+                    if isinstance(self.embedder, (AELSTM, MLPAutoencoder)):
                         recon = self.embedder(sample_batch, lengths=sample_lengths)
+                    elif isinstance(self.embedder, (VanillaVAE, TimeVAE)):
+                        recon, _, _ = self.embedder(sample_batch, padding_mask=padding_mask)
                     elif isinstance(self.embedder, TSTransformerEncoder):
                         recon = self.embedder(sample_batch, padding_mask)
                 # Compute reconstruction error (MSE per sample)
@@ -962,9 +1115,10 @@ class PatternAnalysis:
         logger.debug(f"Remapped {len(cluster_sizes)} clusters")
         return new_labels
     
-    def calculate_validation_encodings(self, 
+    def calculate_validation_encodings(self,
                                        raw_sequence_data:list[pd.DataFrame],
-                                       validation_method: str = "Behavlets") -> pd.DataFrame:
+                                       validation_method: str = "Behavlets",
+                                       ignore_cache: bool = False) -> pd.DataFrame:
         """
         Compute validation labels for clustering results using behavioral pattern encodings (Behavlets).
 
@@ -978,16 +1132,37 @@ class PatternAnalysis:
             List of DataFrames, each containing the game state sequence for a single sample to be validated.
         validation_method : str, optional
             Validation method to use. Currently, only "Behavlets" is implemented.
+        ignore_cache : bool, optional
+            If True, bypasses the on-disk cache and recomputes (still overwrites the cache with
+            the fresh result).
 
         Returns
         ----------
         validation_encodings : pd.DataFrame
             DataFrame of raw (non-binarized) behavlet values for each sequence and behavlet type.
-        
+
         """
         logger.info(f"Calculating validation encodings ({self.validation_method})...")
         ## TODO implement self.validation_method == metadatacolumn (e.g, level, user_id, duration, etc)
-        
+
+        # Only cache when validating the pipeline's own data (identified by the fingerprint
+        # build_data() computed for it). A caller passing arbitrary raw_sequence_data has no
+        # known cache key, so it falls through to a plain (uncached) computation.
+        use_cache = (
+            raw_sequence_data is self.raw_sequence_data
+            and self._data_fingerprint is not None
+        )
+        cache_path = None
+        if use_cache:
+            cache_path = self._validation_cache_path(self._data_fingerprint, validation_method)
+            if ignore_cache:
+                logger.info("ignore_cache=True, bypassing validation encodings cache and recomputing")
+            else:
+                cached = self._load_cache(cache_path, self._data_fingerprint)
+                if cached is not None:
+                    logger.info(f"Using cached validation encodings ({cache_path})")
+                    return cached
+
         if validation_method == "Behavlets":
             # Use BehavletsEncoding for validation
             behavlets_encoder = BehavletsEncoding(
@@ -1041,6 +1216,10 @@ class PatternAnalysis:
             value_cols = [col for col in validation_encodings.columns if col.endswith("_value") or col in metadata_features]
             if value_cols:
                 validation_encodings = validation_encodings[value_cols]
+
+            if use_cache:
+                self._save_cache(cache_path, self._data_fingerprint, validation_encodings)
+                logger.info(f"Cached validation encodings at {cache_path}")
 
             return validation_encodings
         else:
