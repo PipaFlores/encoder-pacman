@@ -32,7 +32,7 @@ FEATURE_SETS=("Experimental2")
 # FEATURE_SETS=("Ghost_Distances")
 
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
-SEQUENCE_TYPES=("pacman_attack")
+SEQUENCE_TYPES=("pacman_attack" "last_5_seconds")
 # SEQUENCE_TYPES=("fixed_blocks")
 
 EMBEDDER="LSTM"

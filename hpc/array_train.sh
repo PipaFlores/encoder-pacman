@@ -36,7 +36,7 @@ LOGGING_COMMENT="latent dimension sweep -- all features"
 FEATURE_SETS=("all_features")
 
 # SEQUENCE_TYPES=("first_5_seconds" "last_5_seconds")
-SEQUENCE_TYPES=("pacman_attack")
+SEQUENCE_TYPES=("pacman_attack" "last_5_seconds")
 # SEQUENCE_TYPES=("sliding_window")
 # SEQUENCE_TYPES=("fixed_blocks")
 # SEQUENCE_TYPES=("first_5_seconds" "pacman_attack")
