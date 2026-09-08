@@ -556,7 +556,7 @@ class PatternAnalysis:
                 validation_labels= self.validation_labels,
                 embeddings = self.reduced_embeddings
                 )
-            
+
         
         if WANDB_AVAILABLE and self.wandb_logging:
             if close_wandb_logger:
@@ -648,7 +648,6 @@ class PatternAnalysis:
             "filter_by_pill": self.filter_by_pill,
             "sort_distances": self.sort_distances,
             "normalization": self.normalization,
-            "augmented_visualization": self.augmented_visualization,
             "max_samples": self.max_samples,
             "read_games_only": self.reader.read_games_only,
             "source_data": self._source_data_fingerprint(),
@@ -1179,6 +1178,7 @@ class PatternAnalysis:
                 "Caution2b", # Avg distance during hunt
                 "Caution3", # Close calls
                 ]
+            # Include variables in metadata_dictionary as validation features
             metadata_features=[
                 "total_levels_played",
                 "duration",
@@ -1189,16 +1189,46 @@ class PatternAnalysis:
                 # "level_in_session",
                 # "user_id",
             ]
-                        
+
+            # Performance (flow) and psychological (BISBAS + demographics) metadata, only
+            # present in metadata_dictionary when the reader was initialized with
+            # read_games_only=False (see PacmanDataReader._add_flow_and_bisbas_metadata).
+            # Carry over whichever of these are available, same as metadata_features.
+            performance_features = ["flow_score", "flow_z_score"]
+            psych_features = ["gender", "nationality", "age", "education", "bis", "reward", "drive", "fun"]
+            metadata_features = metadata_features + [
+                feature
+                for feature in performance_features + psych_features
+                if feature in self.metadata_dictionary
+            ]
+
+            # Most behavlets (hunting ghosts after a pill, ghost kills, being trapped, etc.)
+            # structurally can't occur within a level's opening 5 seconds, which makes some
+            # behavlet columns all-zero for every sequence in the sample - recode_validation_labels
+            # then recodes those as all-None (no information to validate against), which
+            # calculate_validation_measures doesn't tolerate (it asserts no validation column
+            # has missing values). Skip computing behavlets there; metadata_features (duration,
+            # score, etc.) are still meaningful and get computed regardless of sequence_type.
+            compute_behavlets = self.sequence_type != "first_5_seconds"
+            if not compute_behavlets:
+                logger.info(
+                    "Skipping Behavlets computation for sequence_type='first_5_seconds': most "
+                    "behavlets can't occur within a level's opening 5 seconds. metadata_features "
+                    "are still computed."
+                )
+
             # Get behavlet encodings for validation
             validation_encodings = pd.DataFrame()
             # To ensure the order of results aligns with the raw_sequence list, collect results in a list and concatenate at the end
             validation_rows = []
             for idx, gamestate in enumerate(raw_sequence_data):
                 try:
-                    summary_row = behavlets_encoder.calculate_behavlets_gamestate_slice(
-                        gamestates=gamestate, behavlet_type=behavlet_types
-                    )
+                    if compute_behavlets:
+                        summary_row = behavlets_encoder.calculate_behavlets_gamestate_slice(
+                            gamestates=gamestate, behavlet_type=behavlet_types
+                        )
+                    else:
+                        summary_row = pd.DataFrame(index=[0])
                     for meta_feature in metadata_features:
                         summary_row[meta_feature] = self.metadata_dictionary[meta_feature][idx]
                     validation_rows.append(summary_row)

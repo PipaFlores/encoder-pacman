@@ -22,6 +22,7 @@ from src.datahandlers import ImputationDataset, PacmanDataset  # noqa: E402
 from src.models import (  # noqa: E402
     AE_Trainer,
     AELSTM,
+    MLPAutoencoder,
     TimeVAE,
     Transformer_Trainer,
     TSTransformerEncoder,
@@ -54,6 +55,42 @@ class TestAELSTM:
     def test_trains_one_epoch_without_error(self):
         dataset = PacmanDataset(gamestates=make_synthetic_sequences())
         model = AELSTM(input_size=N_FEATURES, hidden_size=LATENT_DIM, dropout=0.0)
+        trainer = AE_Trainer(max_epochs=1, batch_size=4, validation_split=0.3, verbose=False)
+
+        trainer.fit(model, dataset)
+
+        assert len(trainer.train_loss_list) == 1
+        assert math.isfinite(trainer.train_loss_list[-1])
+
+
+class TestMLPAutoencoder:
+    @pytest.mark.parametrize("pooling", [False, True])
+    def test_forward_and_encode_shapes(self, pooling):
+        data = torch.from_numpy(make_synthetic_sequences())
+        lengths = torch.full((N_SAMPLES,), SEQ_LEN, dtype=torch.long)
+        model = MLPAutoencoder(
+            input_dim=N_FEATURES,
+            seq_len=SEQ_LEN,
+            latent_dim=LATENT_DIM,
+            hidden_dims=[16, 8],
+            pooling=pooling,
+        )
+
+        reconstruction = model(data, lengths=lengths)
+        assert reconstruction.shape == data.shape
+
+        encoding = model.encode(data, lengths=lengths)
+        assert encoding.shape == (N_SAMPLES, LATENT_DIM)
+
+    def test_trains_one_epoch_without_error(self):
+        dataset = PacmanDataset(gamestates=make_synthetic_sequences())
+        model = MLPAutoencoder(
+            input_dim=N_FEATURES,
+            seq_len=SEQ_LEN,
+            latent_dim=LATENT_DIM,
+            hidden_dims=[16, 8],
+            pooling=False,
+        )
         trainer = AE_Trainer(max_epochs=1, batch_size=4, validation_split=0.3, verbose=False)
 
         trainer.fit(model, dataset)
