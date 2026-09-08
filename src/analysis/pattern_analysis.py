@@ -585,6 +585,33 @@ class PatternAnalysis:
                 logger.info(f"Using cached data ({cache_path})")
                 (self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list,
                  self.features_columns, self.trajectory_list, self.metadata_dictionary) = cached
+
+                # augmented_visualization doesn't affect raw/processed/trajectory/metadata, so it's
+                # not part of the fingerprint - a cache entry can be reused across it. But gifs
+                # themselves aren't cached data, they're rendered files, and there's no cheap way to
+                # get their paths without re-running make_data(); so if this entry was cached without
+                # them and gifs are wanted now, generate them once here and fold them into the cache.
+                if self.augmented_visualization and not self.gif_path_list:
+                    logger.info(
+                        "augmented_visualization=True but the cached entry has no gifs; "
+                        "generating them now (one-time cost, will be cached from here on)"
+                    )
+                    _, _, self.gif_path_list, _, _, _ = self.reader.make_data(
+                        feature_set=self.feature_set,
+                        sequence_type=self.sequence_type,
+                        context=self.context,
+                        rebase_scores=self.rebase_score,
+                        filter_by_pill=self.filter_by_pill,
+                        sort_ghost_distances=self.sort_distances,
+                        normalization=self.normalization,
+                        make_gif=True,
+                        max_samples=self.max_samples
+                    )
+                    self._save_cache(cache_path, fingerprint, (
+                        self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list,
+                        self.features_columns, self.trajectory_list, self.metadata_dictionary
+                    ))
+                    logger.info(f"Cached data (with gifs) at {cache_path}")
             else:
                 self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns, self.trajectory_list, self.metadata_dictionary = self.reader.make_data(
                     feature_set=self.feature_set,
@@ -639,6 +666,11 @@ class PatternAnalysis:
         Fingerprint of every input that determines reader.make_data()'s output for the
         current configuration. Used to key the on-disk data cache and to invalidate it
         automatically when the config or the source dataset changes.
+
+        Deliberately excludes augmented_visualization: it only controls whether gif files
+        get rendered as a side effect, it doesn't change raw/processed/trajectory/metadata
+        content, so toggling it shouldn't force a recompute of those. See build_data(),
+        which backfills gifs into an existing cache entry on demand instead.
         """
         config = {
             "feature_set": self.feature_set,

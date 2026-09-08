@@ -23,13 +23,19 @@ MAX_SAMPLES = 10
 CACHE_HIT_TIME_LIMIT = 2.0  # seconds; a cache hit should be near-instant
 
 
-def make_pattern_analysis(cache_folder, max_samples=MAX_SAMPLES, sequence_type=SEQUENCE_TYPE):
+def make_pattern_analysis(
+    cache_folder,
+    max_samples=MAX_SAMPLES,
+    sequence_type=SEQUENCE_TYPE,
+    augmented_visualization=False,
+):
     return PatternAnalysis(
         data_folder="data",
         cache_folder=str(cache_folder),
         clusterer=GeomClustering(),
         sequence_type=sequence_type,
         max_samples=max_samples,
+        augmented_visualization=augmented_visualization,
         verbose=False,
     )
 
@@ -106,6 +112,55 @@ class TestValidationEncodingsCache:
 
         cache_path = pa._validation_cache_path(pa._data_fingerprint, "Behavlets")
         assert not os.path.exists(cache_path)
+
+
+class TestGifBackfill:
+    """augmented_visualization is excluded from the data-cache fingerprint (it doesn't affect
+    raw/processed/trajectory/metadata), so an entry cached without gifs is reused across it.
+    But gif paths aren't derivable from the cached data - the only way to get them is another
+    reader.make_data(make_gif=True) call - so build_data() must backfill them into the cache
+    on demand rather than silently returning an empty list. reader.make_data is mocked here so
+    the test doesn't depend on ffmpeg or real video files, only on build_data()'s control flow."""
+
+    def test_backfills_gifs_into_a_gifless_cache_entry(self, tmp_path, monkeypatch):
+        pa = make_pattern_analysis(tmp_path, augmented_visualization=False)
+        pa.build_data()
+        assert pa.gif_path_list == []
+        fingerprint = pa._data_fingerprint
+        real_raw, real_processed, real_features, real_traj, real_meta = (
+            pa.raw_sequence_data, pa.processed_sequence_data, pa.features_columns,
+            pa.trajectory_list, pa.metadata_dictionary,
+        )
+
+        pa2 = make_pattern_analysis(tmp_path, augmented_visualization=True)
+        assert pa2._compute_data_fingerprint() == fingerprint  # same cache entry is reused
+
+        calls = []
+
+        def fake_make_data(**kwargs):
+            calls.append(kwargs.get("make_gif"))
+            fake_gifs = [f"fake_{i}.gif" for i in range(len(real_raw))]
+            return real_raw, real_processed, fake_gifs, real_features, real_traj, real_meta
+
+        monkeypatch.setattr(pa2.reader, "make_data", fake_make_data)
+        pa2.build_data()
+
+        assert calls == [True]  # exactly one backfill call, requesting gifs
+        assert pa2.gif_path_list == [f"fake_{i}.gif" for i in range(MAX_SAMPLES)]
+
+        cache_path = pa2._data_cache_path(fingerprint)
+        cached = pa2._load_cache(cache_path, fingerprint)
+        assert cached[2] == pa2.gif_path_list  # the cache entry now carries the backfilled gifs
+
+        # A further augmented_visualization=True run must hit the now-complete cache entry
+        # without calling reader.make_data() again.
+        def fail_make_data(**kwargs):
+            raise AssertionError("should not recompute: cache already has gifs")
+
+        pa3 = make_pattern_analysis(tmp_path, augmented_visualization=True)
+        monkeypatch.setattr(pa3.reader, "make_data", fail_make_data)
+        pa3.build_data()
+        assert pa3.gif_path_list == pa2.gif_path_list
 
 
 class TestIgnoreCache:
