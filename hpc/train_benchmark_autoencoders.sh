@@ -30,7 +30,7 @@ for DATASET in "${DATASETS[@]}"; do
     python train_benchmark_autoencoders.py \
     --dataset "$DATASET" \
     --run-id "$RUN_ID" \
-    --architectures LSTM Transformer VanillaVAE TimeVAE UMAP RandomProjection \
+    --architectures LSTM MLP Transformer VanillaVAE TimeVAE UMAP RandomProjection \
     --latent-space 64 \
     --n-epochs 100 \
     --batch-size 32 \

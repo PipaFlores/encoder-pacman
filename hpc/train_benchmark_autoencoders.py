@@ -75,8 +75,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--architectures",
         nargs="+",
-        default=["LSTM", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection", "RandomNoise"],
-        choices=["LSTM", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection", "RandomNoise"],
+        default=["LSTM", "MLP", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection", "RandomNoise"],
+        choices=["LSTM", "MLP", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection", "RandomNoise"],
         help="Architectures to run.",
     )
     parser.add_argument("--output-dir", default=os.path.join("benchmark_results", "autoencoders"))
@@ -201,7 +201,7 @@ def evaluate_torch_model(model, X_test: np.ndarray, args: argparse.Namespace) ->
     import torch
     from torch.utils.data import DataLoader
     from src.datahandlers import ImputationDataset, PacmanDataset, collate_dynamic_padding
-    from src.models import AELSTM, TSTransformerEncoder
+    from src.models import AELSTM, MLPAutoencoder, TSTransformerEncoder
     from src.models.loss import MaskedMSELoss, VAELoss
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -241,7 +241,7 @@ def evaluate_torch_model(model, X_test: np.ndarray, args: argparse.Namespace) ->
                 recon = model(x_masked, padding_mask.bool())
                 loss_mask = 1 - noise_mask
                 loss = mse_loss(recon, x, padding_mask=padding_mask, obs_mask=obs_mask, loss_mask=loss_mask)
-            elif isinstance(model, AELSTM):
+            elif isinstance(model, (AELSTM, MLPAutoencoder)):
                 lengths = batch["lengths"].to(device)
                 recon = model(x, lengths=lengths)
                 loss = mse_loss(recon, x, padding_mask=padding_mask, obs_mask=obs_mask)
@@ -274,6 +274,33 @@ def train_lstm(X_train: np.ndarray, X_test: np.ndarray, args: argparse.Namespace
         verbose=args.verbose,
     )
     trainer.fit(model, PacmanDataset(X_train, elementwise_masking=args.elementwise_masking))
+    return model, trainer.train_loss_list[-1], trainer.val_loss_list[-1], evaluate_torch_model(model, X_test, args)
+
+
+def train_mlp(X_train: np.ndarray, X_test: np.ndarray, args: argparse.Namespace):
+    """Train the repo MLP autoencoder baseline and return train/val/test losses."""
+    from src.datahandlers import PacmanDataset
+    from src.models import AE_Trainer, MLPAutoencoder
+
+    dataset = PacmanDataset(X_train, elementwise_masking=args.elementwise_masking)
+    # Same rationale as train_vanilla_vae: only pool when this dataset is actually padded.
+    has_padding = bool(dataset.lengths.min().item() < X_train.shape[1])
+
+    model = MLPAutoencoder(
+        input_dim=X_train.shape[-1],
+        seq_len=X_train.shape[1],
+        latent_dim=args.latent_space,
+        dropout=args.dropout,
+        pooling=has_padding,
+    )
+    trainer = AE_Trainer(
+        max_epochs=args.n_epochs,
+        batch_size=args.batch_size,
+        validation_split=args.validation_split,
+        lr=args.learning_rate,
+        verbose=args.verbose,
+    )
+    trainer.fit(model, dataset)
     return model, trainer.train_loss_list[-1], trainer.val_loss_list[-1], evaluate_torch_model(model, X_test, args)
 
 
@@ -394,7 +421,7 @@ def extract_torch_embeddings(name: str, model, X: np.ndarray, args: argparse.Nam
             if isinstance(model, TSTransformerEncoder):
                 padding_mask = batch["padding_mask"].to(device)
                 batch_z = model.encode(batch_x, padding_mask, pooling=True)
-            elif name == "LSTM":
+            elif name in ("LSTM", "MLP"):
                 batch_lengths = batch["lengths"].to(device)
                 batch_z = model.encode(batch_x, lengths=batch_lengths)
             else:
@@ -423,7 +450,7 @@ def extract_embeddings(name: str, model, X: np.ndarray, args: argparse.Namespace
     """Dispatch latent extraction for trained models and no-training baselines."""
     if name in {"UMAP", "RandomProjection", "RandomNoise"}:
         return model.transform(X)
-    if name in {"LSTM", "Transformer", "VanillaVAE", "TimeVAE"}:
+    if name in {"LSTM", "MLP", "Transformer", "VanillaVAE", "TimeVAE"}:
         return extract_torch_embeddings(name, model, X, args)
     return extract_aeon_embeddings(model, X)
 
@@ -734,6 +761,7 @@ def run_architecture(name: str, X_train: np.ndarray, X_test: np.ndarray, args: a
     """Train or fit the requested architecture/baseline."""
     trainers = {
         "LSTM": train_lstm,
+        "MLP": train_mlp,
         "Transformer": train_transformer,
         "VanillaVAE": train_vanilla_vae,
         "TimeVAE": train_time_vae,
@@ -858,7 +886,7 @@ def main():
         results.append(result)
         write_results(results, output_dir, args)
 
-    print("\nSummary")
+    print(f"\nSummary for {args.dataset}")
     for result in results:
         if result.status == "ok":
             test_loss_text = "NA" if result.test_loss is None else f"{result.test_loss:.6f}"
