@@ -255,12 +255,41 @@ class PacmanDataReader:
             self.game_flow_df = self._process_flow()
             self.bisbas_df = self._process_bisbas()
 
+    def _add_performance_metadata(self, metadata_dictionary: dict) -> None:
+        """
+        Enriches metadata_dictionary in-place with per-user performance summary statistics,
+        aggregated across all of a user's levels in `level_df`: max_score, mean_score,
+        score/time, max_level_reached, win_ratio. Available regardless of read_games_only,
+        since level_df is always populated.
+        """
+        performance_columns = ["overall_max_score", "overall_mean_score", "overall_score/time", "overall_max_level_reached", "overall_win_ratio"]
+        performance_values = {key: [] for key in performance_columns}
+        for user_id in metadata_dictionary["user_id"]:
+            level_records = self.level_df[self.level_df["user_id"] == user_id]
+            if len(level_records) == 0:
+                logger.warning(f"No level records for user_id {user_id}")
+                for key in performance_columns:
+                    performance_values[key].append(np.nan)
+                continue
+
+            performance_values["overall_max_score"].append(level_records["max_score"].max())
+            performance_values["overall_mean_score"].append(level_records["max_score"].mean().round(2))
+            performance_values["overall_score/time"].append(
+                (level_records["max_score"] / level_records["duration"]).mean().round(2)
+            )
+            performance_values["overall_max_level_reached"].append(level_records["level"].max())
+            performance_values["overall_win_ratio"].append(level_records["win"].mean())
+
+        for key, values in performance_values.items():
+            metadata_dictionary[key] = np.asarray(values, dtype=float)
+
     def _add_flow_and_bisbas_metadata(self, metadata_dictionary: dict) -> None:
         """
-        Enriches metadata_dictionary in-place with per-sequence performance (flow) and
-        psychological (BISBAS + demographics) values, looked up from `game_flow_df` and
-        `bisbas_df` (only available when the reader was loaded with read_games_only=False).
-        Sequences without a matching row (e.g. games without a flow measure) are filled with NaN.
+        Enriches metadata_dictionary in-place with per-sequence psychological values: flow
+        (state/trait engagement during play) and BISBAS + demographics, looked up from
+        `game_flow_df` and `bisbas_df` (only available when the reader was loaded with
+        read_games_only=False). Sequences without a matching row (e.g. games without a flow
+        measure) are filled with NaN.
         """
         if not hasattr(self, "game_flow_df") or not hasattr(self, "bisbas_df"):
             logger.warning(
@@ -355,10 +384,13 @@ class PacmanDataReader:
                 - gif_paths: list[str], paths to any generated GIFs (if make_gif is True).
                 - features: list[str], feature column names used for extraction.
                 - trajectory_list: list, list of trajectories for aggregate visualizations
-                - metadata_dictionary: dict, dictionary of high-level metadata. Includes per-sequence
-                    performance ("flow_score", "flow_z_score") and psychological ("gender", "nationality",
-                    "age", "education", "bis", "reward", "drive", "fun") values when the reader was
-                    initialized with read_games_only=False; otherwise these keys are omitted.
+                - metadata_dictionary: dict, dictionary of high-level metadata. Always includes
+                    per-user performance aggregates ("overall_max_score", "overall_mean_score",
+                    "overall_score/time", "overall_max_level_reached", "overall_win_ratio").
+                    Also includes psychological values
+                    ("flow_score", "flow_z_score", "gender", "nationality", "age", "education",
+                    "bis", "reward", "drive", "fun") when the reader was initialized with
+                    read_games_only=False; otherwise those keys are omitted.
             Otherwise:
                 (Not used here; function expects return_raw_sequences and will return above tuple.)
         """
@@ -455,7 +487,10 @@ class PacmanDataReader:
         metadata_dictionary["score_change"] = np.array(scores)
         metadata_dictionary["pellet_eaten"] = np.array(pellet_eaten)
 
-        ## performance (flow) and psychological (bisbas) metadata, only available if read_games_only=False
+        ## performance (per-user score/level/win aggregates), always available
+        self._add_performance_metadata(metadata_dictionary)
+
+        ## psychological (flow, bisbas, demographics) metadata, only available if read_games_only=False
         self._add_flow_and_bisbas_metadata(metadata_dictionary)
 
         if make_gif:

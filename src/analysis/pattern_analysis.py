@@ -79,6 +79,7 @@ class PatternAnalysis:
     def __init__(
             self, 
             reader: PacmanDataReader = None,
+            read_games_only: bool = False,
             data_folder: str = "../data",
             hpc_folder: str = "../hpc",
             cache_folder: str = "../cache",
@@ -200,7 +201,7 @@ class PatternAnalysis:
             self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         # Core components
-        self.reader = reader if reader is not None else PacmanDataReader(data_folder)
+        self.reader = reader if reader is not None else PacmanDataReader(data_folder, read_games_only= read_games_only)
         if isinstance(clusterer, GeomClustering): # Only clusterer.
             
             self.feature_set = "Pacman"
@@ -1222,12 +1223,15 @@ class PatternAnalysis:
                 # "user_id",
             ]
 
-            # Performance (flow) and psychological (BISBAS + demographics) metadata, only
-            # present in metadata_dictionary when the reader was initialized with
-            # read_games_only=False (see PacmanDataReader._add_flow_and_bisbas_metadata).
-            # Carry over whichever of these are available, same as metadata_features.
-            performance_features = ["flow_score", "flow_z_score"]
-            psych_features = ["gender", "nationality", "age", "education", "bis", "reward", "drive", "fun"]
+            # Per-user performance aggregates (always present, see
+            # PacmanDataReader._add_performance_metadata) and psychological metadata - flow,
+            # BISBAS + demographics - which is only present in metadata_dictionary when the
+            # reader was initialized with read_games_only=False (see
+            # PacmanDataReader._add_flow_and_bisbas_metadata). Carry over whichever of these
+            # are available, same as metadata_features. "nationality" is excluded: it's a
+            # string label, not something recode_validation_labels can binarize/bin.
+            performance_features = ["overall_max_score", "overall_mean_score", "overall_score/time", "overall_max_level_reached", "overall_win_ratio"]
+            psych_features = ["flow_score", "flow_z_score", "gender", "age", "education", "bis", "reward", "drive", "fun"]
             metadata_features = metadata_features + [
                 feature
                 for feature in performance_features + psych_features
@@ -1303,10 +1307,15 @@ class PatternAnalysis:
             col_values = validation_encodings[col].to_numpy()
             if np.sum(col_values) == 0:
                 validation_labels[col] = None
-            elif col == "Aggression3_value":
+            # Keep values as they are, if 0 then set to -1 (Absence)
+            elif col in [
+                "Aggression3_value",
+                "gender",
+                "education"
+            ]:
                 # For Aggression3_value (Ghost kills), keep the original value if >0, else set to -1
                 validation_labels[col] = np.where(col_values > 0, col_values, -1)
-            
+            # Keep values as they are
             elif col in [
                 "level",
                 # "total_levels_played",
@@ -1314,6 +1323,7 @@ class PatternAnalysis:
                 ]:
                 # Keep these ones as they are
                 validation_labels[col] = col_values
+            # Quantile recoding of values, mostly all quantitative values
             elif col in [
                 # "Aggression1_value",
                 # "Aggression4_value",
@@ -1324,15 +1334,37 @@ class PatternAnalysis:
                 "total_levels_played",
                 "score_change",
                 "pellet_eaten",
+                "flow_score",
+                "flow_z_score",
+                "age",
+                "bis",
+                "reward",
+                "drive",
+                "fun",
+                "overall_max_score",
+                "overall_mean_score",
+                "overall_score/time",
+                "overall_max_level_reached",
+                "overall_win_ratio",
                 ]:
-                # Digitize continuous values into 10 decile bins
-                if use_quantiles_for_bins:
-                    validation_labels[col] = pd.qcut(col_values, q=10, labels=False, duplicates='drop')
-                else:
-                    validation_labels[col] = np.digitize(col_values, np.linspace(min(col_values), max(col_values), 11)[1:-1], right=False)
-
+                # Some of these (e.g. flow_z_score) can have real per-row NaNs (e.g. no
+                # repeat-measure z-score for that player), rather than being entirely absent.
+                # qcut/digitize would otherwise propagate those as NaN bins, which
+                # calculate_validation_measures doesn't tolerate. Recode them to -1 (absence)
+                # before binning the rest, consistent with the rest of this method's convention.
+                nan_mask = pd.isnull(col_values)
+                binned = np.full(len(col_values), -1, dtype=float)
+                valid_values = col_values[~nan_mask]
+                if len(valid_values) > 0:
+                    # Digitize continuous values into 10 decile bins
+                    if use_quantiles_for_bins:
+                        binned[~nan_mask] = pd.qcut(valid_values, q=10, labels=False, duplicates='drop')
+                    else:
+                        binned[~nan_mask] = np.digitize(valid_values, np.linspace(min(valid_values), max(valid_values), 11)[1:-1], right=False)
+                validation_labels[col] = binned
 
             else:
+                # Else, presence or no presence of behavlets (agnostic of value).
                 validation_labels[col] = np.where(col_values > 0, 1, -1)
 
         return validation_labels
