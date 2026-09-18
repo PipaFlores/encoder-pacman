@@ -34,3 +34,7 @@ hpc/affinity_matrices/
 hpc/wandb/
 
 benchmark_results/
+.pytest_cache/
+cache/
+hpc/runs/
+hpc/logs/

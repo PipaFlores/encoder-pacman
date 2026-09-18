@@ -1,5 +1,6 @@
 """
 Default configuration values used across the project.
+Quite empty, so consider removing
 """
 
 from typing import Tuple

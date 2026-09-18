@@ -151,3 +151,21 @@ class TestPacmanDataReader:
             reader.get_partial_trajectory(
                 level_id=test_level_id, start_timestep=-10, end_timestep=200
             )
+
+    def test_make_data_pacman_attack_with_global_normalization(self, reader):
+        """
+        Regression test: `normalization="global"` re-slices "pacman_attack" sequences
+        against the now-normalized gamestate_df, whose attack flag is no longer exactly
+        0/1. slice_attack_modes must still detect attack-mode intervals (previously this
+        silently returned zero sequences and make_data crashed in padding_sequences).
+        """
+        raw_sequences, processed, _, features, _, _ = reader.make_data(
+            feature_set="Experimental2",
+            sequence_type="pacman_attack",
+            normalization="global",
+            max_samples=50,
+        )
+
+        assert len(raw_sequences) > 0
+        assert processed.shape[0] == len(raw_sequences)
+        assert processed.shape[-1] == len(features)

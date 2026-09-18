@@ -26,3 +26,4 @@ playground/*
 slurm*
 *.py
 wandb/
+cache/

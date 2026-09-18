@@ -34,3 +34,6 @@ hpc/videos/
 *.gif
 
 wandb/
+cache/
+hpc/runs/
+hpc/logs/
