@@ -578,6 +578,7 @@ class PacmanDataReader:
                 for seq in normalized_sequences
             ]
 
+        # ---- Feature selection + padding --------------------------
         if "available_pellets_states" not in features:
             filtered = [sequence[features].to_numpy() for sequence in normalized_sequences] 
 
@@ -596,8 +597,6 @@ class PacmanDataReader:
 
 
 
-        # ---- Feature selection + padding -----------------------------------
-        filtered = [sequence[features].to_numpy() for sequence in normalized_sequences]
         X_padded = self.padding_sequences(filtered, padding_value=padding_value)
 
         # Optional ghost-distance sorting
