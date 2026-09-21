@@ -5,8 +5,7 @@ reduce -> cluster) across the main variations of the analysis pipeline:
 
 - the standard flow (deep embedder -> UMAP down to 2 dimensions -> HDBSCAN) for
   the two main sequence types ("first_5_seconds" and "pacman_attack");
-- every supported embedder: the torch ones (LSTM, MLP, Transformer, VAE,
-  TimeVAE) and the aeon/keras ones (DRNN, DCNN, ResNet);
+- every supported embedder (LSTM, MLP, Transformer, VAE, TimeVAE);
 - the no-deep-embedder configuration, where the reducer embeds the flat raw
   data itself instead of a trained model's latent space;
 - "Behavlets" validation on top of the clustering.
@@ -38,7 +37,7 @@ torch = pytest.importorskip("torch")
 
 from hdbscan import HDBSCAN  # noqa: E402
 
-from src.analysis.pattern_analysis import KERAS_AVAILABLE, PatternAnalysis  # noqa: E402
+from src.analysis.pattern_analysis import PatternAnalysis  # noqa: E402
 from src.datahandlers import PacmanDataReader  # noqa: E402
 
 MAX_SAMPLES = 30
@@ -58,14 +57,10 @@ REDUCED_DIM = 2  # what the reducer (UMAP) takes the embeddings down to, for clu
 LATENT_DIM = 128
 # The end-to-end test uses a realistic latent size instead, as in a real run.
 CANONICAL_LATENT_DIM = 256
-# AEResNetClusterer's latent space is fixed by its architecture, not configurable.
-RESNET_LATENT_DIM = 128
-
 # The more complex of the two sequence types - see module docstring.
 EMBEDDER_SEQUENCE_TYPE = "pacman_attack"
 
 TORCH_EMBEDDERS = ["MLP", "Transformer", "VAE", "TimeVAE"]  # "LSTM" is covered end-to-end below
-AEON_EMBEDDERS = ["DRNN", "DCNN", "ResNet"]
 
 
 @pytest.fixture(scope="module")
@@ -95,17 +90,12 @@ def cache_folder(tmp_path_factory):
 def release_memory_between_tests():
     """Drop each case's model and data copy before the next one starts.
 
-    Every case holds a trained model plus its own copy of the sliced data, and the aeon ones
-    additionally accumulate keras' global graph state. This module runs close enough to the
-    memory ceiling on a 16GB machine that build_data()'s full-dataset padding array (~190MB
-    for "first_5_seconds", on top of torch and tensorflow both being loaded) has failed to
-    allocate partway through a run.
+    Every case holds a trained model plus its own copy of the sliced data. This module runs
+    close enough to the memory ceiling on a 16GB machine that build_data()'s full-dataset
+    padding array (~190MB for "first_5_seconds", on top of torch) has failed to allocate
+    partway through a run.
     """
     yield
-    if KERAS_AVAILABLE:
-        import keras
-
-        keras.backend.clear_session()
     gc.collect()
 
 
@@ -130,9 +120,8 @@ def make_pattern_analysis(
         feature_set=FEATURE_SET,
         max_samples=MAX_SAMPLES,
         max_epochs=MAX_EPOCHS,
-        # What every HPC training job runs with (see hpc/*.sh). Unnormalized, raw scores run
-        # into the thousands right next to the -999 padding value, which diverges to NaN in the
-        # models that train without a padding mask (TimeVAE and the aeon ones).
+        # What every HPC training job runs with. Unnormalized, raw scores run into the
+        # thousands right next to the -999 padding value, which diverges to NaN in TimeVAE.
         normalization=NORMALIZATION,
         latent_dimension=latent_dimension,
         batch_size=8,
@@ -184,23 +173,6 @@ def test_fit_with_torch_embedders(reader, cache_folder, tmp_path, embedder):
     assert_pipeline_outputs(pa, LATENT_DIM)
     assert len(pa.embedder.loss_history) == MAX_EPOCHS
     assert all(np.isfinite(pa.embedder.loss_history))
-
-
-@pytest.mark.skipif(not KERAS_AVAILABLE, reason="aeon embedders need tensorflow/keras")
-@pytest.mark.parametrize("embedder", AEON_EMBEDDERS)
-def test_fit_with_aeon_embedders(reader, cache_folder, tmp_path, embedder):
-    pa = make_pattern_analysis(reader, cache_folder, tmp_path, embedder=embedder)
-
-    pa.fit()
-
-    # PatternAnalysis overrides latent_dimension for ResNet (see _initialize_deep_embedder).
-    # It currently coincides with LATENT_DIM, but this stays correct if that constant moves.
-    expected_latent_dim = RESNET_LATENT_DIM if embedder == "ResNet" else LATENT_DIM
-    assert pa.latent_dimension == expected_latent_dim
-    assert_pipeline_outputs(pa, expected_latent_dim)
-
-    # Same check as loss_history for the torch models: aeon keeps the keras History object
-    assert len(pa.embedder.summary()["loss"]) == MAX_EPOCHS
 
 
 def test_fit_without_deep_embedder(reader, cache_folder, tmp_path):

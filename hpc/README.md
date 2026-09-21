@@ -122,26 +122,14 @@ spells them as negations.
 
 ## Submission modes
 
-`submit_experiment.sh` submits **one `sbatch` call per environment module group**.
+`submit_experiment.sh` submits **one `sbatch` call** per experiment.
 
-**Array mode (default).** One `sbatch --array=<indices>` per group. SLURM then treats each
-task as an independent job with its own JobID, node and GPU, and runs them in parallel as
-resources allow. A 10-configuration sweep is 10 tasks running concurrently, not a loop.
+**Array mode (default).** One `sbatch --array=0-<N-1>`. SLURM then treats each task as an
+independent job with its own JobID, node and GPU, and runs them in parallel as resources
+allow. A 10-configuration sweep is 10 tasks running concurrently, not a loop.
 
-**Module groups.** The aeon/keras embedders (`DRNN`, `DCNN`, `ResNet`) need
-`python-tensorflow`, everything else needs `python-pytorch`, and the two modules cannot be
-loaded together. So an experiment spanning both is submitted as two arrays over the *same
-experiment file*, with explicit index lists and a shared run id — the array equivalent of
-the two sequential passes in `train_benchmark_autoencoders.sh`. Nothing extra to do:
-
-```
-$ python run_experiment.py --config experiments/general_training.yaml --module-groups
-python-pytorch/2.13      0,1,2,3,4,8
-python-tensorflow/2.21   5,6,7
-```
-
-**Sequential mode.** `use_array: false` in the `slurm:` block submits one ordinary job per
-group that works through its configurations in order.
+**Sequential mode.** `use_array: false` in the `slurm:` block submits one ordinary job that
+works through every configuration in order.
 
 > **Why you would want this:** Slurm counts *every array task* as a separate job against the
 > project's limit. A partition with a tight limit (`gputest`) will reject a 3-task array

@@ -31,7 +31,7 @@ from experiment import (  # noqa: E402
     RunResult,
     expand,
     load_spec,
-    module_groups,
+    experiment_module,
     run_one,
     run_one_guarded,
 )
@@ -98,13 +98,9 @@ def parse_args() -> argparse.Namespace:
         help="Print the experiment's slurm block as sbatch flags and exit (used by submit_experiment.sh).",
     )
     parser.add_argument(
-        "--module-groups",
+        "--module",
         action="store_true",
-        help=(
-            "Print one line per environment module needed by this experiment, as "
-            "<module><TAB><comma-separated indices>, and exit. submit_experiment.sh "
-            "submits one array per line."
-        ),
+        help="Print the environment module this experiment runs under and exit (used by submit_experiment.sh).",
     )
     parser.add_argument(
         "--submit-mode",
@@ -264,9 +260,8 @@ def main() -> int:
         print(submit_mode(spec))
         return 0
 
-    if args.module_groups:
-        for module, indices in module_groups(configs, spec.get("modules")).items():
-            print(f"{module}\t{','.join(str(i) for i in indices)}")
+    if args.module:
+        print(experiment_module(spec))
         return 0
 
     if args.dry_run:

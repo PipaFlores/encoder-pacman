@@ -26,9 +26,8 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 
-# Which module to load is a property of the configurations in this array, not of the
-# script: the aeon/keras embedders need tensorflow and the rest need torch. submit_experiment.sh
-# submits one array per module and exports the choice (see module_groups() in experiment.py).
+# The module is a property of the experiment, not of this script; submit_experiment.sh
+# exports the choice (see experiment_module() in experiment.py).
 module load "${EXPERIMENT_MODULE:-python-pytorch/2.13}"
 
 cd "${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}" || exit 1
@@ -57,8 +56,8 @@ fi
 
 echo "run_experiment.sh: config=$CONFIG selection=${INDEX_FLAGS[*]:-<whole expansion>}"
 
-# One experiment can be split across several arrays (one per module), and they must agree on
-# the output directory - so the run id is decided at submit time rather than per array job.
+# Every task of one array must agree on the output directory, so the run id is decided
+# at submit time rather than per job.
 RUN_ID_FLAGS=()
 if [[ -n "${EXPERIMENT_RUN_ID:-}" ]]; then
     RUN_ID_FLAGS=(--run-id "$EXPERIMENT_RUN_ID")

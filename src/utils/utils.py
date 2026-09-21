@@ -185,8 +185,7 @@ def replace_inf_with_feature_max(data: np.ndarray) -> np.ndarray:
     there on. The torch datasets already handle this themselves (PacmanDataset/ImputationDataset
     build an obs_mask from isfinite and call replace_inf, see src/datahandlers/datamodule.py);
     this is the equivalent for the code paths that feed numpy arrays straight to a model or a
-    reducer. Kept in numpy, not torch, since the keras/aeon path has to work in environments
-    without torch installed.
+    reducer.
 
     A feature that is infinite everywhere across the sample has no finite maximum to fall back
     on, so it gets 0 - the same "no information" placeholder the feature normalization uses.

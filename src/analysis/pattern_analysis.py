@@ -17,7 +17,6 @@ from src.datahandlers import PacmanDataReader
 
 ### Embedding 
 ### trying lazy import first to avoid hpc environment issues. 
-## If torch, no keras/tensorflow imports are required, and the opposite.
 try:
     import torch
     TORCH_AVAILABLE = True
@@ -25,15 +24,6 @@ try:
     from src.datahandlers import PacmanDataset, ImputationDataset, collate_dynamic_padding
 except ImportError:
     TORCH_AVAILABLE = False
-
-try:
-    import tensorflow # check backend
-    import keras
-    KERAS_AVAILABLE = True
-    from aeon.clustering.deep_learning import AEResNetClusterer, AEDRNNClusterer, AEDCNNClusterer
-    from aeon.clustering import DummyClusterer
-except ImportError:
-    KERAS_AVAILABLE = False
 
 try: 
     import wandb
@@ -279,7 +269,7 @@ class PatternAnalysis:
 
     def _initialize_deep_embedder(self, embedder:str):
 
-        supported = ["LSTM", "MLP", "Transformer","DRNN", "DCNN", "ResNet", "VAE", "TimeVAE"]
+        supported = ["LSTM", "MLP", "Transformer", "VAE", "TimeVAE"]
         if embedder not in supported:
             raise ValueError(f"Embedder {embedder} is not one of the supported embedding deep networks ({supported})")
         
@@ -288,7 +278,6 @@ class PatternAnalysis:
                 raise ModuleNotFoundError(f"Using LSTM requires torch in the environment")
 
             self.using_torch = True
-            self.using_keras = False
             return AELSTM(
                 input_size= len(self.features_columns),
                 hidden_size=self.latent_dimension,
@@ -299,7 +288,6 @@ class PatternAnalysis:
                 raise ModuleNotFoundError(f"Using MLP requires torch in the environment")
 
             self.using_torch = True
-            self.using_keras = False
 
             # Same padding-aware pooling decision as VAE/TimeVAE - see _sequences_have_padding.
             has_padding = self._sequences_have_padding(embedder)
@@ -316,7 +304,6 @@ class PatternAnalysis:
                 raise ModuleNotFoundError(f"Using LSTM requires torch in the environment")
 
             self.using_torch = True
-            self.using_keras = False
             return TSTransformerEncoder(
                 feat_dim= len(self.features_columns),
                 d_model=self.latent_dimension,
@@ -333,7 +320,6 @@ class PatternAnalysis:
                 raise ModuleNotFoundError(f"Using VAE requires torch in the environment")
 
             self.using_torch = True
-            self.using_keras = False
 
             # Only pool (padding-safe, position-agnostic) when sequences are actually
             # padded; a genuinely fixed-length sequence_type keeps the reference
@@ -354,7 +340,6 @@ class PatternAnalysis:
                 raise ModuleNotFoundError(f"Using TimeVAE requires torch in the environment")
 
             self.using_torch = True
-            self.using_keras = False
 
             has_padding = self._sequences_have_padding(embedder)
 
@@ -365,50 +350,8 @@ class PatternAnalysis:
                 pooling=has_padding,
             )
 
-        if embedder == "DRNN":
-            if not KERAS_AVAILABLE:
-                raise ModuleNotFoundError(f"using DRNN requires aeon/tensorflow/keras in the environment")
-            
-            self.using_torch = False
-            self.using_keras = True
-
-            return AEDRNNClusterer(
-                estimator=DummyClusterer(),
-                latent_space_dim=self.latent_dimension,
-                n_epochs=self.max_epochs,
-                validation_split=self.validation_data_split,
-                verbose=self.verbose
-            )
-        if embedder == "ResNet":
-            if not KERAS_AVAILABLE:
-                raise ModuleNotFoundError(f"using ResNet requires aeon/tensorflow/keras in the environment")
-            
-            self.using_torch = False
-            self.using_keras = True
-
-            self.latent_dimension = 128 # ResNet latent_space fixed to 128
-
-            return AEResNetClusterer(
-                estimator=DummyClusterer(),
-                n_epochs=self.max_epochs,
-                validation_split=self.validation_data_split,
-                verbose=self.verbose                
-            )
-        
-        if embedder == "DCNN":
-            if not KERAS_AVAILABLE:
-                raise ModuleNotFoundError(f"using DCNN requires aeon/tensorflow/keras in the environment")
-            
-            self.using_torch = False
-            self.using_keras = True
-
-            return AEDCNNClusterer(
-                estimator=DummyClusterer(),
-                latent_space_dim=self.latent_dimension,
-                n_epochs=self.max_epochs,
-                validation_split=self.validation_data_split,
-                verbose=self.verbose
-            )
+        # Only reachable if `supported` gains a name without a branch above.
+        raise ValueError(f"Embedder {embedder} is listed as supported but has no constructor")
 
     def fit(self,
             raw_sequences: list[pd.DataFrame] | None = None,
@@ -750,10 +693,7 @@ class PatternAnalysis:
             "test_data" if test_dataset else f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}" 
         )
         
-        if self.using_torch:
-            model_path += "_best.pth" if use_best else "_last.pth"
-        elif self.using_keras:
-            model_path += "_best.keras" if use_best else "_last.keras"
+        model_path += "_best.pth" if use_best else "_last.pth"
 
         if return_path:
             return os.path.exists(model_path) , model_path
@@ -762,12 +702,8 @@ class PatternAnalysis:
     
     def _load_model(self, model_path):
         
-        if self.using_torch:
-            self.embedder.load_state_dict(torch.load(model_path, map_location=self.device))
-            self.embedder.eval()
-
-        elif self.using_keras:
-            self.embedder.load_model(model_path, estimator=None)
+        self.embedder.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.embedder.eval()
 
         return
 
@@ -775,7 +711,7 @@ class PatternAnalysis:
                      padded_sequence_data: np.ndarray,
                      test_dataset: bool = False):
         """
-        Train the embedding model (either PyTorch or Keras-based) on the provided padded sequence data.
+        Train the embedding model on the provided padded sequence data.
 
         Args:
             padded_sequence_data (np.ndarray): The input data to train the embedding model, of shape [N, seq_length, features].
@@ -784,23 +720,15 @@ class PatternAnalysis:
         Returns:
             None. The trained model is saved to disk at the specified model path.
         """
-        # Create directories for model saving, loss plots, and latent space plots
+        # Create the directory the trained model is saved into
         model_dir = os.path.join(
             self.hpc_folder,
             "trained_models",
             self.sequence_type,
             "f" + str(len(self.features_columns))
         )
-        loss_plot_dir = os.path.join(
-            self.hpc_folder,
-            "trained_models",
-            "loss_plots",
-            self.sequence_type,
-            "f" + str(len(self.features_columns))
-        )
         
         os.makedirs(model_dir, exist_ok=True)
-        os.makedirs(loss_plot_dir, exist_ok=True)
 
         model_path = os.path.join(
              model_dir,
@@ -860,40 +788,7 @@ class PatternAnalysis:
                 data_class = ImputationDataset(gamestates=padded_sequence_data, elementwise_masking=self.elementwise_masking)
                 trainer.fit(self.embedder, data_class)
             
-        elif self.using_keras:
-            # aeon builds its save path as `file_path + file_name + ".keras"` (plain string
-            # concatenation, file_path defaulting to "./"), so file_path has to carry the
-            # directory - with a trailing separator - and the file names have to be bare.
-            # Passing the absolute model_path as the file name instead yields "./C:\..." and
-            # dies in makedirs("./C:"). The result matches what _check_model_training_status
-            # looks for: model_dir/<model name>_best.keras.
-            model_name = os.path.basename(model_path)
-            self.embedder.file_path = os.path.join(model_dir, "")
-            self.embedder.save_best_model = True
-            self.embedder.best_file_name = model_name + "_best"
-            self.embedder.save_last_model = True
-            self.embedder.last_file_name = model_name + "_last"
-            
-            if WANDB_AVAILABLE and self.wandb_logging:
-                # WandbMetricsLogger() raises unless a run is active, so this has to follow
-                # wandb_logging like the torch branch does (which passes wandb_run=None when off).
-                from wandb.integration.keras import WandbMetricsLogger
-                self.embedder.callbacks = WandbMetricsLogger()
 
-
-            # Unlike the torch trainers, which go through PacmanDataset/ImputationDataset, aeon
-            # gets a plain array - so the infinite ghost distances have to be dealt with here or
-            # the loss is NaN from the first batch on.
-            keras_input = replace_inf_with_feature_max(padded_sequence_data)
-            self.embedder.fit(keras_input.transpose(0,2,1)) # Transpose to match aeon input format of [n, channels, seq_length]
-
-            self.embedder.plot_loss_keras(
-                os.path.join(
-                    loss_plot_dir,
-                    "test_data" if test_dataset else f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}.png"
-                )
-            )       
-            
     def embed(self, padded_data: np.ndarray) -> np.ndarray:
         """
         Generate embeddings from the input data.
@@ -1036,31 +931,6 @@ class PatternAnalysis:
 
             
 
-        if self.using_keras:
-
-            # Same inf handling as training (see _train_model), so the encoder is fed the same
-            # kind of input it was trained on rather than propagating inf into the embeddings.
-            padded_data = replace_inf_with_feature_max(padded_data)
-            embeddings = self.embedder.model_.layers[1].predict(padded_data)
-
-            if check_recon_error:
-                ## recon error, aeon/keras version (no masking)
-                n_samples = len(padded_data)
-                sample_size = max(1, int(0.1 * n_samples))
-                sample_indices = np.random.choice(n_samples, size=sample_size, replace=False)
-                sample_batch = padded_data[sample_indices]
-
-                if hasattr(self.embedder, 'predict'):
-                    # Convert sample_batch to tf.Tensor
-                    sample_batch_tensor = tensorflow.convert_to_tensor(sample_batch)
-                    recon = self.embedder.model_(sample_batch_tensor, training=False)
-                    # Use tf.losses.mean_squared_error directly on tensors
-                    recon_error = tensorflow.reduce_mean(keras.losses.mean_squared_error(sample_batch_tensor, recon)).numpy()
-                    logger.info(f"Mean reconstruction error on 10% sample: {recon_error:.2f}")
-                else:
-                    logger.warning("Aeon/keras embedder does not have a predict method for reconstruction error calculation.")
-
-        
         return embeddings
 
     ### CLUSTERING

@@ -12,9 +12,6 @@
 #   - {embedder: LSTM, latent_space: 64}
 #   - {embedder: LSTM, latent_space: 128}
 #
-# Spans both environment modules (torch and tensorflow); submit_experiment.sh submits one
-# array per module and merges the results:
-#
 #   ./submit_experiment.sh experiments/general_training.yaml
 name: general_training
 description: "general training -- every embedder at its own latent size"
@@ -56,10 +53,5 @@ include:
   - {embedder: Transformer, latent_space: 64}
   - {embedder: VAE,         latent_space: 64}
   - {embedder: TimeVAE,     latent_space: 64}
-  - {embedder: DRNN,        latent_space: 64}
-  - {embedder: DCNN,        latent_space: 64}
-  # AEResNetClusterer's latent space is fixed at 128 by its architecture; setting anything
-  # else here would be silently ignored (see _initialize_deep_embedder in pattern_analysis.py).
-  - {embedder: ResNet,      latent_space: 128}
   # No learned embedding: UMAP reduces the raw sequences. latent_space does not apply.
   - {embedder: null}

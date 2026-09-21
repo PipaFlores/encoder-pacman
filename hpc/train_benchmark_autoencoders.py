@@ -26,7 +26,6 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
@@ -75,8 +74,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--architectures",
         nargs="+",
-        default=["LSTM", "MLP", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection", "RandomNoise"],
-        choices=["LSTM", "MLP", "Transformer", "VanillaVAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "UMAP", "RandomProjection", "RandomNoise"],
+        default=["LSTM", "MLP", "Transformer", "VanillaVAE", "TimeVAE", "UMAP", "RandomProjection", "RandomNoise"],
+        choices=["LSTM", "MLP", "Transformer", "VanillaVAE", "TimeVAE", "UMAP", "RandomProjection", "RandomNoise"],
         help="Architectures to run.",
     )
     parser.add_argument("--output-dir", default=os.path.join("benchmark_results", "autoencoders"))
@@ -85,8 +84,8 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Run identifier used as the output subdirectory name. Defaults to the current "
-            "timestamp. Pass the same run-id across multiple invocations (e.g. a pytorch pass "
-            "followed by a tensorflow pass) to accumulate their results in one results.csv/json."
+            "timestamp. Pass the same run-id across multiple invocations to accumulate their "
+            "results in one results.csv/json."
         ),
     )
     parser.add_argument("--latent-space", type=int, default=64)
@@ -432,27 +431,11 @@ def extract_torch_embeddings(name: str, model, X: np.ndarray, args: argparse.Nam
     return np.concatenate(embeddings, axis=0)
 
 
-def extract_aeon_embeddings(model, X: np.ndarray) -> np.ndarray:
-    """Extract latent vectors from aeon/Keras clusterer internals.
-
-    `model.fit`/`model.predict` (the aeon/sklearn API) take channels-first X
-    ([samples, channels, time], aeon's own array convention) and transpose it
-    to channels-last internally before feeding the actual Keras graph - see
-    `train_aeon`. `model_.layers[1]` bypasses that preprocessing and talks to
-    the raw (already-transposed) Keras graph directly, so it needs the
-    channels-last shape fed to it as-is: X here is already [samples, time,
-    features] (see `to_repo_shape`), so no further transpose is needed.
-    """
-    return model.model_.layers[1].predict(X)
-
-
 def extract_embeddings(name: str, model, X: np.ndarray, args: argparse.Namespace) -> np.ndarray:
     """Dispatch latent extraction for trained models and no-training baselines."""
     if name in {"UMAP", "RandomProjection", "RandomNoise"}:
         return model.transform(X)
-    if name in {"LSTM", "MLP", "Transformer", "VanillaVAE", "TimeVAE"}:
-        return extract_torch_embeddings(name, model, X, args)
-    return extract_aeon_embeddings(model, X)
+    return extract_torch_embeddings(name, model, X, args)
 
 
 def reduce_for_clustering(embeddings: np.ndarray, args: argparse.Namespace) -> np.ndarray:
@@ -710,53 +693,6 @@ def train_umap_baseline(X_train: np.ndarray, X_test: np.ndarray, args: argparse.
     return model, None, None, None
 
 
-def train_aeon(name: str, X_train: np.ndarray, X_test: np.ndarray, args: argparse.Namespace):
-    """Train aeon/Keras autoencoder clusterers and evaluate reconstruction MSE."""
-    from aeon.clustering import DummyClusterer
-    from aeon.clustering.deep_learning import AEDCNNClusterer, AEDRNNClusterer, AEResNetClusterer
-
-    constructors: dict[str, Callable[[], object]] = {
-        "DRNN": lambda: AEDRNNClusterer(
-            estimator=DummyClusterer(),
-            latent_space_dim=args.latent_space,
-            n_epochs=args.n_epochs,
-            validation_split=args.validation_split,
-            verbose=args.verbose,
-        ),
-        "DCNN": lambda: AEDCNNClusterer(
-            estimator=DummyClusterer(),
-            latent_space_dim=args.latent_space,
-            n_epochs=args.n_epochs,
-            validation_split=args.validation_split,
-            verbose=args.verbose,
-        ),
-        "ResNet": lambda: AEResNetClusterer(
-            estimator=DummyClusterer(),
-            n_epochs=args.n_epochs,
-            validation_split=args.validation_split,
-            verbose=args.verbose,
-        ),
-    }
-    model = constructors[name]()
-    # X_train/X_test are channels-last ([samples, time, features], see
-    # to_repo_shape). model.fit() (the aeon/sklearn API) instead wants
-    # channels-first X ([samples, channels, time], aeon's own array
-    # convention) and transposes it back to channels-last internally before
-    # building/feeding the actual Keras graph. Calling model.model_ directly
-    # bypasses that preprocessing, so it needs X fed to it in that
-    # already-channels-last shape as-is - see extract_aeon_embeddings for the
-    # same caveat.
-    X_train_channels_first = np.transpose(X_train, (0, 2, 1))
-    model.fit(X_train_channels_first)
-
-    recon = model.model_(X_test, training=False).numpy()
-    test_loss = float(np.mean((recon - X_test) ** 2))
-    summary = model.summary()
-    train_loss = float(summary["loss"][-1]) if "loss" in summary else None
-    val_loss = float(summary["val_loss"][-1]) if "val_loss" in summary else None
-    return model, train_loss, val_loss, test_loss
-
-
 def run_architecture(name: str, X_train: np.ndarray, X_test: np.ndarray, args: argparse.Namespace):
     """Train or fit the requested architecture/baseline."""
     trainers = {
@@ -769,15 +705,12 @@ def run_architecture(name: str, X_train: np.ndarray, X_test: np.ndarray, args: a
         "RandomProjection": train_random_projection_baseline,
         "RandomNoise": train_random_noise_baseline,
     }
-    if name in trainers:
-        return trainers[name](X_train, X_test, args)
-    return train_aeon(name, X_train, X_test, args)
+    return trainers[name](X_train, X_test, args)
 
 
 def load_existing_results(output_dir: Path) -> list[Result]:
     """Load a prior run's results.json, if present, so a later invocation with a
-    shared --run-id (e.g. a tensorflow pass after a pytorch pass) appends to it
-    instead of overwriting it."""
+    shared --run-id appends to it instead of overwriting it."""
     json_path = output_dir / "results.json"
     if not json_path.exists():
         return []

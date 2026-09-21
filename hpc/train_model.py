@@ -107,11 +107,10 @@ def parse_args() -> argparse.Namespace:
         "--embedder",
         type=str,
         default="LSTM",
-        choices=["LSTM", "MLP", "Transformer", "VAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "none", "None"],
+        choices=["LSTM", "MLP", "Transformer", "VAE", "TimeVAE", "none", "None"],
         help=(
-            "Deep embedder to use. Torch: LSTM, MLP, Transformer, VAE, TimeVAE. "
-            "Keras/aeon: DRNN, DCNN, ResNet. 'none' skips embedding and uses the reducer "
-            "instead (e.g., UMAP)."
+            "Deep embedder to use: LSTM, MLP, Transformer, VAE or TimeVAE. 'none' skips "
+            "embedding and uses the reducer instead (e.g., UMAP)."
         ),
     )
     parser.add_argument(

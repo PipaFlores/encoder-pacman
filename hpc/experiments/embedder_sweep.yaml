@@ -2,11 +2,6 @@
 # on one slicing scheme and feature set. The point is to hold everything except the
 # architecture constant, so differences in the validation measures are attributable to it.
 #
-# This experiment spans both environment modules - LSTM/MLP/Transformer/VAE/TimeVAE need
-# torch, DRNN/DCNN/ResNet need tensorflow. submit_experiment.sh handles that by submitting
-# one array per module against this same file, sharing a run id so everything collects into
-# a single results.csv. Nothing extra to do:
-#
 #   ./submit_experiment.sh experiments/embedder_sweep.yaml
 name: embedder_sweep
 description: "architecture comparison -- every embedder at latent 128"
@@ -29,9 +24,8 @@ defaults:
   # which is a ~17GB weight at pacman_attack's sequence length.
   feature_set: Experimental2
   normalization: global
-  # 128 works for every architecture here: divisible by the transformer's n_heads=8, and
-  # equal to the value AEResNetClusterer fixes internally, so no architecture is quietly
-  # running at a size other than the one written here.
+  # 128 works for every architecture here - it has to stay divisible by the
+  # transformer's n_heads=8.
   latent_space: 128
   n_epochs: 100
   batch_size: 32
@@ -46,7 +40,7 @@ defaults:
   verbose: true
 
 grid:
-  embedder: [LSTM, MLP, Transformer, VAE, TimeVAE, DRNN, DCNN, ResNet]
+  embedder: [LSTM, MLP, Transformer, VAE, TimeVAE]
 
 include:
   # The non-learned floor for the comparison: UMAP reduces the raw sequences directly, so

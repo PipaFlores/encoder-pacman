@@ -23,7 +23,7 @@ for DATASET in "${DATASETS[@]}"; do
     # Shared across both passes so their results land in the same results.csv/json.
     RUN_ID=$(date +%Y%m%d-%H%M%S)
 
-    # Pass 1: repo pytorch architectures plus the no-training baselines.
+    # Repo pytorch architectures plus the no-training baselines.
     # UMAP reduces to --clustering-dim before HDBSCAN; plots are always 2D.
     # Transformer benchmark follows the repo masked-imputation objective.
     module load python-pytorch/2.13
@@ -43,19 +43,4 @@ for DATASET in "${DATASETS[@]}"; do
     --continue-on-error \
     --verbose
     module unload python-pytorch/2.13
-
-    # Pass 2: aeon's Keras/tensorflow-backed deep clusterers.
-    module load python-tensorflow/2.21
-    python train_benchmark_autoencoders.py \
-    --dataset "$DATASET" \
-    --run-id "$RUN_ID" \
-    --architectures DRNN DCNN ResNet \
-    --latent-space 64 \
-    --n-epochs 100 \
-    --batch-size 32 \
-    --validation-split 0.2 \
-    --clustering-dim 2 \
-    --continue-on-error \
-    --verbose
-    module unload python-tensorflow/2.21
 done

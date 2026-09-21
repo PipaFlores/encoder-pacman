@@ -46,17 +46,10 @@ if TYPE_CHECKING:  # annotations only - never imported at runtime
     from src.analysis import PatternAnalysis
 
 
-# Which environment module an embedder needs. The aeon/keras architectures import
-# tensorflow and the rest import torch, and the two modules cannot be loaded at once -
-# which is why train_benchmark_autoencoders.sh runs them as two sequential passes. For
-# an array the equivalent is one array per module over the same experiment file (see
-# module_groups() and submit_experiment.sh), so a single experiment can still sweep
-# every embedder and land in one results directory.
-KERAS_EMBEDDERS = frozenset({"DRNN", "DCNN", "ResNet"})
-DEFAULT_MODULES = {
-    "torch": "python-pytorch/2.13",
-    "keras": "python-tensorflow/2.21",
-}
+# The environment module every configuration runs under. Every embedder is torch-backed,
+# so one module covers a whole experiment; an experiment file can still override it with
+# a top-level `module:` key if the cluster's module names change.
+DEFAULT_MODULE = "python-pytorch/2.13"
 
 
 # Keys that describe where a run reads and writes, or how loudly it talks - not what it
@@ -253,7 +246,7 @@ def expand(spec: dict[str, Any]) -> list[RunConfig]:
     task trust `--index`: editing the experiment file renumbers the indices, so a running
     array should be left alone until it finishes.
     """
-    known = {"name", "description", "slurm", "modules", "defaults", "grid", "include", "exclude"}
+    known = {"name", "description", "slurm", "module", "defaults", "grid", "include", "exclude"}
     unknown = sorted(set(spec) - known)
     if unknown:
         raise ValueError(
@@ -308,23 +301,9 @@ def expand(spec: dict[str, Any]) -> list[RunConfig]:
     return unique
 
 
-def required_module(config: RunConfig, modules: Optional[dict[str, str]] = None) -> str:
-    """The environment module this configuration has to run under."""
-    table = {**DEFAULT_MODULES, **(modules or {})}
-    return table["keras" if config.embedder in KERAS_EMBEDDERS else "torch"]
-
-
-def module_groups(configs: list[RunConfig], modules: Optional[dict[str, str]] = None) -> dict[str, list[int]]:
-    """Group configuration indices by the module they need, in first-appearance order.
-
-    submit_experiment.sh turns each group into its own `sbatch --array=<indices>`, which
-    is how one experiment file sweeping both torch and keras embedders still produces a
-    single results directory with no index collisions.
-    """
-    groups: dict[str, list[int]] = {}
-    for index, config in enumerate(configs):
-        groups.setdefault(required_module(config, modules), []).append(index)
-    return groups
+def experiment_module(spec: Optional[dict] = None) -> str:
+    """The environment module this experiment runs under."""
+    return (spec or {}).get("module") or DEFAULT_MODULE
 
 
 # --------------------------------------------------------------------------------------

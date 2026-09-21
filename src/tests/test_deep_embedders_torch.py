@@ -6,9 +6,7 @@ batch of shape [n_samples, seq_len, n_features] - the same layout
 forward/encode pass, and one training epoch complete without error and
 produce the expected shapes; they say nothing about representation quality.
 
-Skipped entirely when torch is not installed (e.g. a tensorflow-only
-environment), mirroring the module-load split used on the HPC cluster
-(see hpc/smoke_benchmark_autoencoders.sh).
+Skipped entirely when torch is not installed.
 """
 
 import math
