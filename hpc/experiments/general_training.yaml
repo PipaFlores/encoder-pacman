@@ -1,0 +1,65 @@
+# General training run: train every embedder once, each at its own latent size.
+#
+# Unlike embedder_sweep.yaml, which holds the latent size constant to make architectures
+# comparable, this file is the "train the set of models we actually want" run - so each
+# architecture gets the dimensionality that suits it. That is what the `include:` list
+# below is for: one line per configuration, with `latent_space` set per line. Anything a
+# line does not mention falls back to `defaults:`.
+#
+# To change one architecture's dimensionality, edit its line. To train an architecture at
+# several sizes, give it several lines:
+#
+#   - {embedder: LSTM, latent_space: 64}
+#   - {embedder: LSTM, latent_space: 128}
+#
+# Spans both environment modules (torch and tensorflow); submit_experiment.sh submits one
+# array per module and merges the results:
+#
+#   ./submit_experiment.sh experiments/general_training.yaml
+name: general_training
+description: "general training -- every embedder at its own latent size"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "04:00:00"
+
+defaults:
+  sequence_type: pacman_attack
+  feature_set: Experimental2
+  normalization: global
+  n_epochs: 100
+  batch_size: 32
+  validation_split: 0.3
+  dropout: 0.1
+  context: 20
+  filter_by_pill: null
+  elementwise_masking: true
+  clusterer: hdbscan
+  reducer: umap
+  validation_method: Behavlets
+  using_hpc: true
+  verbose: true
+
+# One line per configuration. `latent_space` is the knob this file exists to expose.
+include:
+  - {embedder: LSTM,        latent_space: 128}
+  - {embedder: MLP,         latent_space: 64}
+  # latent_space is the transformer's d_model and n_heads is 8, so this must stay a
+  # multiple of 8 - torch raises at construction otherwise.
+  - {embedder: Transformer, latent_space: 64}
+  - {embedder: VAE,         latent_space: 64}
+  - {embedder: TimeVAE,     latent_space: 64}
+  - {embedder: DRNN,        latent_space: 64}
+  - {embedder: DCNN,        latent_space: 64}
+  # AEResNetClusterer's latent space is fixed at 128 by its architecture; setting anything
+  # else here would be silently ignored (see _initialize_deep_embedder in pattern_analysis.py).
+  - {embedder: ResNet,      latent_space: 128}
+  # No learned embedding: UMAP reduces the raw sequences. latent_space does not apply.
+  - {embedder: null}

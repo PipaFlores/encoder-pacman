@@ -1,0 +1,54 @@
+# Architecture comparison: every embedder the pipeline supports, at a matched latent size,
+# on one slicing scheme and feature set. The point is to hold everything except the
+# architecture constant, so differences in the validation measures are attributable to it.
+#
+# This experiment spans both environment modules - LSTM/MLP/Transformer/VAE/TimeVAE need
+# torch, DRNN/DCNN/ResNet need tensorflow. submit_experiment.sh handles that by submitting
+# one array per module against this same file, sharing a run id so everything collects into
+# a single results.csv. Nothing extra to do:
+#
+#   ./submit_experiment.sh experiments/embedder_sweep.yaml
+name: embedder_sweep
+description: "architecture comparison -- every embedder at latent 128"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "04:00:00"
+
+defaults:
+  sequence_type: pacman_attack
+  # Experimental2 (4 ghost distances + score) rather than all_features: at 267 columns
+  # TimeVAE's residual decoder ends in a Linear(feat_dim * L_final, seq_len * feat_dim),
+  # which is a ~17GB weight at pacman_attack's sequence length.
+  feature_set: Experimental2
+  normalization: global
+  # 128 works for every architecture here: divisible by the transformer's n_heads=8, and
+  # equal to the value AEResNetClusterer fixes internally, so no architecture is quietly
+  # running at a size other than the one written here.
+  latent_space: 128
+  n_epochs: 100
+  batch_size: 32
+  validation_split: 0.3
+  dropout: 0.1
+  context: 20
+  elementwise_masking: true
+  clusterer: hdbscan
+  reducer: umap
+  validation_method: Behavlets
+  using_hpc: true
+  verbose: true
+
+grid:
+  embedder: [LSTM, MLP, Transformer, VAE, TimeVAE, DRNN, DCNN, ResNet]
+
+include:
+  # The non-learned floor for the comparison: UMAP reduces the raw sequences directly, so
+  # any architecture that cannot beat this row is not earning its training time.
+  - {embedder: null}

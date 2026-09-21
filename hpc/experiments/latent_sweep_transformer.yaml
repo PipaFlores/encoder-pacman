@@ -1,0 +1,39 @@
+# Replaces the former array_train.sh.
+#
+# That script swept latent size with a SLURM array while looping over sequence types
+# *inside* each task - 5 tasks doing 2 trainings each. Here both are grid axes, so the
+# same 10 trainings become 10 independent array tasks.
+name: latent_sweep_transformer
+description: "latent dimension sweep -- all features"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "04:00:00"
+
+defaults:
+  feature_set: all_features
+  embedder: Transformer
+  clusterer: hdbscan
+  reducer: umap
+  normalization: global
+  n_epochs: 100
+  batch_size: 32
+  validation_split: 0.3
+  context: 20
+  filter_by_pill: null
+  validation_method: Behavlets
+  using_hpc: true
+  verbose: true
+
+grid:
+  # TSTransformerEncoder uses latent_space as d_model with n_heads=8, so these must stay
+  # divisible by 8 - the old LSTM sweep's `2` is not a valid transformer latent size.
+  latent_space: [32, 64, 128, 256, 512]
+  sequence_type: [pacman_attack, last_5_seconds]

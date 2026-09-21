@@ -1,15 +1,26 @@
+"""Single-configuration entry point for the PatternAnalysis pipeline.
+
+This is a command-line front end over `experiment.run_one()` - the same function that
+run_experiment.py calls for every configuration of a sweep. It exists for one-off and
+debugging runs, where writing an experiment file for a single configuration would be
+ceremony; anything that sweeps, or that should leave a results.csv behind, belongs in
+run_experiment.py.
+
+Nothing here constructs a pipeline of its own. That is deliberate: this CLI and the
+library had drifted apart before (embedders reachable from PatternAnalysis but not
+from here, pipeline arguments never exposed), and a second implementation of "build a
+reducer, a clusterer and a PatternAnalysis" is exactly how that happens. RunConfig is
+the shared vocabulary, and `RunConfig.from_dict` below rejects any argparse
+destination that does not name one of its fields - so the drift fails at startup
+rather than silently.
+"""
+
 import argparse
 import os
 import sys
-from typing import Optional
 
-from hdbscan import HDBSCAN
-from sklearn.cluster import KMeans
-from sklearn.decomposition import PCA
-from umap import UMAP
-
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-from src.analysis import GeomClustering, PatternAnalysis 
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from experiment import HPC_DIR as _HPC_DIR, REPO_ROOT as _REPO_ROOT, RunConfig, run_one  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -18,17 +29,33 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Data / IO -----------------------------------------------------------------
+    # Defaults resolve relative to this script rather than the cwd, so a job does not
+    # depend on being submitted from hpc/ (they point at the same folders when it is).
     parser.add_argument(
         "--data-folder",
         type=str,
-        default=os.path.join("..", "data"),
+        default=os.path.join(_REPO_ROOT, "data"),
         help="Base folder that stores Pacman CSV and processed artifacts.",
     )
     parser.add_argument(
         "--hpc-folder",
         type=str,
-        default=".",
+        default=_HPC_DIR,
         help="Folder to store affinity matrices, trained models and plots.",
+    )
+    parser.add_argument(
+        "--cache-folder",
+        type=str,
+        default=os.path.join(_REPO_ROOT, "cache"),
+        help=(
+            "Folder for cached pipeline intermediates (make_data, validation encodings). "
+            "Kept separate from --hpc-folder since it is local to each machine/environment."
+        ),
+    )
+    parser.add_argument(
+        "--ignore-cache",
+        action="store_true",
+        help="Bypass the on-disk cache and recompute make_data and validation encodings from scratch (the fresh result still overwrites the cache).",
     )
     parser.add_argument(
         "--sequence-type",
@@ -48,6 +75,12 @@ def parse_args() -> argparse.Namespace:
         type=lambda x: None if x.lower() == "none" else int(x),
         default=None,
         help="If set (1-4), only use sequences associated with this power pill index. 1 is upper left, then clockwise. Use 'none' to disable.",
+    )
+
+    parser.add_argument(
+        "--no-rebase-score",
+        action="store_true",
+        help="Keep the raw score instead of rebasing each sequence so its score starts at 0.",
     )
 
     parser.add_argument(
@@ -74,8 +107,12 @@ def parse_args() -> argparse.Namespace:
         "--embedder",
         type=str,
         default="LSTM",
-        choices=["LSTM", "DRNN", "DCNN", "ResNet", "Transformer" ,"none", "None"],
-        help="Deep embedder to use. 'none' skips embedding and uses Reducer instead(e.g., UMAP).",
+        choices=["LSTM", "MLP", "Transformer", "VAE", "TimeVAE", "DRNN", "DCNN", "ResNet", "none", "None"],
+        help=(
+            "Deep embedder to use. Torch: LSTM, MLP, Transformer, VAE, TimeVAE. "
+            "Keras/aeon: DRNN, DCNN, ResNet. 'none' skips embedding and uses the reducer "
+            "instead (e.g., UMAP)."
+        ),
     )
     parser.add_argument(
         "--latent-space",
@@ -113,6 +150,12 @@ def parse_args() -> argparse.Namespace:
         "--elementwise-masking",
         action="store_true",
         help="Enable elementwise masking (obs. mask) during training of pytorch models.",
+    )
+
+    parser.add_argument(
+        "--use-last-model",
+        action="store_true",
+        help="Use the last checkpoint instead of the best one when loading a trained embedder.",
     )
 
     # Reducer -------------------------------------------------------------------
@@ -223,6 +266,17 @@ def parse_args() -> argparse.Namespace:
         help="Run against the PenDigits benchmark dataset (debug mode).",
     )
     parser.add_argument(
+        "--test-run",
+        action="store_true",
+        help="Run the pipeline on a subset of at most 500 samples (debug mode).",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=None,
+        help="Cap the number of sequences fed to the pipeline. For fast debugging.",
+    )
+    parser.add_argument(
         "--using-hpc",
         action="store_true",
         help="Enable HPC-friendly settings (mostly affects GeomClustering affinity).",
@@ -242,149 +296,24 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_reducer(args: argparse.Namespace):
-    reducer_name = args.reducer.lower()
-    if reducer_name == "umap":
-        return UMAP(
-            n_neighbors=args.umap_neighbors,
-            n_components=args.reducer_components,
-            min_dist=args.umap_min_dist,
-            metric=args.umap_metric,
-            random_state=args.seed,
-        )
-    if reducer_name == "pca":
-        return PCA(n_components=args.reducer_components, random_state=args.seed)
-    if reducer_name == "none":
-        return None
-    raise ValueError(f"Reducer {args.reducer} is not supported.")
-
-
-def build_clusterer(args: argparse.Namespace):
-    min_samples: Optional[int]
-    if args.min_samples is None or args.min_samples < 0:
-        min_samples = None
-    else:
-        min_samples = args.min_samples
-
-    if args.clusterer == "hdbscan":
-        return HDBSCAN(
-            min_cluster_size=args.min_cluster_size,
-            min_samples=min_samples,
-            cluster_selection_epsilon=args.cluster_selection_epsilon,
-            metric="euclidean",
-        )
-    if args.clusterer == "kmeans":
-        return KMeans(
-            n_clusters=args.kmeans_k,
-            random_state=args.seed,
-            n_init="auto",
-        )
-    if args.clusterer == "geom":
-        return GeomClustering(
-            similarity_measure=args.geom_similarity,
-            verbose=args.verbose,
-            min_cluster_size=args.min_cluster_size,
-            min_samples=min_samples,
-        )
-    raise ValueError(f"Clusterer {args.clusterer} is not supported.")
-
-
 def main():
     args = parse_args()
 
-    if not args.disable_wandb:
-        try:
-            import wandb
-            WANDB_AVAILABLE = True
-        except ImportError:
-            WANDB_AVAILABLE = False
-    else:
-        WANDB_AVAILABLE = False
-        args.disable_wandb = True
+    # argparse spells two booleans as negations for a better command line; RunConfig keeps
+    # them positive. Every other destination name matches a RunConfig field one-for-one,
+    # and from_dict() raises on any that does not.
+    values = vars(args).copy()
+    values["rebase_score"] = not values.pop("no_rebase_score")
+    values["use_best"] = not values.pop("use_last_model")
 
-    print("Running PatternAnalysis with configuration:")
-    for key, value in vars(args).items():
-        print(f"  {key}: {value}")
+    config = RunConfig.from_dict(values)
+    result = run_one(config)
 
-    # Iterate over all args fields and transform any that are set to the string "none" (case-insensitive) to None
-    for key, value in vars(args).items():
-        if isinstance(value, str) and value.lower() == "none":
-            setattr(args, key, None)
-
-    reducer = build_reducer(args)
-    clusterer = build_clusterer(args)
-
-    analysis = PatternAnalysis(
-        data_folder=args.data_folder,
-        hpc_folder=args.hpc_folder,
-        embedder=args.embedder,
-        reducer=reducer,
-        clusterer=clusterer,
-        similarity_measure=args.similarity_measure,
-        sequence_type=args.sequence_type,
-        context=args.context,
-        filter_by_pill=args.filter_by_pill,
-        validation_method= args.validation_method,
-        feature_set=args.feature_set,
-        augmented_visualization=False,
-        batch_size=args.batch_size,
-        normalization=args.normalization,
-        max_epochs=args.n_epochs,
-        latent_dimension=args.latent_space,
-        validation_data_split=args.validation_split,
-        elementwise_masking=args.elementwise_masking,
-        dropout=args.dropout,
-        sort_distances=args.sort_ghost_distances,
-        using_hpc=args.using_hpc,
-        random_seed=args.seed,
-        verbose=args.verbose,
-        wandb_logging=not args.disable_wandb,
-        wandb_logging_comment=args.logging_comment,
-    )
-
-    analysis.fit(
-        force_training=True,
-        test_dataset=args.test_dataset,
-        close_wandb_logger=False
-    )
-    analysis.summarize()
-
-    ## VISUALIZE
-    
-    # import matplotlib.pyplot as plt
-
-
-    ## only latent space fig
-    # fig, axs = plt.subplots(1, 1, figsize=(10, 10))
-
-    # axs.scatter(analysis.reduced_embeddings[:,0], analysis.reduced_embeddings[:,1], s=2, cmap="tab20", c=analysis.labels)
-    # axs.set_title(f"{args.sequence_type}_{args.feature_set}_{args.embedder}_{reducer}_{clusterer}", size=8)
-    try:
-        fig = analysis.plot_latent_space_overview(
-            validation_set = "all",
-            black_background = True,
-            colormap = "viridis",
-            dotsize = 0.2,
-            pretty_val_title = True
-        )
-    except Exception as e:
-        fig = None
-        print(f"Error in creating validation plots: {e}")
-
-    if WANDB_AVAILABLE:
-        # TODO: upload validation measures to wandb (pa.validation_measures)
-        validation_measures = wandb.Table(
-            dataframe = analysis.validation_measures
-        )
-
-        wandb.Image(fig)
-
-        analysis.wandbrun.log({"validation_plot": wandb.Image(fig),
-                               "validation_measures": validation_measures})  
-
-        
-        analysis.wandbrun.finish()
+    if result.status != "ok":
+        print(f"Run failed: {result.error}")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

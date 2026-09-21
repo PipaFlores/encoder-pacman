@@ -1,0 +1,44 @@
+# Fast end-to-end check of the whole path: expansion -> training -> reduction ->
+# clustering -> validation -> results. Two epochs on a handful of samples, so it verifies
+# plumbing rather than producing anything meaningful. Covers one torch embedder, the
+# no-embedder branch, and the no-validation branch.
+#
+#   python run_experiment.py --config experiments/smoke.yaml --dry-run
+#   python run_experiment.py --config experiments/smoke.yaml --continue-on-error
+name: smoke
+description: "SMOKE TEST - pipeline plumbing only, safe to delete"
+
+slurm:
+  partition: gputest
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "00:15:00"
+  # gputest allows only a job or two per project, and Slurm counts every array task as
+  # a separate job - so this experiment runs its configurations in sequence inside one
+  # job instead of as a 3-task array, which the QOS rejects at submit time.
+  use_array: false
+
+defaults:
+  sequence_type: pacman_attack
+  feature_set: Experimental2
+  normalization: global
+  latent_space: 64
+  n_epochs: 2
+  batch_size: 16
+  max_samples: 100
+  min_cluster_size: 5
+  validation_method: Behavlets
+  disable_wandb: false
+  verbose: true
+
+grid:
+  embedder: [MLP, null]
+
+include:
+  #The branch that used to crash on the last statement of an otherwise finished run.
+  - {embedder: MLP, validation_method: none, max_samples: 30}

@@ -7,6 +7,7 @@ from .similarity_measures import SimilarityMeasures
 __all__ = [
     "calculate_velocities",
     "pos_mirroring",
+    "replace_inf_with_feature_max",
     "timer",
     "load_maze_data",
     "Astar",

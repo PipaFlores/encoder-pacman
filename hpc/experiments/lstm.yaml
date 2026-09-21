@@ -1,0 +1,37 @@
+# Replaces the former train_LSTM.sh.
+name: lstm
+description: "ghost distances, 128 dimensions LSTM"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "03:00:00"
+
+defaults:
+  feature_set: Experimental2
+  embedder: LSTM
+  clusterer: hdbscan
+  reducer: umap
+  normalization: global
+  n_epochs: 100
+  latent_space: 128
+  batch_size: 32
+  validation_split: 0.3
+  dropout: 0.1
+  context: 20
+  filter_by_pill: null
+  # Always used for LSTM: first/last-5-second slices carry a lot of infinite ghost
+  # distances, and elementwise masking keeps them out of the loss.
+  elementwise_masking: true
+  validation_method: Behavlets
+  using_hpc: true
+  verbose: true
+
+grid:
+  sequence_type: [pacman_attack, last_5_seconds]

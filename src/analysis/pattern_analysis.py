@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import time
 
 import torch.utils.data.dataloader
-from src.utils import setup_logger
+from src.utils import setup_logger, replace_inf_with_feature_max
 
 ### Data Handling
 from src.datahandlers import PacmanDataReader
@@ -79,7 +79,7 @@ class PatternAnalysis:
     def __init__(
             self, 
             reader: PacmanDataReader = None,
-            read_games_only: bool = False,
+            read_games_only: bool = True,
             data_folder: str = "../data",
             hpc_folder: str = "../hpc",
             cache_folder: str = "../cache",
@@ -243,11 +243,17 @@ class PatternAnalysis:
         self.labels = None
         self.validation_encodings = None
         self.validation_labels = None
+        # Stays None unless a validation method actually produced measures in fit() - callers
+        # (e.g. hpc/train_model.py) check it rather than assuming fit() set it.
+        self.validation_measures = None
         self.metadata = None
         self.results = {}
 
         # Logging
         self.wandb_logging = wandb_logging 
+        # Set by _init_wandb_run() during fit(); stays None when logging is off, or when
+        # the run never reaches the embedding step at all (e.g. GeomClustering).
+        self.wandbrun = None
         self.wandb_logging_comment = wandb_logging_comment
 
 
@@ -741,7 +747,7 @@ class PatternAnalysis:
             "trained_models",
             self.sequence_type,
             "f" + str(len(self.features_columns)),
-            "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}" 
+            "test_data" if test_dataset else f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}" 
         )
         
         if self.using_torch:
@@ -798,7 +804,7 @@ class PatternAnalysis:
 
         model_path = os.path.join(
              model_dir,
-            "test_data" if test_dataset else "" + f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
+            "test_data" if test_dataset else f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
         )
 
         self._init_wandb_run()
@@ -855,22 +861,36 @@ class PatternAnalysis:
                 trainer.fit(self.embedder, data_class)
             
         elif self.using_keras:
+            # aeon builds its save path as `file_path + file_name + ".keras"` (plain string
+            # concatenation, file_path defaulting to "./"), so file_path has to carry the
+            # directory - with a trailing separator - and the file names have to be bare.
+            # Passing the absolute model_path as the file name instead yields "./C:\..." and
+            # dies in makedirs("./C:"). The result matches what _check_model_training_status
+            # looks for: model_dir/<model name>_best.keras.
+            model_name = os.path.basename(model_path)
+            self.embedder.file_path = os.path.join(model_dir, "")
             self.embedder.save_best_model = True
-            self.embedder.best_file_name = model_path + "_best"
+            self.embedder.best_file_name = model_name + "_best"
             self.embedder.save_last_model = True
-            self.embedder.last_file_name = model_path + "_last"
+            self.embedder.last_file_name = model_name + "_last"
             
-            if WANDB_AVAILABLE:
+            if WANDB_AVAILABLE and self.wandb_logging:
+                # WandbMetricsLogger() raises unless a run is active, so this has to follow
+                # wandb_logging like the torch branch does (which passes wandb_run=None when off).
                 from wandb.integration.keras import WandbMetricsLogger
                 self.embedder.callbacks = WandbMetricsLogger()
 
 
-            self.embedder.fit(padded_sequence_data.transpose(0,2,1)) # Transpose to match aeon input format of [n, channels, seq_length]
+            # Unlike the torch trainers, which go through PacmanDataset/ImputationDataset, aeon
+            # gets a plain array - so the infinite ghost distances have to be dealt with here or
+            # the loss is NaN from the first batch on.
+            keras_input = replace_inf_with_feature_max(padded_sequence_data)
+            self.embedder.fit(keras_input.transpose(0,2,1)) # Transpose to match aeon input format of [n, channels, seq_length]
 
             self.embedder.plot_loss_keras(
                 os.path.join(
                     loss_plot_dir,
-                    "test_data" if test_dataset else "" + "{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}.png"
+                    "test_data" if test_dataset else f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}.png"
                 )
             )       
             
@@ -895,7 +915,6 @@ class PatternAnalysis:
         else:
             # Use UMAP (or whatever reducer)
             if self.embedder == None and self.wandb_logging:
-                    import datetime
                     # wandb_config = self._get_wandb_config()
                     wandb_config = {
                         # Hyperparameters only available in pattern_analysis
@@ -923,23 +942,17 @@ class PatternAnalysis:
                     self.wandbrun = wandb.init(
                         project = "pacman",
                         config= wandb_config,
-                        name=f"{self.sequence_type}_{self.feature_set}_{datetime.datetime.now().strftime('%m_%d_%H_%M')}",
-                        tags=[self.sequence_type, self.embedder.__class__.__name__]
+                        name=self._wandb_run_name(),
+                        # self.embedder is None here, so name the reducer doing the
+                        # embedding rather than tagging every baseline run "NoneType".
+                        tags=[self.sequence_type, self.reducer.__class__.__name__]
                     )
             else:
                 self.wandbrun = None
 
             logger.info("Embedding with self.reducer (e.g., UMAP) from flat raw data to 2 dimensions..")
-            if np.any(np.isinf(padded_data)):  # replace "inf" values with max for each feature
-                X = padded_data.copy()
-                for feat_idx in range(padded_data.shape[-1]):
-                    feat_data = padded_data[..., feat_idx]
-                    finite_max = np.nanmax(feat_data[np.isfinite(feat_data)])
-                    X[..., feat_idx] = np.where(np.isinf(feat_data), finite_max, feat_data)
-                
-                X_flat = X.reshape(len(X), -1)
-            else:
-                X_flat = padded_data.copy().reshape(len(padded_data), -1)
+            X = replace_inf_with_feature_max(padded_data)
+            X_flat = X.reshape(len(X), -1)
 
             embeddings = self.reducer.fit_transform(X_flat)
 
@@ -1023,8 +1036,11 @@ class PatternAnalysis:
 
             
 
-        if self.using_keras: 
+        if self.using_keras:
 
+            # Same inf handling as training (see _train_model), so the encoder is fed the same
+            # kind of input it was trained on rather than propagating inf into the embeddings.
+            padded_data = replace_inf_with_feature_max(padded_data)
             embeddings = self.embedder.model_.layers[1].predict(padded_data)
 
             if check_recon_error:
@@ -1392,7 +1408,9 @@ class PatternAnalysis:
             - NMI (Normalized Mutual Information)
             - neighborhood_hit (fraction of same-label neighbors in low-dim embedding, if embeddings is provided)
 
-        If the reference labels are all NaN, all zeros, or otherwise degenerate, the metrics are set to NaN for that validation set.
+        Validation sets with no signal at all (every value missing - see recode_validation_labels)
+        are skipped with a warning and get no row in the result; ones that are merely degenerate
+        (no valid instances left after masking) get a row of NaN metrics.
 
         Args:
             labels (np.ndarray): The cluster labels produced by the clustering algorithm.
@@ -1415,7 +1433,20 @@ class PatternAnalysis:
             if hasattr(validation_labels, "columns"):
                 for col in validation_labels.columns:
                     val_labels = validation_labels[col].to_numpy()
-                    # Only compute if val_labels is no NaN values
+
+                    # A validation set with nothing to validate against - recode_validation_labels
+                    # produces an all-None column whenever the encoding never fired across the
+                    # sampled sequences (e.g. a behavlet that can't occur in the sequence type, or
+                    # simply didn't in a small sample). There's no measure to compute, so skip it
+                    # rather than treating it as a broken encoding.
+                    if pd.isnull(val_labels).all():
+                        logger.warning(
+                            f"Skipping validation set '{col}': no signal (every value is missing), "
+                            f"nothing to compare the clustering against"
+                        )
+                        continue
+
+                    # Partially missing values, on the other hand, do mean the encoding is broken
                     assert not pd.isnull(val_labels).any(), f"{col} has missing values, check label encoding"
 
                     mask = (val_labels != -1) # -1 in validation labels represent null instances (not to confuse with the -1 of clustering labels, which is noise)
@@ -2296,18 +2327,38 @@ class PatternAnalysis:
     
     def _init_wandb_run(self):
         if WANDB_AVAILABLE and self.wandb_logging:
-            import datetime
-            import uuid
             wandb_config = self._get_wandb_config()
             self.wandbrun = wandb.init(
                 project = "pacman",
                 config= wandb_config,
-                name=f"{uuid.uuid4().hex[:8]}_{self.sequence_type}_{self.feature_set}_{self.embedder}",
+                name=self._wandb_run_name(),
                 tags=[self.sequence_type, self.embedder.__class__.__name__]
             )
         else:
             self.wandbrun = None
     
+    def _wandb_run_name(self) -> str:
+        """Name for this run in wandb.
+
+        `WANDB_NAME` wins when set, which is how hpc/run_experiment.py labels a sweep's
+        runs with the same "<index>_<config hash>" that names their output directory -
+        so a run in the wandb UI can be traced back to its files on disk.
+
+        Otherwise: a timestamp, the slicing scheme, the feature set and the embedder's
+        class name. Note `self.embedder` holds the *instantiated* model by this point,
+        so it has to be the class name - interpolating the object itself puts
+        nn.Module.__repr__(), i.e. the entire architecture, into the run name.
+        """
+        import datetime
+
+        override = os.environ.get("WANDB_NAME")
+        if override:
+            return override
+
+        embedder_name = self.embedder.__class__.__name__ if self.embedder is not None else "NoEmbedder"
+        stamp = datetime.datetime.now().strftime("%m%d_%H%M")
+        return f"{stamp}_{self.sequence_type}_{self.feature_set}_{embedder_name}_h{self.latent_dimension}"
+
     def _get_wandb_config(self):
 
         wandb_config = {

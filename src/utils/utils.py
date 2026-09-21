@@ -175,7 +175,43 @@ def calculate_velocities(
 
 
 
-def neighborhood_hit(X_embedded, 
+def replace_inf_with_feature_max(data: np.ndarray) -> np.ndarray:
+    """
+    Replace infinite values with the largest finite value of their own feature.
+
+    Some features are legitimately infinite for part of a sequence - a ghost distance is inf
+    while that ghost isn't reachable (still in the house, or eaten) - and models can't train on
+    that: it makes the reconstruction loss inf/NaN on the first batch and every weight NaN from
+    there on. The torch datasets already handle this themselves (PacmanDataset/ImputationDataset
+    build an obs_mask from isfinite and call replace_inf, see src/datahandlers/datamodule.py);
+    this is the equivalent for the code paths that feed numpy arrays straight to a model or a
+    reducer. Kept in numpy, not torch, since the keras/aeon path has to work in environments
+    without torch installed.
+
+    A feature that is infinite everywhere across the sample has no finite maximum to fall back
+    on, so it gets 0 - the same "no information" placeholder the feature normalization uses.
+
+    Args:
+        data: Array whose last axis is the feature axis, e.g. [n_samples, seq_len, n_features].
+
+    Returns:
+        np.ndarray: The input unchanged when it holds no infinities, otherwise a copy with them
+            replaced per feature.
+    """
+    if not np.any(np.isinf(data)):
+        return data
+
+    cleaned = data.copy()
+    for feat_idx in range(data.shape[-1]):
+        feat_data = data[..., feat_idx]
+        finite_values = feat_data[np.isfinite(feat_data)]
+        fill_value = finite_values.max() if finite_values.size else 0.0
+        cleaned[..., feat_idx] = np.where(np.isinf(feat_data), fill_value, feat_data)
+
+    return cleaned
+
+
+def neighborhood_hit(X_embedded,
                     labels, 
                     n_neighbors=5, 
                     no_null_instances=True,
