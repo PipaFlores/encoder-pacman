@@ -148,6 +148,85 @@ class FeatureNormalizer:
         values = values.clip(lower=0.0, upper=1.0)
         return self.standardize(values)
 
+    def normalize_pellet_states(self, series: pd.Series) -> pd.Series:
+        """
+        Standardizes the per-row pellet-state vector (one 0/1 entry per maze pellet).
+
+        The column holds an array per row rather than a scalar, so it cannot go
+        through `normalize_binary_flag`. The transform is the same in shape
+        (clip to [0, 1], then z-score), but the statistics are pooled over every
+        pellet and every row instead of being computed per pellet dimension.
+        Per-dimension statistics would rescale each pellet by how often that
+        particular tile happens to get cleared - a maze-topology artifact - and
+        would collapse every pellet that stays constant within a sequence to
+        exactly 0 under 'sample'/'sequence' normalization, wiping out the map
+        layout. Pooled statistics keep the 244 dimensions mutually comparable.
+
+        Rows that did not change the maze share the *same* array object as the
+        previous row (see `PacmanDataReader._process_pellet_positions`), so the
+        work is grouped by object identity: statistics are weighted by how many
+        rows point at each vector and the transform runs once per distinct
+        vector. That keeps the output's memory footprint proportional to the
+        input's instead of materializing one array per row.
+        """
+        cells = series.to_numpy()
+
+        # id(vector) -> (vector, number of rows referencing it)
+        groups: Dict[int, tuple[np.ndarray, int]] = {}
+        for item in cells:
+            if item is None or np.isscalar(item):
+                continue
+            key = id(item)
+            vector, count = groups.get(key, (item, 0))
+            groups[key] = (vector, count + 1)
+
+        total_count = 0
+        total_sum = 0.0
+        total_square_sum = 0.0
+        for vector, count in groups.values():
+            clipped = self._as_pellet_vector(vector)
+            total_count += count * clipped.size
+            total_sum += count * float(clipped.sum())
+            total_square_sum += count * float(np.square(clipped).sum())
+
+        if total_count == 0:
+            logger.debug(
+                "FeatureNormalizer: no pellet-state vectors found in column '%s'",
+                series.name,
+            )
+            return series
+
+        mean = total_sum / total_count
+        if total_count > 1:
+            # Values live in [0, 1], so the one-pass variance is numerically safe
+            # here. ddof=1 matches the pandas .std() used by `standardize`.
+            variance = max(
+                (total_square_sum - total_count * mean**2) / (total_count - 1), 0.0
+            )
+            std = float(np.sqrt(variance))
+        else:
+            std = 0.0
+        std = std if std > self.EPS else 1.0
+
+        normalized_by_id = {
+            key: ((self._as_pellet_vector(vector) - mean) / std).astype(np.float32)
+            for key, (vector, _) in groups.items()
+        }
+
+        normalized = [
+            item if (item is None or np.isscalar(item)) else normalized_by_id[id(item)]
+            for item in cells
+        ]
+        return pd.Series(normalized, index=series.index, dtype=object)
+
+    @staticmethod
+    def _as_pellet_vector(vector) -> np.ndarray:
+        """Returns `vector` as a fresh float64 array clipped to [0, 1], NaNs as 0."""
+        values = np.array(vector, dtype=np.float64, copy=True).ravel()
+        np.nan_to_num(values, nan=0.0, copy=False)
+        np.clip(values, 0.0, 1.0, out=values)
+        return values
+
     def normalize_multistate_flag(
         self, series: pd.Series, max_state: int = 3
     ) -> pd.Series:
@@ -232,6 +311,10 @@ class FeatureNormalizer:
             "Ghost3_distance",
             "Ghost4_distance",
         ]
+
+        # Vector-valued column: one 0/1 entry per maze pellet, normalized against
+        # statistics pooled over all pellets (see normalize_pellet_states).
+        strategies["available_pellets_states"] = self.normalize_pellet_states
 
         for column in counter_columns:
             strategies[column] = self.normalize_counter
