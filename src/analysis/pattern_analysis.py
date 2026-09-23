@@ -42,7 +42,6 @@ from sklearn.decomposition import PCA
 ## Clustering
 from hdbscan import HDBSCAN
 from sklearn.cluster import KMeans
-from src.analysis import GeomClustering
 
 # Validation
 from src.analysis import BehavletsEncoding
@@ -59,7 +58,7 @@ class PatternAnalysis:
 
     Pipeline:
     1. Data loading and slicing 
-    2. Embedding generation (deep learning or geometric)
+    2. Embedding generation (deep learning, or the reducer on raw data)
     3. Dimensionality reduction
     4. Clustering 
     5. Validation (using behavlets or other methods)
@@ -75,7 +74,7 @@ class PatternAnalysis:
             cache_folder: str = "../cache",
             embedder: str | None = "LSTM",
             reducer: UMAP | PCA | None = None,
-            clusterer: HDBSCAN | KMeans | GeomClustering = None,
+            clusterer: HDBSCAN | KMeans = None,
             similarity_measure: str = "euclidean",
             sequence_type: str = "first_5_seconds",
             context: int = 20,
@@ -93,7 +92,6 @@ class PatternAnalysis:
             elementwise_masking: bool = False,
             use_best: bool = True,
             sort_distances: bool = False,
-            using_hpc: bool = False,
             random_seed: int | None = None,
             verbose: bool = False,
             max_samples: int | None = False,
@@ -113,7 +111,7 @@ class PatternAnalysis:
                 between them), unlike hpc_folder which may be shared/synced.
             embedder (str | None): Type of embedder to use "LSTM", "DRNN", "DCNN", "ResNet" or None to skip embedding.
             reducer (UMAP | PCA | None): Dimensionality reduction method. If None, defaults to UMAP.
-            clusterer (HDBSCAN | KMeans | GeomClustering): Clustering algorithm to use.
+            clusterer (HDBSCAN | KMeans): Clustering algorithm to use.
             similarity_measure (str): Similarity metric for affinity matrix calculation (euclidean or cosine). Not the one
             used in clustering or reducing, define those in reducer, or clusterer instances.
             sequence_type (str): Type of sequence to analyze (e.g., "first_5_seconds").
@@ -134,7 +132,6 @@ class PatternAnalysis:
             elementwise_masking (bool): Whether or not to use element-wise masking during training (only pytorch models)
             use_best (bool): Whether to use best or last autoencoder model.
             sort_distance (bool): If using Astar distances as features, sort them in ascending order.
-            using_hpc (bool): Whether to use HPC for parallel computations.
             random_seed (int | None): Random seed for reproducibility.
             max_samples (int | None): Max number of samples to be used, for fast debugging purposes
             verbose (bool): If True, enables verbose logging.
@@ -142,7 +139,7 @@ class PatternAnalysis:
             wandb_logging_comment
 
         Sets up the core components of the pipeline, including data reader, embedder, reducer, clusterer,
-        and visualization tools. Handles configuration for both geometric and neural network-based clustering.
+        and visualization tools.
         """
         
         self.verbose = verbose
@@ -162,7 +159,6 @@ class PatternAnalysis:
         
         # HPC CONFIG
         self.hpc_folder = hpc_folder ## for videos and trained models lookups (wherever videos/ affinity_matrices/ and trained_models/ are)
-        self.using_hpc = using_hpc ## For parallel computing of affinity matrix
 
         # CACHE CONFIG
         self.cache_folder = cache_folder ## for cached pipeline intermediates (make_data, validation encodings). Local per environment, kept separate from hpc_folder.
@@ -192,27 +188,15 @@ class PatternAnalysis:
 
         # Core components
         self.reader = reader if reader is not None else PacmanDataReader(data_folder, read_games_only= read_games_only)
-        if isinstance(clusterer, GeomClustering): # Only clusterer.
-            
-            self.feature_set = "Pacman"
-            self.features_columns = ["Pacman_X", "Pacman_Y"] # Always these two features
-            self.normalization = "none"
-            logger.info(f"features columns set to Pacman's X,Y coordinates for GeomClustering")
-            self.embedder = None
-            self.embedder_type = None
-            self.reducer = None
-            self.clusterer = clusterer
-            self.similarity_measure = clusterer.similarity_measures.measure_type
-        else: # Neural-Network embedding -> Reducer -> clusterer
-            self.feature_set = feature_set
-            self.features_columns = self._get_feature_columns(feature_set)
-            # Embedder initialized after make_data, as some models look for data's size/length
-            self.embedder_type = embedder
-            self.embedder = embedder
-            # self.embedder = self._initialize_deep_embedder(embedder) if embedder is not None else None
-            self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="euclidean", random_state=random_seed)
-            self.clusterer = clusterer if clusterer is not None else HDBSCAN(min_cluster_size=20, min_samples=None)
-            self.similarity_measure = similarity_measure
+        # Neural-Network embedding -> Reducer -> clusterer
+        self.feature_set = feature_set
+        self.features_columns = self._get_feature_columns(feature_set)
+        # Embedder initialized after make_data, as some models look for data's size/length
+        self.embedder_type = embedder
+        self.embedder = embedder
+        self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="euclidean", random_state=random_seed)
+        self.clusterer = clusterer if clusterer is not None else HDBSCAN(min_cluster_size=20, min_samples=None)
+        self.similarity_measure = similarity_measure
 
 
         # Visualization components
@@ -242,7 +226,7 @@ class PatternAnalysis:
         # Logging
         self.wandb_logging = wandb_logging 
         # Set by _init_wandb_run() during fit(); stays None when logging is off, or when
-        # the run never reaches the embedding step at all (e.g. GeomClustering).
+        # no model gets trained (e.g. a trained one is loaded instead).
         self.wandbrun = None
         self.wandb_logging_comment = wandb_logging_comment
 
@@ -372,9 +356,9 @@ class PatternAnalysis:
         This method orchestrates the full analysis workflow, including:
             1. Loading and preparing the data (unless `reader.make_data()` is pre-computed and provided as input).
             2. Loading or training the embedding model, if an embedder is specified.
-            3. Generating embeddings for the input data (unless using geometric clustering).
+            3. Generating embeddings for the input data.
             4. Reducing the dimensionality of embeddings if necessary.
-            5. Performing clustering on the reduced embeddings or trajectories.
+            5. Performing clustering on the reduced embeddings.
 
         Args:
             raw_sequences (list[pd.DataFrame], optional): 
@@ -435,8 +419,8 @@ class PatternAnalysis:
 
         logger.info(f"Using {len(self.features_columns)} features: {self.feature_set}")    
 
-        # Step 2a: load or train embedding model. GeomClustering skips this step
-        
+        # Step 2a: load or train embedding model.
+
         if self.embedder is not None:
             self.embedder = self._initialize_deep_embedder(embedder = self.embedder_type)
             is_model_trained_, self.model_path = self._check_model_training_status(return_path=True, test_dataset=test_dataset, use_best=self.use_best)
@@ -459,33 +443,25 @@ class PatternAnalysis:
                     test_dataset=test_dataset)
                 logger.info(f"Model trained and saved at {self.model_path}")
 
-        # Step 2b: Generate embeddings 
-        # (If not conducting geometric clustering, which instead uses trajectory similarity measures)
-        if not isinstance(self.clusterer, GeomClustering):
-            self.embeddings = self.embed(self.processed_sequence_data)
-            
-            # Step 2c: Reduce dimensions if embeddings are high-dimensional
-            if self.embeddings.shape[1] > 2:
-                logger.info("Reducing dimensionality...")
-                self.reduced_embeddings = self.reducer.fit_transform(self.embeddings)
-            else:
-                self.reduced_embeddings = self.embeddings
+        # Step 2b: Generate embeddings
+        self.embeddings = self.embed(self.processed_sequence_data)
 
-        
-        # Step 3: Perform clustering
-        if isinstance(self.clusterer, GeomClustering):
-            logger.info(f"Performing geometrical clustering with similarity measure: {self.clusterer.similarity_measures.measure_type}")
-            self.labels = self._geom_clustering(self.trajectory_list)
+        # Step 2c: Reduce dimensions if embeddings are high-dimensional
+        if self.embeddings.shape[1] > 2:
+            logger.info("Reducing dimensionality...")
+            self.reduced_embeddings = self.reducer.fit_transform(self.embeddings)
         else:
-            logger.info(f"Performing {self.clusterer.__class__.__name__} clustering")
-            self.labels = self.clusterer.fit_predict(self.reduced_embeddings)
+            self.reduced_embeddings = self.embeddings
+
+        # Step 3: Perform clustering
+        logger.info(f"Performing {self.clusterer.__class__.__name__} clustering")
+        self.labels = self.clusterer.fit_predict(self.reduced_embeddings)
 
         self.labels = self._sort_labels()
         logger.info(f"Clustering complete. Found {len(set(self.labels)) - 1} clusters")
 
         self.cluster_sizes = None
         self.cluster_centroids = None
-        self.trajectory_centroids = None  
 
         self.clustervisualizer = ClusterVisualizer(
         )
@@ -792,10 +768,8 @@ class PatternAnalysis:
     def embed(self, padded_data: np.ndarray) -> np.ndarray:
         """
         Generate embeddings from the input data.
-        If geometric clustering is used, no embeddings are produced. Instead
-        a similarity/affinity matrix is calculated in the clustering step using
-        trajectory similarity measures (only 2 Features [Pacman_X, Pacman_Y]).
-        
+        If no embedder is set, `self.reducer` embeds the flattened raw data directly.
+
         Args:
             padded_data: Input data of same-length sequences (padded)
             
@@ -935,66 +909,6 @@ class PatternAnalysis:
 
     ### CLUSTERING
 
-    def _geom_clustering(self, trajectory_list) -> np.ndarray:
-        """
-        Performs geometric-HDBSCAN clustering on trajectory list.
-        It follows the main pipeline on `GeomClustering` but does not
-        use the `.fit()` method. This avoids the creation of duplicates affinity matrices, cluster centroids 
-        and labels.
-        
-        """
-        
-        ## If exists, load affinity matrix
-        affinity_matrix_path = os.path.join(
-                self.hpc_folder,
-                "affinity_matrices",
-                self.sequence_type,
-                f"{self.clusterer.similarity_measures.measure_type}_affinity_matrix.csv"
-                )
-        
-        is_affinity_ok = False
-        if os.path.exists(affinity_matrix_path):
-            logger.info(f"Using existing affinity matrix ({affinity_matrix_path})")
-            self.affinity_matrix = np.loadtxt(affinity_matrix_path, delimiter=',')
-
-            # Verify that the affinity matrix matches the number of trajectories
-            if self.affinity_matrix.shape[0] == len(trajectory_list):
-                is_affinity_ok = True
-            else:
-                logger.warning(
-                    f"Affinity matrix shape {self.affinity_matrix.shape} does not match number of trajectories {len(trajectory_list)}. Will recalculate."
-                )
-            
-        ## Else, calculate affinity matrix
-        if not is_affinity_ok:
-            os.makedirs(
-                    os.path.join(
-                        self.hpc_folder,
-                        "affinity_matrices",
-                        self.sequence_type
-                    ),
-                    exist_ok = True
-                )
-            if self.using_hpc == True:
-                self.affinity_matrix = self.clusterer.calculate_affinity_matrix_parallel_cpu(
-                    trajectories= trajectory_list, n_jobs=None, chunk_size_multiplier=1
-                )
-            else:
-                self.affinity_matrix = self.clusterer.calculate_affinity_matrix(
-                        trajectories = trajectory_list)
-                
-            np.savetxt(
-                    affinity_matrix_path,
-                    self.affinity_matrix,
-                    delimiter=",",
-                )
-            logger.info(f"Calculated and saved affinity matrix in {affinity_matrix_path}")
-    
-        labels = self.clusterer.clusterer.fit_predict(self.affinity_matrix)
-
-        return labels
-            
-        
     def _sort_labels(self) -> np.ndarray:
         """
         Sort cluster labels based on the number of trajectories in each cluster and
@@ -1467,12 +1381,8 @@ class PatternAnalysis:
             fig = None
             show_plot = False
         
-        if not isinstance(self.clusterer, GeomClustering):
-    
-            self.affinity_matrix = self._calculate_affinity_matrix()
-            suptitle = f"Embeddings Affinity Matrix Overview - {self.similarity_measure} distance in {self.embedder.__class__.__name__}_{self.reducer.__class__.__name__} latent space"
-        else:
-            suptitle = f"Trajectory Affinity Matrix Overview - {self.similarity_measure} trajectory similarity measure"
+        self.affinity_matrix = self._calculate_affinity_matrix()
+        suptitle = f"Embeddings Affinity Matrix Overview - {self.similarity_measure} distance in {self.embedder.__class__.__name__}_{self.reducer.__class__.__name__} latent space"
 
         self.clustervisualizer.plot_affinity_matrix(self.affinity_matrix,
                                               measure_type=self.similarity_measure,
@@ -1582,49 +1492,25 @@ class PatternAnalysis:
         else:
             labels = self.labels    
 
-        if isinstance(self.clusterer, GeomClustering):
-            # Plot trajectory centroids, as there are no embeddings.
-            p1 = self.clustervisualizer.plot_affinity_matrix_bokeh(
-                affinity_matrix=self.affinity_matrix, 
-                measure_type=self.similarity_measure)
-
-            self.trajectory_centroids = self._calculate_trajectory_centroids()
-            
-            if self.augmented_visualization:
-                p2 = self.clustervisualizer.plot_augmented_trajectories_embedding_bokeh(
-                    traj_embeddings=self.trajectory_centroids,
-                    gif_path_list=self.gif_path_list,
-                    labels=labels,
-                    metadata=metadata
-                )
-            else:
-                p2 = self.clustervisualizer.plot_trajectories_embedding_bokeh(
-                        traj_embeddings=self.trajectory_centroids,
-                        labels=labels,
-                        metadata=metadata
-                    )
-            
+        if self.augmented_visualization:
+            logger.info("plotting augmented")
+            p2 = self.clustervisualizer.plot_augmented_trajectories_embedding_bokeh(
+                traj_embeddings=self.reduced_embeddings,
+                gif_path_list=self.gif_path_list,
+                labels=labels,
+                metadata=metadata
+            )
         else:
-
-            if self.augmented_visualization:
-                logger.info("plotting augmented")
-                p2 = self.clustervisualizer.plot_augmented_trajectories_embedding_bokeh(
+            p2 = self.clustervisualizer.plot_trajectories_embedding_bokeh(
                     traj_embeddings=self.reduced_embeddings,
-                    gif_path_list=self.gif_path_list,
                     labels=labels,
                     metadata=metadata
                 )
-            else:
-                p2 = self.clustervisualizer.plot_trajectories_embedding_bokeh(
-                        traj_embeddings=self.reduced_embeddings,
-                        labels=labels,
-                        metadata=metadata
-                    )
-            
-            p2.xaxis.axis_label = "Reduced Dim. 1"
-            p2.yaxis.axis_label = "Reduced Dim. 2"
 
-            
+        p2.xaxis.axis_label = "Reduced Dim. 1"
+        p2.yaxis.axis_label = "Reduced Dim. 2"
+
+
         if plot_only_latent_space:
             show(p2)
         else:
@@ -1651,7 +1537,7 @@ class PatternAnalysis:
                                    colormap = None,
                                    dotsize: bool | int = 3):
         """
-        Plot the trajectory embeddings (or geometrical centroids) colored by their cluster assignments.
+        Plot the trajectory embeddings colored by their cluster assignments.
         
         This method visualizes the spatial distribution of trajectory embeddings, or centroids,
         with each point colored according to its cluster membership.
@@ -1673,21 +1559,13 @@ class PatternAnalysis:
         if custom_embeddings is not None:
             assert len(custom_embeddings) == len(self.raw_sequence_data), "custom embeddings need to be same len of PA class sample size"
 
-        if isinstance(self.clusterer, GeomClustering): ## Kind of deprecated, for now
-            self.trajectory_centroids = self._calculate_trajectory_centroids()  # Geometrical embedding (centroid)
-            traj_embeddings = self.trajectory_centroids
-            frame_to_maze = True
-            xlabel = "X coordinate"
-            ylabel = "Y coordinate"
-        else:
-            
-            traj_embeddings = self.reduced_embeddings if custom_embeddings is None else custom_embeddings
-            traj_embeddings = traj_embeddings if mask is None else traj_embeddings[mask]
-            if custom_labels is not None:
-                custom_labels = custom_labels if mask is None else custom_labels[mask]
-            frame_to_maze = False
-            xlabel = "Reduced Latent Dimension 1"
-            ylabel = "Reduced Latent Dimension 2"
+        traj_embeddings = self.reduced_embeddings if custom_embeddings is None else custom_embeddings
+        traj_embeddings = traj_embeddings if mask is None else traj_embeddings[mask]
+        if custom_labels is not None:
+            custom_labels = custom_labels if mask is None else custom_labels[mask]
+        frame_to_maze = False
+        xlabel = "Reduced Latent Dimension 1"
+        ylabel = "Reduced Latent Dimension 2"
 
         if validation_set == "all":
             n_of_validation_sets = len(self.validation_labels.columns)
@@ -2041,9 +1919,6 @@ class PatternAnalysis:
         The affinity matrix is a symmetric matrix where each element (i,j) represents
         the cosine similarity between embedding i and embedding j
 
-        While similar, is not the one used in `GeomClustering`, which uses
-        trajectory similarity measures (euclidean, DTW, etc.).
-
         Returns:
             np.ndarray: Affinity matrix of shape (n, n)
         """
@@ -2085,8 +1960,7 @@ class PatternAnalysis:
 
     def _calculate_cluster_centroids(self) -> np.ndarray:
         """
-        Calculate the centroids of all clusters. If using GeomClustering, it calculates them
-        from trajectories (reducing each to their geom. center), if not, from the reduced embeddings.
+        Calculate the centroids of all clusters from the reduced embeddings.
 
         Returns:
             np.ndarray: Array of centroids for each cluster, shape (n_clusters, 2)
@@ -2097,50 +1971,20 @@ class PatternAnalysis:
         cluster_sizes = []
         for label in np.unique(self.labels):
             if label != -1:  # Skip noise points
-                # Get all trajectories in this cluster
-                if isinstance(self.clusterer, GeomClustering):
-                    cluster_elements = [
-                        traj
-                        for traj, l in zip(self.trajectory_list, self.labels)
-                        if l == label
-                    ]
-                    # Calculate mean for each trajectory first [seq_length, 2] -> [,2]
-                    cluster_elements = np.array([np.mean(traj,axis=0) for traj in cluster_elements])
-
-                else:
-                    cluster_elements = np.array([
-                        embedding
-                        for embedding, l in zip(self.reduced_embeddings, self.labels)
-                        if l == label
-                    ])
+                cluster_elements = np.array([
+                    embedding
+                    for embedding, l in zip(self.reduced_embeddings, self.labels)
+                    if l == label
+                ])
 
                 cluster_sizes.append(len(cluster_elements))
-                
-                # Then calculate the mean of all trajectory means
+
                 cluster_centroid = np.mean(cluster_elements, axis=0)
                 cluster_centroids.append(cluster_centroid)
 
         logger.debug("Cluster centroids calculated")
         return np.array(cluster_centroids), np.array(cluster_sizes)
 
-    def _calculate_trajectory_centroids(self) -> list[np.ndarray]:
-        """
-        Calculate the geometrical centroids of all trajectories for dimensionality reduction and plotting.
-        Only used when self.clusterer == GeomClustering()
-
-        Returns:
-            List[np.ndarray]: List of centroids for each trajectory
-        """
-        logger.debug("Calculating trajectory centroids")
-        centroids = [np.mean(trajectory, axis=0) for trajectory in self.trajectory_list]
-        centroids_array = np.array(centroids)
-        if centroids_array.ndim == 1:
-            centroids_array = centroids_array.reshape(
-                -1, 2
-            )  # Reshape to (n_trajectories, 2)
-        logger.debug("Trajectory centroids calculated")
-        return centroids_array
-    
     def _get_feature_columns(self, feature_set:str):
     
         try:

@@ -99,13 +99,12 @@ spells them as negations.
 | `latent_space` | `256` | | `cluster_selection_epsilon` | `0.0` |
 | `n_epochs` | `500` | | `kmeans_k` | `6` |
 | `batch_size` | `32` | | `similarity_measure` | `euclidean` |
-| `validation_split` | `0.3` | | `geom_similarity` | `dtw` |
-| `dropout` | `0.1` | | `validation_method` | `Behavlets` |
-| `elementwise_masking` | `false` | | `disable_wandb` | `false` |
-| `use_best` | `true` | | `logging_comment` | `""` |
-| `max_samples` | `null` | | `test_dataset` | `false` |
-| `seed` | `null` | | `test_run` | `false` |
-| `using_hpc` | `false` | | `verbose` | `false` |
+| `validation_split` | `0.3` | | `validation_method` | `Behavlets` |
+| `dropout` | `0.1` | | `disable_wandb` | `false` |
+| `elementwise_masking` | `false` | | `logging_comment` | `""` |
+| `use_best` | `true` | | `test_dataset` | `false` |
+| `max_samples` | `null` | | `test_run` | `false` |
+| `seed` | `null` | | `verbose` | `false` |
 | `ignore_cache` | `false` | | `data_folder` / `hpc_folder` / `cache_folder` | repo-relative |
 
 </details>
@@ -197,7 +196,7 @@ For a single configuration, `train_model.py` takes the same settings as command-
 ```bash
 python train_model.py --embedder MLP --sequence-type pacman_attack \
     --feature-set Experimental2 --normalization global --latent-space 64 \
-    --n-epochs 100 --using-hpc --verbose
+    --n-epochs 100 --verbose
 ```
 
 It builds one `RunConfig` and calls the same `run_one()` the sweeps use — it does not

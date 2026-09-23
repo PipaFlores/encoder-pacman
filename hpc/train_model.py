@@ -195,14 +195,14 @@ def parse_args() -> argparse.Namespace:
         "--clusterer",
         type=str,
         default="hdbscan",
-        choices=["hdbscan", "kmeans", "geom"],
-        help="Clustering algorithm for latent space or trajectories.",
+        choices=["hdbscan", "kmeans"],
+        help="Clustering algorithm for the reduced latent space.",
     )
     parser.add_argument(
         "--min-cluster-size",
         type=int,
         default=20,
-        help="HDBSCAN min_cluster_size / geom clustering min cluster size.",
+        help="HDBSCAN min_cluster_size.",
     )
     parser.add_argument(
         "--min-samples",
@@ -228,12 +228,6 @@ def parse_args() -> argparse.Namespace:
         default="euclidean",
         choices=["euclidean", "cosine"],
         help="Similarity metric for the affinity matrix of reduced embeddings.",
-    )
-    parser.add_argument(
-        "--geom-similarity",
-        type=str,
-        default="dtw",
-        help="Similarity measure for geometric clustering (only if clusterer=geom).",
     )
 
     # Validation / logging ------------------------------------------------------
@@ -274,11 +268,6 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Cap the number of sequences fed to the pipeline. For fast debugging.",
-    )
-    parser.add_argument(
-        "--using-hpc",
-        action="store_true",
-        help="Enable HPC-friendly settings (mostly affects GeomClustering affinity).",
     )
     parser.add_argument(
         "--seed",

@@ -66,7 +66,6 @@ CONTEXT=20
 FILTER_BY_PILL="None"  # or "None"
 NORMALIZATION="global"
 EXTRA_FLAGS=(
-    --using-hpc
     --verbose
     # --elementwise-masking   # Always use for LSTM (or better said, for first 5 seconds where there is a LOT of infs)
 )
@@ -80,7 +79,6 @@ EXTRA_FLAGS=(
 #     --validation-split 0.3 \
 #     --normalization "global" \
 #     --logging-comment "TestDataset" \
-#     --using-hpc \
 #     --verbose
 
 for FEATURES in "${FEATURE_SETS[@]}"; do

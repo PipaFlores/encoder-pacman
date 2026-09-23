@@ -64,7 +64,6 @@ _HASH_EXCLUDE = frozenset(
         "disable_wandb",
         "logging_comment",
         "verbose",
-        "using_hpc",
     }
 )
 
@@ -121,7 +120,6 @@ class RunConfig:
     cluster_selection_epsilon: float = 0.0
     kmeans_k: int = 6
     similarity_measure: str = "euclidean"
-    geom_similarity: str = "dtw"
 
     # Validation / logging
     validation_method: Optional[str] = "Behavlets"
@@ -132,7 +130,6 @@ class RunConfig:
     test_dataset: bool = False
     test_run: bool = False
     max_samples: Optional[int] = None
-    using_hpc: bool = False
     seed: Optional[int] = None
     verbose: bool = False
 
@@ -346,15 +343,6 @@ def build_clusterer(config: RunConfig):
         from sklearn.cluster import KMeans
 
         return KMeans(n_clusters=config.kmeans_k, random_state=config.seed, n_init="auto")
-    if config.clusterer == "geom":
-        from src.analysis import GeomClustering
-
-        return GeomClustering(
-            similarity_measure=config.geom_similarity,
-            verbose=config.verbose,
-            min_cluster_size=config.min_cluster_size,
-            min_samples=config.min_samples,
-        )
     raise ValueError(f"Clusterer {config.clusterer} is not supported.")
 
 
@@ -386,7 +374,6 @@ def build_analysis(config: RunConfig) -> "PatternAnalysis":
         max_samples=config.max_samples,
         dropout=config.dropout,
         sort_distances=config.sort_ghost_distances,
-        using_hpc=config.using_hpc,
         random_seed=config.seed,
         verbose=config.verbose,
         wandb_logging=not config.disable_wandb,

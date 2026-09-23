@@ -1,6 +1,5 @@
 from typing import Tuple
 import pandas as pd
-import matplotlib.pyplot as plt
 import functools
 import time
 import numpy as np
@@ -92,18 +91,6 @@ def parse_unity_tilemap_(file_content):
             current_pos = None
 
     return positions
-
-
-def plot_ts(ts, title):
-    fig, axs = plt.subplots(ts.shape[1], sharex=True, gridspec_kw={"hspace": 0})
-    plt.suptitle(title, fontsize="30")
-
-    for i in range(ts.shape[1]):
-        axs[i].set_ylabel(f"{ts.columns[i]}", fontsize="8")
-        axs[i].set_xlabel("Step", fontsize="20")
-        axs[i].plot(ts.iloc[:, i])
-
-    plt.show()
 
 
 def pos_mirroring(df, return_quadrant=False):
@@ -263,6 +250,9 @@ def make_synth_data(n_per_category: int | tuple[int] = (1000, 1000),
               seed = 42):
     """
     Generate a synthetic 2D dataset with clustered categories and uniform noise.
+
+    Helper method, not called by the main pipeline: kept for ad-hoc use (e.g. sanity-checking
+    clustering or validation measures on data with a known ground truth).
 
     Args:
         n_per_category: Number of samples per category.

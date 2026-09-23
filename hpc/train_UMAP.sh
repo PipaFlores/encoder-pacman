@@ -50,7 +50,6 @@ UMAP_METRIC="euclidean"
 NORMALIZATION="global"
 LOGGING_COMMENT="testing Umap embedding"
 EXTRA_FLAGS=(
-    --using-hpc
     --verbose
     --elementwise-masking
 )

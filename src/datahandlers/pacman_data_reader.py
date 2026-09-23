@@ -513,6 +513,9 @@ class PacmanDataReader:
     max_samples: int | None = None,
 ) -> tuple[np.ndarray, list[str]]:
         """
+        Helper method, not called by the main pipeline: kept for ad-hoc use (e.g. notebooks)
+        on sequences sliced outside of `make_data`.
+
         Process pre-sliced raw_sequences similarly to `make_data`, focusing on
         normalization (global / sequence / sample) and feature filtering.
 
@@ -1865,82 +1868,6 @@ class PacmanDataReader:
                 cut_idx = int(0.95 * (len(lengths_sorted) - 1))
                 cut_len = lengths_sorted[cut_idx]
                 raw_sequences = [seq[:cut_len] if len(seq) > cut_len else seq for seq in raw_sequences]
-
-        return raw_sequences, gif_path_list
-
-    # FIXME: Notdone, only copypasted.
-    def slice_instant_event(
-            self,
-            event_col_name:str,
-            CONTEXT: int = 20,
-            make_gif: bool=False,
-            videos_directory= "../hpc/videos/",
-            gifs_directory = "./Results/subsequences/"):
-        """
-        Extracts and slices sequences of game states where event_col_name changes values.
-
-        Args:
-            CONTEXT (int, optional): Number of extra frames to include before and after each
-                attack mode interval. Default is 0 (no extra context).
-
-        Returns:
-            raw_sequences (list): List of DataFrames, each containing a sequence of game states
-                where Pac-Man is in attack mode for a given level.
-            gif_path_list (list): Empty list (reserved for future use, e.g., GIF generation).
-        """
-
-        raw_sequences = []
-        gif_path_list = []
-
-        if make_gif:
-            from src.visualization import GameReplayer
-            from tqdm import tqdm
-            replayer = GameReplayer()
-            logger.info("Using augmented visualization, checking for .gif or creating (can take long)")
-            level_iter = tqdm(self.level_df["level_id"].unique(), desc="Processing levels for GIFs")
-        else:
-            level_iter = self.level_df["level_id"].unique()
-
-        for level_id in level_iter:
-            gamestates = self._filter_gamestate_data(level_id=level_id)[0]
-            # Find indices where "pacman_attack" changes value
-            attack_col = gamestates["pacman_attack"].values
-            change_indices = np.where(attack_col[1:] != attack_col[:-1])[0] + 1  # +1 to get the index where the change happened [if changed to attack, the value at this state, and thereafter, will be 1]
-            
-            # Find (start_index, end_index) tuples where value switches from 1 to 0.
-            # If a 1 is not followed by a 0, use the last index in gamestates as end_index.
-            intervals = []
-            start_index = None
-
-            for idx, value in zip(change_indices, attack_col[change_indices]):
-                if value == 1:
-                    start_index = max(idx - CONTEXT , 0)
-                elif value == 0 and start_index is not None:
-                    end_index = min(idx + CONTEXT, len(gamestates) - 1)
-                    intervals.append((start_index, end_index))
-                    start_index = None
-
-            # If we end with a 1 and no following 0, close the interval at the last index
-            if start_index is not None:
-                end_index = gamestates.index[-1]
-                intervals.append((start_index, end_index))
-
-            for (start_index, end_index) in intervals:
-                raw_sequences.append(gamestates.iloc[start_index:end_index+1])
-                ## and create video_sequence
-                if make_gif:
-                    gif_path = os.path.join(gifs_directory, f"level_{level_id}_{start_index:06d}_{end_index:06d}.gif")
-                    gif_path_list.append(gif_path)
-                    if not os.path.exists(gif_path):
-                        replayer.extract_gamestate_subsequence_ffmpeg(
-                            video_path=os.path.join(videos_directory, f"{level_id}.mp4"),
-                            start_gamestate=start_index, 
-                            end_gamestate=end_index,
-                            output_path=gif_path)
-                        
-                    else:
-                        # print(f"sequence for level_id {level_id} already exists, skipping")
-                        pass
 
         return raw_sequences, gif_path_list
 

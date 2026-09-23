@@ -30,7 +30,6 @@ defaults:
   # distances, and elementwise masking keeps them out of the loss.
   elementwise_masking: true
   validation_method: Behavlets
-  using_hpc: true
   verbose: true
 
 grid:

@@ -3,7 +3,7 @@
 Covers the two cached steps added for issue #32: `build_data()` (wrapping
 `reader.make_data()`) and `calculate_validation_encodings()`. Uses the real
 "data" folder (like test_data_reader.py) with a small `max_samples` and
-`GeomClustering` so no deep model needs training, and points `cache_folder` at
+`embedder=None` so no deep model is built, and points `cache_folder` at
 a fresh `tmp_path` per test so caches never leak between tests or pollute the
 real `cache/` directory.
 """
@@ -15,7 +15,6 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from src.analysis import GeomClustering  # noqa: E402
 from src.analysis.pattern_analysis import PatternAnalysis  # noqa: E402
 
 SEQUENCE_TYPE = "first_5_seconds"
@@ -32,7 +31,8 @@ def make_pattern_analysis(
     return PatternAnalysis(
         data_folder="data",
         cache_folder=str(cache_folder),
-        clusterer=GeomClustering(),
+        embedder=None,
+        feature_set="Pacman",
         sequence_type=sequence_type,
         max_samples=max_samples,
         augmented_visualization=augmented_visualization,

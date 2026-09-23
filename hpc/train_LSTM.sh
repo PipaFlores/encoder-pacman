@@ -49,7 +49,6 @@ FILTER_BY_PILL="None"
 NORMALIZATION="global"
 LOGGING_COMMENT="ghost distances, 64 dimensions LSTM, pacman attack"
 EXTRA_FLAGS=(
-    --using-hpc
     --verbose
     --elementwise-masking
 )

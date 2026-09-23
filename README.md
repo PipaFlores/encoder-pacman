@@ -31,12 +31,10 @@ A configurable feature set (`all_features` (244 feats), `Pacman` coordinates, gh
 
 ### 2. Embedding (representation learning)
 
-Each sequence slice is reduced to a fixed-size latent vector, using one of two families of methods:
+Each sequence slice is reduced to a fixed-size latent vector, using one of two approaches:
 
 - **Deep autoencoders** (`src/models/`): all share a common [`BaseAutoencoder`](src/models/base.py) PyTorch Lightning interface trained on a masked reconstruction objective (so that padded/missing timesteps don't leak into the loss or the latent space). Supported architectures are `LSTM`, `MLP`, `Transformer` (a masked-imputation time-series transformer), and `VAE`/`TimeVAE`. Models are trained lazily, cached under `hpc/trained_models/`, and reused across runs unless `force_training=True`.
-- **Geometric similarity** ([`GeomClustering`](src/analysis/geom_clustering.py)): skips learned embeddings entirely and instead clusters trajectories directly by pairwise similarity (DTW or Euclidean) over their raw (x, y) coordinates. This acts as a non-learned baseline for the deep-embedding approach.
-
-- **Dim. red** Skips embedding phase entirely and instead just projects higher dimensionality of data into a lower dimensionality representation while preserving global/local structures, uses `UMAP` by default. This acts as another baseline alternative to for the deep-embedding approach.
+- **Dim. red** Skips embedding phase entirely and instead just projects higher dimensionality of data into a lower dimensionality representation while preserving global/local structures, uses `UMAP` by default. This acts as a non-learned baseline for the deep-embedding approach.
 
 ### 3. Dimensionality reduction
 
@@ -44,7 +42,7 @@ When the embedding/latent dimension is larger than 2D, embeddings are projected 
 
 ### 4. Clustering
 
-Reduced embeddings (or, for geometric clustering, the trajectories' affinity matrix) are clustered with `HDBSCAN` (default) or `KMeans`, grouping gameplay slices into behaviorally similar clusters.
+Reduced embeddings are clustered with `HDBSCAN` (default) or `KMeans`, grouping gameplay slices into behaviorally similar clusters.
 
 ### 5. Validation
 
@@ -67,7 +65,7 @@ Cluster quality is assessed against an independent, literature-grounded referenc
 
 ```
 src/
-├── analysis/         # PatternAnalysis pipeline, Behavlets, geometric clustering, latent-space metrics
+├── analysis/         # PatternAnalysis pipeline, Behavlets, latent-space metrics
 ├── datahandlers/      # PacmanDataReader, Trajectory, PyTorch Dataset/DataModule, feature normalization
 ├── models/            # Autoencoder architectures (LSTM, MLP, VAE, TimeVAE, transformer) sharing BaseAutoencoder
 ├── visualization/      # Game replay, trajectory, and cluster visualizers
@@ -98,7 +96,7 @@ conda env create -f environment.yml
 conda activate pacman_encoder
 ```
 
-The base environment covers geometric clustering, Behavlets, and the PyTorch autoencoders. `wandb` logging is optional and imported lazily — install it separately if you need it. `RQA` metrics additionally require `pyrqa`.
+The base environment covers Behavlets and the PyTorch autoencoders. `wandb` logging is optional and imported lazily — install it separately if you need it. `RQA` metrics additionally require `pyrqa`.
 
 ## Usage
 Minimal pipeline example:

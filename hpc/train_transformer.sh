@@ -48,7 +48,6 @@ CONTEXT=20
 FILTER_BY_PILL="None"  # or "None"
 NORMALIZATION="global"
 EXTRA_FLAGS=(
-    --using-hpc
     --verbose
     # --elementwise-masking
 )
@@ -64,7 +63,6 @@ LOGGING_COMMENT="ghost distances, 64 dim transformer"
 #     --validation-split 0.3 \
 #     --normalization "global" \
 #     --logging-comment "TestDataset" \
-#     --using-hpc \
 #     --verbose
 
 for FEATURES in "${FEATURE_SETS[@]}"; do

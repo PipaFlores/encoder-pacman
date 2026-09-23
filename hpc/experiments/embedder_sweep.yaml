@@ -36,7 +36,6 @@ defaults:
   clusterer: hdbscan
   reducer: umap
   validation_method: Behavlets
-  using_hpc: true
   verbose: true
 
 grid:

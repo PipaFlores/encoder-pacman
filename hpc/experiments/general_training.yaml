@@ -41,7 +41,6 @@ defaults:
   clusterer: hdbscan
   reducer: umap
   validation_method: Behavlets
-  using_hpc: true
   verbose: true
 
 # One line per configuration. `latent_space` is the knob this file exists to expose.

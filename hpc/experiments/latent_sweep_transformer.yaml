@@ -29,7 +29,6 @@ defaults:
   context: 20
   filter_by_pill: null
   validation_method: Behavlets
-  using_hpc: true
   verbose: true
 
 grid:
