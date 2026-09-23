@@ -18,6 +18,10 @@ BASELINE_DIR = BASE_DIR / "visualization/baseline_images"
 RESULT_DIR = BASE_DIR / "visualization/result_images"
 DIFF_DIR = BASE_DIR / "visualization/diff_images"
 TEST_LEVEL_ID = 602  # Example level ID for testing
+# Pinned explicitly (not taken from level_df order) so the baselines only change when the
+# rendering does. 606-612 are filtered out by the reader, so the aggregate range starts at 613.
+AGGREGATE_LEVEL_IDS = list(range(613, 663))
+HEATMAP_LEVEL_IDS = [600, 601, 602]
 
 
 @pytest.fixture(scope="module")
@@ -170,7 +174,7 @@ class TestGameVisualizer:
 
         fig, ax = plt.subplots(figsize=(6, 6))
         trajectories = [
-            reader.get_trajectory(level_id=level_id) for level_id in range(600, 650)
+            reader.get_trajectory(level_id=level_id) for level_id in AGGREGATE_LEVEL_IDS
         ]
         visualizer.plot_velocity_grid(trajectory=trajectories, ax=ax)
 
@@ -217,8 +221,7 @@ class TestGameVisualizer:
     def test_aggregated_heatmap(self, visualizer, reader, setup_dirs):
         """Test aggregated heatmap from multiple trajectories"""
         # Get multiple trajectories
-        level_ids = reader.level_df["level_id"].iloc[:3].tolist()
-        trajectories = [reader.get_trajectory(level_id=lid) for lid in level_ids]
+        trajectories = [reader.get_trajectory(level_id=lid) for lid in HEATMAP_LEVEL_IDS]
 
         fig, ax = plt.subplots(figsize=(6, 6))
         visualizer.plot_heatmap(trajectory=trajectories, ax=ax)

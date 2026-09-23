@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 from src.datahandlers import PacmanDataReader
 from src.analysis import BehavletsEncoding, Behavlets
@@ -33,14 +34,22 @@ class TestBehavlets:
     def test_calculation(self):
         Beh_encodings = BehavletsEncoding(data_folder="data")
 
+        summary_list, instance_list = [], []
         for level_id in range(400, 800):
             try:
-                Beh_encodings.calculate_behavlets_level(level_id=level_id)
+                summary, instances = Beh_encodings.calculate_behavlets_level(
+                    level_id=level_id, return_instance_details=True
+                )
             except ValueError:
                 continue
+            summary_list.append(summary)
+            instance_list.append(instances)
 
-        assert Beh_encodings.summary_results.shape[0] >= 0
-        assert Beh_encodings.instance_details.shape[0] >= 0
+        summary_results = pd.concat(summary_list, ignore_index=True)
+        instance_details = pd.concat(instance_list, ignore_index=True)
+
+        assert summary_results.shape[0] > 0
+        assert instance_details.shape[0] > 0
 
         ## TODO : Include tests for specific Behavlets
 
@@ -53,20 +62,20 @@ class TestBehavlets:
         ]
         # Aggression 1 - Hunt close to ghost home
         assert (
-            Beh_encodings.summary_results[
-                Beh_encodings.summary_results["Aggression1_value"] > 0
+            summary_results[
+                summary_results["Aggression1_value"] > 0
             ].shape[0]
             >= 0
         )
         assert (
-            Beh_encodings.instance_details[
-                Beh_encodings.instance_details["behavlet_name"] == "Aggression1"
+            instance_details[
+                instance_details["behavlet_name"] == "Aggression1"
             ].shape[0]
             >= 0
         )
 
-        Aggression1_instance_subset = Beh_encodings.instance_details.loc[
-            Beh_encodings.instance_details["behavlet_name"] == "Aggression1",
+        Aggression1_instance_subset = instance_details.loc[
+            instance_details["behavlet_name"] == "Aggression1",
             Common_attributes + ["value_per_instance"],
         ]
 
@@ -80,20 +89,20 @@ class TestBehavlets:
         # Aggression 3 - Ghost kills
 
         assert (
-            Beh_encodings.summary_results[
-                Beh_encodings.summary_results["Aggression3_value"] > 0
+            summary_results[
+                summary_results["Aggression3_value"] > 0
             ].shape[0]
             >= 0
         )
         assert (
-            Beh_encodings.instance_details[
-                Beh_encodings.instance_details["behavlet_name"] == "Aggression3"
+            instance_details[
+                instance_details["behavlet_name"] == "Aggression3"
             ].shape[0]
             >= 0
         )
 
-        Aggression_3_instance_subset = Beh_encodings.instance_details.loc[
-            Beh_encodings.instance_details["behavlet_name"] == "Aggression3",
+        Aggression_3_instance_subset = instance_details.loc[
+            instance_details["behavlet_name"] == "Aggression3",
             Common_attributes + ["instant_position", "instant_gamestep"],
         ]
 
@@ -107,20 +116,20 @@ class TestBehavlets:
         # Aggression 4 - Hunt even after powerpill finishes
 
         assert (
-            Beh_encodings.summary_results[
-                Beh_encodings.summary_results["Aggression4_value"] > 0
+            summary_results[
+                summary_results["Aggression4_value"] > 0
             ].shape[0]
             >= 0
         )
         assert (
-            Beh_encodings.instance_details[
-                Beh_encodings.instance_details["behavlet_name"] == "Aggression4"
+            instance_details[
+                instance_details["behavlet_name"] == "Aggression4"
             ].shape[0]
             >= 0
         )
 
-        Aggression4_instance_subset = Beh_encodings.instance_details.loc[
-            Beh_encodings.instance_details["behavlet_name"] == "Aggression4",
+        Aggression4_instance_subset = instance_details.loc[
+            instance_details["behavlet_name"] == "Aggression4",
             Common_attributes + ["value_per_pill", "died"],
         ]
 
@@ -134,26 +143,26 @@ class TestBehavlets:
         # Aggression 6 - Chase Ghosts or Collect Pellets
 
         assert (
-            Beh_encodings.summary_results[
-                Beh_encodings.summary_results["Aggression6_value"] > 0
+            summary_results[
+                summary_results["Aggression6_value"] > 0
             ].shape[0]
             >= 0
         )
         assert (
-            Beh_encodings.instance_details[
-                Beh_encodings.instance_details["behavlet_name"] == "Aggression6"
+            instance_details[
+                instance_details["behavlet_name"] == "Aggression6"
             ].shape[0]
             >= 0
         )
 
         if Beh_encodings.behavlets["Aggression6"].kwargs["CONTEXT_LENGTH"] is not None:
-            Aggression6_instance_subset = Beh_encodings.instance_details.loc[
-                Beh_encodings.instance_details["behavlet_name"] == "Aggression6",
+            Aggression6_instance_subset = instance_details.loc[
+                instance_details["behavlet_name"] == "Aggression6",
                 Common_attributes + ["value_per_pill", "original_gamesteps"],
             ]
         else:
-            Aggression6_instance_subset = Beh_encodings.instance_details.loc[
-                Beh_encodings.instance_details["behavlet_name"] == "Aggression6",
+            Aggression6_instance_subset = instance_details.loc[
+                instance_details["behavlet_name"] == "Aggression6",
                 Common_attributes + ["value_per_pill"],
             ]
 
@@ -167,20 +176,20 @@ class TestBehavlets:
         # Caution 1 - Times Trapped by Ghosts
 
         assert (
-            Beh_encodings.summary_results[
-                Beh_encodings.summary_results["Caution1_value"] > 0
+            summary_results[
+                summary_results["Caution1_value"] > 0
             ].shape[0]
             >= 0
         )
         assert (
-            Beh_encodings.instance_details[
-                Beh_encodings.instance_details["behavlet_name"] == "Caution1"
+            instance_details[
+                instance_details["behavlet_name"] == "Caution1"
             ].shape[0]
             >= 0
         )
 
-        Aggression6_instance_subset = Beh_encodings.instance_details.loc[
-            Beh_encodings.instance_details["behavlet_name"] == "Caution1",
+        Aggression6_instance_subset = instance_details.loc[
+            instance_details["behavlet_name"] == "Caution1",
             Common_attributes + ["value_per_instance", "died"],
         ]
 
@@ -190,6 +199,21 @@ class TestBehavlets:
         assert empty_rows.empty, (
             f"Found {len(empty_rows)} rows with NaN values:\n{empty_rows}"
         )
+
+    def test_encoding_getters_on_returned_results(self):
+        Beh_encodings = BehavletsEncoding(data_folder="data")
+        summary_results, instance_details = Beh_encodings.calculate_behavlets_level(
+            level_id=603, return_instance_details=True
+        )
+
+        vector = Beh_encodings.get_vector_encodings(summary_results)
+        assert list(vector.columns) == [f"{name}_value" for name in Behavlets.NAMES]
+        assert vector["Aggression1_value"].iloc[0] == 21
+
+        trajectory = Beh_encodings.get_trajectories(instance_details, "Aggression1")
+        assert trajectory.metadata["behavlet"] == "Aggression1"
+        assert trajectory.metadata["gamesteps"] == (461349, 461370)
+        assert trajectory.timevalues is not None
 
     def test_Aggression1(self, reader):
         Beh = Behavlets(name="Aggression1")
@@ -293,9 +317,10 @@ class TestBehavlets:
             GHOST_DISTANCE_THRESHOLD=15,  # Larger distance threshold
         )
 
+        # Expected values use the precomputed A* ghost distances (since 5ebe1f2), not Manhattan.
         assert results_custom.instances == 2
-        assert results_custom.value == 31
-        assert results_custom.value_per_pill == [0, 24, 0, 7]
+        assert results_custom.value == 10
+        assert results_custom.value_per_pill == [0, 5, 0, 5]
 
         # Test with CONTEXT_LENGTH
         Beh_context = Behavlets(name="Aggression4", CONTEXT_LENGTH=15)
@@ -313,8 +338,9 @@ class TestBehavlets:
         )
 
         assert Beh == results
-        assert Beh.value == 0.19021739130434784
-        assert Beh.value_per_pill == [0, 0.13043478260869565, 0, 0.25]
+        # Expected values use the precomputed A* ghost distances (since 5ebe1f2), not Manhattan.
+        assert Beh.value == pytest.approx(0.06123188405797102)
+        assert Beh.value_per_pill == pytest.approx([0, 0.0391304347826087, 0, 0.08333333333333333])
         assert Beh.gamesteps == [None, (458403, 458633), None, (457761, 457881)]
 
         # Test additional attributes are set correctly
@@ -330,7 +356,7 @@ class TestBehavlets:
         results_no_norm = Beh_no_norm.calculate(gamestates=gamestates)
 
         assert results_no_norm.value == sum(results_no_norm.value_per_pill)
-        assert results_no_norm.value == 60
+        assert results_no_norm.value == 19
 
         # Test with ONLY_CLOSEST_GHOST=True
         Beh_all_ghosts = Behavlets(
@@ -339,7 +365,7 @@ class TestBehavlets:
         results_all_ghosts = Beh_all_ghosts.calculate(gamestates=gamestates)
 
         assert results_all_ghosts.instances == 2
-        assert results_all_ghosts.value == 60
+        assert results_all_ghosts.value == 19
 
         # Test with CONTEXT_LENGTH and normalization interaction
         Beh_context_norm = Behavlets(
@@ -363,8 +389,9 @@ class TestBehavlets:
         )
 
         assert results.value == results.instances
+        # Expected values use the precomputed A* ghost distances (since 5ebe1f2), not Manhattan.
         assert results.value == 1
-        assert results.value_per_instance == [6]
+        assert results.value_per_instance == [3]
 
         assert results.died == [True]
-        assert results.gamesteps == [(309885, 309905)]
+        assert results.gamesteps == [(309902, 309904)]

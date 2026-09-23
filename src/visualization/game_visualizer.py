@@ -100,6 +100,7 @@ class GameVisualizer(BaseVisualizer):
             raise ValueError("Either level_id or trajectory must be provided")
 
         if isinstance(trajectory, list):
+            self.analyzer._reset_grids()  # In case previous aggregate calculations were performed
             for traj in trajectory:
                 self.analyzer._initialize_idx_grid()
                 self.analyzer.calculate_recurrence_grid(

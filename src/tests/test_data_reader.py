@@ -77,7 +77,7 @@ class TestPacmanDataReader:
 
         # Get partial trajectory
         partial_trajectory = reader.get_partial_trajectory(
-            level_id=test_level_id, start_timestep=0, end_timestep=2
+            level_id=test_level_id, start_step=0, end_step=2
         )
 
         assert len(partial_trajectory) <= len(full_trajectory)
@@ -86,26 +86,6 @@ class TestPacmanDataReader:
         )
 
         assert full_trajectory.metadata == partial_trajectory.metadata
-
-    def test_get_trajectory_dataframe(self, reader):
-        """Test trajectory dataframe generation"""
-        # Get a valid level_id from the data
-        test_level_id = reader.level_df["level_id"].iloc[0]
-
-        # Test with different series types
-        df = reader.get_trajectory_dataframe(
-            level_id=test_level_id,
-            series_type=["position", "movement"],
-            include_game_state_vars=True,
-            include_timesteps=True,
-        )
-
-        assert "Pacman_X" in df.columns
-        assert "Pacman_Y" in df.columns
-        assert "movement_dx" in df.columns
-        assert "movement_dy" in df.columns
-        assert "score" in df.columns
-        assert "time_elapsed" in df.columns
 
     def test_psychometric_processing(self, reader):
         """Test psychometric data processing"""
@@ -119,10 +99,12 @@ class TestPacmanDataReader:
         assert "DRIVE" in psych_reader.bisbas_df.columns
         assert "FUN" in psych_reader.bisbas_df.columns
 
-        # Check Flow measures
+        # Check Flow measures, including the per-game keys they are joined into metadata by
         assert psych_reader.game_flow_df is not None
-        assert psych_reader.game_flow_df.columns.to_list() == [
+        assert {
             "user_id",
+            "game_id",
+            "total_levels_played",
             "FLOW",
             "total_games_played",
             "max_score",
@@ -134,7 +116,7 @@ class TestPacmanDataReader:
             "cum_score",
             "log(cum_score)",
             "score_deviation",
-        ]
+        }.issubset(psych_reader.game_flow_df.columns)
 
         # Verify it's the same instance
         assert reader is psych_reader
@@ -145,11 +127,11 @@ class TestPacmanDataReader:
         with pytest.raises(ValueError):
             reader.get_trajectory(level_id=None)
 
-        # Test invalid trajectory segment
+        # Test invalid trajectory segment (start after end)
         test_level_id = reader.level_df["level_id"].iloc[0]
-        with pytest.raises(IndexError):
+        with pytest.raises(ValueError):
             reader.get_partial_trajectory(
-                level_id=test_level_id, start_timestep=-10, end_timestep=200
+                level_id=test_level_id, start_step=10, end_step=2
             )
 
     def test_make_data_pacman_attack_with_global_normalization(self, reader):

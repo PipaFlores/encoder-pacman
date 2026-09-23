@@ -1345,11 +1345,21 @@ class Behavlets:
         state: NamedTuple,
         use_precalculated:bool = True
     ) -> list[float]:
-        """Get Manhattan distance to ghosts from pacman position.
-        inputs a fixed-length list of ghost positions and returns a list of distances to ghosts.
-        If ghost position is None, the distance is set to math.inf.
-        This is used to avoid calculating distance to ghosts that are not alive or in house.
-        FIXME this is precalculated now based on Astar algorithm. 
+        """Get the distance from Pacman to each of the 4 ghosts.
+
+        With `use_precalculated=True` (default), returns the A* maze-path distances
+        precomputed in preprocessing (`state.Ghost{i}_distance`, see
+        `PacmanDataReader._calculate_astar_distances`). `pacman_pos` and `ghost_positions`
+        are not used in this mode, so the `only_alive` filtering of `_get_ghost_pos` has no
+        effect here. It is not needed either: ghosts in the house have no path to Pacman and
+        get math.inf, and in the data ghost states 0/4 only occur inside the house.
+
+        With `use_precalculated=False`, returns the Manhattan distance between `pacman_pos`
+        and each entry of the fixed-length `ghost_positions` list, with math.inf where the
+        position is None (ghost not alive or in house).
+
+        Note that A* distances are never shorter than Manhattan ones, so distance thresholds
+        are stricter in the default mode (behavlet values changed accordingly in 5ebe1f2).
         """
         if use_precalculated == False:
             distance_to_ghosts = [math.inf] * 4
