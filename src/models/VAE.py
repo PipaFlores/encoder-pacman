@@ -128,9 +128,13 @@ class VanillaVAE(nn.Module):
                                                ),
                             nn.BatchNorm1d(hidden_dims[-1]),
                             nn.LeakyReLU(),
+                            # No output activation: the reconstruction is scored against the
+                            # (mostly z-scored) input by MSE, so it has to be able to reach any
+                            # real value. The reference implementation ends in Tanh because it
+                            # reconstructs images normalized to [-1, 1]; here that would cap the
+                            # output below the ~28% of pacman_attack values that exceed +-1.
                             nn.Conv1d(hidden_dims[-1], out_channels= self.input_dim,
-                                      kernel_size= 3, padding= 1),
-                            nn.Tanh())
+                                      kernel_size= 3, padding= 1))
 
         # self.final_layer = nn.Sequential(
         #     nn.Linear(hidden_dims[-1],
@@ -168,10 +172,9 @@ class VanillaVAE(nn.Module):
 
     def decode(self, z: Tensor) -> Tensor:
         """
-        Maps the given latent codes
-        onto the image space.
-        :param z: (Tensor) [B x D]
-        :return: (Tensor) [B x C x H x W]
+        Maps the given latent codes back onto the input sequence space.
+        :param z: (Tensor) [batch, latent_dim]
+        :return: (Tensor) [batch, seq_len, features]
         """
         result = self.decoder_input(z)
         result = result.view(-1, self.encoder[-1][0].out_channels, self.seq_len)

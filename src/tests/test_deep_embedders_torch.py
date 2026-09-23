@@ -165,6 +165,27 @@ class TestVanillaVAE:
         assert len(trainer.train_loss_list) == 1
         assert math.isfinite(trainer.train_loss_list[-1])
 
+    def test_decoder_output_is_unbounded(self):
+        """The reconstruction must be able to reach any real value, since global
+        normalization z-scores most features and ~28% of pacman_attack values exceed +-1.
+        Pinning the last conv to a constant 3.0 makes the check exact: with a bounded
+        output activation (the image-VAE Tanh this used to end in) it would come out at 0.995."""
+        model = VanillaVAE(
+            input_dim=N_FEATURES,
+            seq_len=SEQ_LEN,
+            latent_dim=LATENT_DIM,
+            hidden_dims=[8, 16],
+        )
+        last_layer = model.final_layer[-1]
+        assert isinstance(last_layer, torch.nn.Conv1d)
+
+        with torch.no_grad():
+            last_layer.weight.zero_()
+            last_layer.bias.fill_(3.0)
+            recon = model.decode(torch.randn(N_SAMPLES, LATENT_DIM))
+
+        assert torch.allclose(recon, torch.full_like(recon, 3.0))
+
 
 class TestTimeVAE:
     @pytest.mark.parametrize("pooling", [False, True])
