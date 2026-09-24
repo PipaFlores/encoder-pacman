@@ -1,0 +1,37 @@
+name: general_training_small
+description: "small general training -- every embedder, reduced epochs/samples"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72
+  gres: "gpu:gh200:1"
+  time: "01:00:00"
+  # array_throttle: 2       # only if QOS limits running jobs (see step 3)
+
+defaults:
+  sequence_type: pacman_attack
+  feature_set: Experimental2
+  normalization: global
+  n_epochs: 10
+  max_samples: 2000
+  batch_size: 32
+  validation_split: 0.3
+  dropout: 0.1
+  context: 20
+  filter_by_pill: null
+  elementwise_masking: true
+  clusterer: hdbscan
+  reducer: umap
+  validation_method: Behavlets
+  verbose: true
+
+include:
+  - {embedder: LSTM,        latent_space: 128}
+  - {embedder: MLP,         latent_space: 64}
+  - {embedder: Transformer, latent_space: 64}
+  - {embedder: VAE,         latent_space: 64}
+  - {embedder: TimeVAE,     latent_space: 64}
+  - {embedder: null}

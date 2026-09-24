@@ -25,13 +25,13 @@ slurm:
   # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
   # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
   gres: "gpu:gh200:1"         # 1 GPU per node
-  time: "04:00:00"
+  time: "02:00:00"
 
 defaults:
   sequence_type: pacman_attack
   feature_set: Experimental2
   normalization: global
-  n_epochs: 100
+  n_epochs: 200
   batch_size: 32
   validation_split: 0.3
   dropout: 0.1
