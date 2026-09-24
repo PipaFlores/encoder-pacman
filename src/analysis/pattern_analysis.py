@@ -458,7 +458,8 @@ class PatternAnalysis:
         self.labels = self.clusterer.fit_predict(self.reduced_embeddings)
 
         self.labels = self._sort_labels()
-        logger.info(f"Clustering complete. Found {len(set(self.labels)) - 1} clusters")
+        n_clusters = len(set(self.labels) - {-1})  # -1 is HDBSCAN noise, not a cluster
+        logger.info(f"Clustering complete. Found {n_clusters} clusters")
 
         self.cluster_sizes = None
         self.cluster_centroids = None
@@ -869,7 +870,7 @@ class PatternAnalysis:
                         batch_padding_masks = batch["padding_mask"].to(device)
                         batch_embeddings = self.embedder.encode(batch_data, batch_padding_masks, pooling=True)
                     else:
-                        TypeError(f"Unknown pytorch model ({self.embedder})")
+                        raise TypeError(f"Unknown pytorch model ({self.embedder})")
                     
                     all_embeddings.append(batch_embeddings.cpu())
 
