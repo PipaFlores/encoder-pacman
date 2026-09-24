@@ -132,9 +132,8 @@ class GameVisualizer(BaseVisualizer):
             show_plot = False
 
         if self.darkmode:
-            # Create a copy of the YlOrRd colormap and set the color for 0 to black
-            cmap = plt.get_cmap("YlOrRd").copy()
-            cmap.set_under("black")
+            # Copy of the YlOrRd colormap with the color for 0 (under vmin) set to black
+            cmap = plt.get_cmap("YlOrRd").with_extremes(under="black")
 
         # Find the minimum nonzero value in the grid (if any)
         grid = self.analyzer.recurrence_count_grid

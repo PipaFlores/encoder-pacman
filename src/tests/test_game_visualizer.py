@@ -47,15 +47,32 @@ def setup_dirs():
     return
 
 
-def compare_images(baseline_path, result_path, diff_path, tol=10):
+# Block size and tolerance for compare_images. Both images are averaged over BLOCK x BLOCK
+# pixel blocks before comparing, so anti-aliasing and one-pixel text/line shifts (e.g. from a
+# matplotlib upgrade) mostly average out, while changes to what is plotted do not. TOL is the
+# mean absolute difference (0-255 grey levels) between the block-averaged images. Measured
+# when it was set: matplotlib 3.10 -> 3.11 drift scored 0.13-0.59 on all plots but
+# multiple_trajectories (2.46); real changes (a different game, the aggregated-heatmap state
+# leak) scored 1.14-9.8.
+BLOCK = 8
+TOL = 0.8
+
+
+def _block_mean(array, block):
+    h, w = (array.shape[0] // block) * block, (array.shape[1] // block) * block
+    return array[:h, :w].reshape(h // block, block, w // block, block, -1).mean(axis=(1, 3))
+
+
+def compare_images(baseline_path, result_path, diff_path, tol=TOL, block=BLOCK):
     """
-    Compare two images by displaying them side by side for manual inspection.
+    Compare a result image against its baseline, saving a side-by-side comparison on failure.
 
     Args:
         baseline_path: Path to baseline image
         result_path: Path to result image
         diff_path: Path to save comparison image
-        tol: Tolerance for pixel differences
+        tol: Maximum mean absolute difference between the block-averaged images
+        block: Size of the pixel blocks averaged before comparing
 
     Returns:
         bool: True if images match within tolerance or baseline doesn't exist, False otherwise
@@ -79,16 +96,15 @@ def compare_images(baseline_path, result_path, diff_path, tol=10):
         print(f"Image size mismatch: {baseline.size} vs {result.size}")
         return False
 
-    # Convert images to numpy arrays for comparison
-    baseline_array = np.array(baseline)
-    result_array = np.array(result)
-
-    # Calculate difference
-    diff_array = np.abs(baseline_array - result_array)
-    max_diff = np.max(diff_array)
+    # Signed arithmetic: subtracting the uint8 arrays directly wraps around (0 - 1 -> 255).
+    baseline_array = np.asarray(baseline, dtype=np.float64)
+    result_array = np.asarray(result, dtype=np.float64)
+    mean_diff = np.abs(
+        _block_mean(baseline_array, block) - _block_mean(result_array, block)
+    ).mean()
 
     # Return True if differences are within tolerance
-    if max_diff <= tol:
+    if mean_diff <= tol:
         return True
     else:
         # Create side-by-side comparison for manual inspection
@@ -125,7 +141,7 @@ def compare_images(baseline_path, result_path, diff_path, tol=10):
         comparison.save(diff_path)
         print(f"Saved side-by-side comparison to: {diff_path}")
 
-        print(f"Images differ by {max_diff} (tolerance: {tol})")
+        print(f"Images differ by {mean_diff:.3f} (tolerance: {tol})")
         return False
 
 

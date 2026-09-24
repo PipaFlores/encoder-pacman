@@ -322,8 +322,9 @@ class ClusterVisualizer(BaseVisualizer):
             cmap = plt.cm.viridis
         else:
             cmap = self.cmap
-        
-        cmap.set_under("gray")
+
+        # with_extremes returns a copy, so the shared/global colormap is not modified
+        cmap = plt.get_cmap(cmap).with_extremes(under="gray")
 
         if use_red_for_single_cluster:
             # Create custom colors for the special case
