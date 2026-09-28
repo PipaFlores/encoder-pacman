@@ -1,0 +1,70 @@
+# KL-weight sweep for the VAE family.
+#
+# `kld_weight` was a constructor default until now, so every VAE/TimeVAE run in the project
+# so far used 0.00025 without it ever being an experimental variable. This file makes it one.
+#
+# What it measures: the KL term pulls the aggregate posterior q(z) = (1/N) sum_i q(z|x_i)
+# toward a single unimodal N(0, I), while reconstruction pushes the per-sample means apart.
+# kld_weight is the dial between "one blob" and "separated modes", so it directly controls
+# how much latent structure survives for the reducer and clusterer to find.
+#
+# Reading the ladder below: the two loss terms are reduced differently (reconstruction is a
+# mean *per element*, the KL a sum over latent dims averaged *per sample* - see
+# src/models/loss.py), so the effective beta scales with seq_len * n_features. For this
+# file's configuration that is pacman_attack's seq_len of 247 x Experimental2's 5 features
+# ~= 1235 elements, which puts unit-variance ELBO at 2 / 1235 ~= 0.0016. The values are
+# spaced around that, not around 1.
+#
+# Changing `sequence_type` or `feature_set` changes seq_len * n_features and therefore what
+# each number means - the ladder would need recomputing, not just reusing.
+#
+#   python run_experiment.py --config experiments/kld_sweep.yaml --dry-run
+#   ./submit_experiment.sh experiments/kld_sweep.yaml
+name: kld_sweep
+description: "KL weight sweep -- VAE and TimeVAE, latent 64"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "02:00:00"
+
+# Matches general_training.yaml everywhere except kld_weight, so a point of this sweep is
+# directly comparable to that run's VAE/TimeVAE lines.
+defaults:
+  sequence_type: pacman_attack
+  feature_set: Experimental2
+  normalization: global
+  # Held fixed across the sweep: BIC and cluster counts are not comparable between latent
+  # sizes, and comparing KL weights is the whole point of the file.
+  latent_space: 64
+  n_epochs: 200
+  batch_size: 32
+  validation_split: 0.3
+  dropout: 0.1
+  context: 20
+  filter_by_pill: null
+  elementwise_masking: true
+  clusterer: hdbscan
+  reducer: umap
+  validation_method: Behavlets
+  verbose: true
+
+grid:
+  # Only the VAE family has a KL term. Adding LSTM/MLP/Transformer here would run each of
+  # them five times over an argument they ignore, producing identical results under five
+  # different config hashes.
+  embedder: [VAE, TimeVAE]
+  # 0       - no KL at all: a deterministic autoencoder, the reference point for how much
+  #           structure the reconstruction objective finds on its own.
+  # 0.00025 - the former hardcoded default, i.e. every VAE result in the project to date.
+  # 0.0016  - unit-variance ELBO for this sequence_type/feature_set (2 / (247 * 5)).
+  # 0.008   - ~5x ELBO.
+  # 0.04    - ~25x ELBO; expected to collapse the latent, which is worth showing rather
+  #           than assuming.
+  kld_weight: [0.0, 0.00025, 0.0016, 0.008, 0.04]

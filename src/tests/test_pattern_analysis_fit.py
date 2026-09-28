@@ -8,6 +8,9 @@ reduce -> cluster) across the main variations of the analysis pipeline:
 - every supported embedder (LSTM, MLP, Transformer, VAE, TimeVAE);
 - the no-deep-embedder configuration, where the reducer embeds the flat raw
   data itself instead of a trained model's latent space;
+- the PCA baseline, in both of its forms - PCA as the embedder (the fully linear
+  reference the deep embedders are argued against) and PCA as the reducer behind
+  a deep embedder;
 - "Behavlets" validation on top of the clustering.
 
 Uses the real "data" folder (like test_data_reader.py /
@@ -36,6 +39,7 @@ import pytest
 torch = pytest.importorskip("torch")
 
 from hdbscan import HDBSCAN  # noqa: E402
+from sklearn.decomposition import PCA  # noqa: E402
 
 from src.analysis.pattern_analysis import PatternAnalysis  # noqa: E402
 from src.datahandlers import PacmanDataReader  # noqa: E402
@@ -107,6 +111,7 @@ def make_pattern_analysis(
     embedder="LSTM",
     latent_dimension=LATENT_DIM,
     validation_method=None,
+    reducer=None,
 ):
     return PatternAnalysis(
         reader=reader,
@@ -115,6 +120,8 @@ def make_pattern_analysis(
         # previous test trained (see _check_model_training_status) instead of training its own.
         hpc_folder=str(tmp_path / "hpc"),
         embedder=embedder,
+        # None leaves PatternAnalysis to build its own default UMAP, as in a real run.
+        reducer=reducer,
         clusterer=HDBSCAN(min_cluster_size=5),
         sequence_type=sequence_type,
         feature_set=FEATURE_SET,
@@ -192,6 +199,114 @@ def test_fit_without_deep_embedder(reader, cache_folder, tmp_path):
     assert pa.reduced_embeddings is pa.embeddings
 
     assert pa.labels.shape == (MAX_SAMPLES,)
+
+
+def test_fit_with_pca_baseline(reader, cache_folder, tmp_path):
+    """The linear baseline: no deep embedder, PCA doing the embedding from flat raw data.
+
+    This is the reference the deep embedders are compared against, so what matters here is
+    that it produces a usable, *fitted* PCA - the explained-variance ratios are the number
+    the comparison actually reports, and they only exist if fit_transform ran on the raw
+    sequences rather than on a latent space.
+    """
+    pa = make_pattern_analysis(
+        reader, cache_folder, tmp_path, embedder=None, reducer=PCA(n_components=REDUCED_DIM),
+    )
+
+    pa.fit()
+
+    assert pa.embedder is None
+    assert len(pa.raw_sequence_data) == MAX_SAMPLES
+
+    # As in test_fit_without_deep_embedder: the reducer is the embedder, so it already
+    # outputs REDUCED_DIM and the separate reduction step is skipped.
+    assert pa.embeddings.shape == (MAX_SAMPLES, REDUCED_DIM)
+    assert np.isfinite(pa.embeddings).all()
+    assert pa.reduced_embeddings is pa.embeddings
+    assert pa.labels.shape == (MAX_SAMPLES,)
+
+    # PCA was fitted on the flattened raw sequences, not on an embedding
+    n_timesteps, n_features = pa.processed_sequence_data.shape[1:]
+    assert pa.reducer.components_.shape == (REDUCED_DIM, n_timesteps * n_features)
+
+    variance = pa.reducer.explained_variance_ratio_
+    assert variance.shape == (REDUCED_DIM,)
+    assert np.isfinite(variance).all()
+    assert (variance > 0).all()
+    assert variance.sum() <= 1.0 + 1e-6
+    # PCA orders components by decreasing variance; a baseline that reported them
+    # otherwise would misstate how much structure the linear model captures.
+    assert variance[0] >= variance[1]
+
+
+def test_pca_baseline_is_deterministic(reader, cache_folder, tmp_path):
+    """Two runs of the linear baseline give the same embedding.
+
+    Unlike UMAP, PCA has a closed-form solution, so the baseline carries no run-to-run
+    variance of its own - a difference between it and a deep embedder is a difference in
+    the model, not in the seed. Signs are free in an eigendecomposition, so compare
+    absolute values.
+    """
+    embeddings = []
+    for i in range(2):
+        pa = make_pattern_analysis(
+            reader, cache_folder, tmp_path / f"run{i}", embedder=None,
+            reducer=PCA(n_components=REDUCED_DIM),
+        )
+        pa.fit()
+        embeddings.append(pa.embeddings)
+
+    assert np.allclose(np.abs(embeddings[0]), np.abs(embeddings[1]))
+
+
+def test_fit_with_pca_reducer_after_deep_embedder(reader, cache_folder, tmp_path):
+    """PCA as the reducer in the standard flow: deep embedder -> PCA -> HDBSCAN.
+
+    The reducer is swappable independently of the embedder, so the deep latent space can
+    be taken down to 2 dimensions linearly - which separates "the embedder found nonlinear
+    structure" from "UMAP found it during reduction".
+    """
+    pa = make_pattern_analysis(
+        reader, cache_folder, tmp_path, embedder="MLP", reducer=PCA(n_components=REDUCED_DIM),
+    )
+
+    pa.fit()
+
+    assert_pipeline_outputs(pa, LATENT_DIM)
+    # Reduction ran on the latent space this time, not on the raw sequences
+    assert pa.reducer.components_.shape == (REDUCED_DIM, LATENT_DIM)
+
+
+def test_kld_weight_separates_vae_checkpoints(reader, cache_folder, tmp_path):
+    """A sweep over kld_weight must not have every point overwrite one checkpoint.
+
+    The stem encodes only a few fields (see CLAUDE.md), so kld_weight is appended for the
+    VAE family when it differs from the default - which keeps checkpoints trained at the
+    default under their existing names while making a sweep's points distinguishable.
+    Checked directly on _model_basename rather than through fit(), so no training runs.
+    """
+    from src.analysis.pattern_analysis import DEFAULT_KLD_WEIGHT
+    from src.models import VanillaVAE
+
+    def basename(kld_weight, embedder="VAE"):
+        pa = make_pattern_analysis(reader, cache_folder, tmp_path, embedder=embedder)
+        pa.kld_weight = kld_weight
+        # fit() instantiates the model once it knows the data shape; stand one in here.
+        pa.embedder = (
+            VanillaVAE(input_dim=2, seq_len=4, latent_dim=LATENT_DIM)
+            if embedder == "VAE" else None
+        )
+        return pa._model_basename()
+
+    default_stem = basename(DEFAULT_KLD_WEIGHT)
+    assert default_stem == f"VanillaVAE_h{LATENT_DIM}_e{MAX_EPOCHS}"
+
+    swept_stem = basename(0.002)
+    assert swept_stem == f"{default_stem}_kld0.002"
+    assert basename(0.02) not in (default_stem, swept_stem)
+
+    # The deterministic embedders ignore kld_weight, so their names never carry it
+    assert "kld" not in basename(0.002, embedder=None)
 
 
 def test_fit_with_behavlets_validation(reader, cache_folder, tmp_path):

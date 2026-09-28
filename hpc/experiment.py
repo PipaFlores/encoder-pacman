@@ -68,6 +68,11 @@ _HASH_EXCLUDE = frozenset(
 )
 
 
+# Mirrors PatternAnalysis.DEFAULT_KLD_WEIGHT, duplicated rather than imported because this
+# module must stay importable without torch/src for --dry-run and --count.
+DEFAULT_KLD_WEIGHT = 0.00025
+
+
 @dataclass
 class RunConfig:
     """One fully-resolved pipeline configuration.
@@ -103,6 +108,11 @@ class RunConfig:
     batch_size: int = 32
     validation_split: float = 0.3
     dropout: float = 0.1
+    # VAE/TimeVAE only. Reconstruction is reduced per element while the KL term is summed
+    # over latent dims and averaged per sample, so the effective beta scales with
+    # seq_len x n_features - the same value is a different regularization strength for
+    # `Pacman` than for `all_features`. See PatternAnalysis.__init__ for the full note.
+    kld_weight: float = DEFAULT_KLD_WEIGHT
     elementwise_masking: bool = False
     use_best: bool = True
 
@@ -169,8 +179,20 @@ class RunConfig:
         return hashlib.sha1(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:8]
 
     def label(self) -> str:
-        """Human-readable identity for logs and run directories."""
-        return f"{self.sequence_type}_{self.feature_set}_{self.embedder or 'NoEmbedder'}_h{self.latent_space}"
+        """Human-readable identity for logs, results.csv and wandb run names.
+
+        Carries only the fields that usually distinguish configurations, so a sweep over
+        anything else produces repeated labels - which is fine for a run directory (named
+        by index and hash) but not for the `label` column or a wandb run name.
+        `kld_weight` is appended under the same rule as the checkpoint stem: VAE family
+        only, and only when it differs from the default, so existing labels are unchanged.
+        """
+        label = f"{self.sequence_type}_{self.feature_set}_{self.embedder or 'NoEmbedder'}_h{self.latent_space}"
+
+        if self.embedder in ("VAE", "TimeVAE") and self.kld_weight != DEFAULT_KLD_WEIGHT:
+            label += f"_kld{self.kld_weight:g}"
+
+        return label
 
 
 @dataclass
@@ -370,6 +392,7 @@ def build_analysis(config: RunConfig) -> "PatternAnalysis":
         latent_dimension=config.latent_space,
         validation_data_split=config.validation_split,
         elementwise_masking=config.elementwise_masking,
+        kld_weight=config.kld_weight,
         use_best=config.use_best,
         max_samples=config.max_samples,
         dropout=config.dropout,

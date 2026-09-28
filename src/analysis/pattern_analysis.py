@@ -50,6 +50,12 @@ from src.analysis import BehavletsEncoding
 from src.visualization import GameVisualizer, ClusterVisualizer
 
 logger = setup_logger(__name__)
+
+# Mirrors VAE_Trainer's own default (src/models/VAE.py). Named here so the checkpoint
+# stem can tell "the value every run so far used" from "a value someone is sweeping".
+DEFAULT_KLD_WEIGHT = 0.00025
+
+
 class PatternAnalysis:
     """
     A class that handles the whole Pattern extraction and analysis pipeline in a modular style.
@@ -86,6 +92,7 @@ class PatternAnalysis:
             batch_size: int = 32,
             normalization: str | None = None,
             dropout: float = 0.1,
+            kld_weight: float = DEFAULT_KLD_WEIGHT,
             max_epochs: int = 500,
             latent_dimension: int = 256,
             validation_data_split: int = 0.3,
@@ -126,6 +133,14 @@ class PatternAnalysis:
             batch_size (int): Batch size for neural network training.
             normalization (str): Can be `global`, `sequence`, `sample`, or `none`.
             dropout (float): Dropout for DNN training (Only for "LSTM" and "Transformer" models)
+            kld_weight (float): Weight on the KL term of the VAE objective (only "VAE" and
+                "TimeVAE"; ignored by the deterministic embedders). Note the two loss terms
+                are reduced differently - the reconstruction term is a mean *per element*
+                while the KL term is summed over latent dimensions and averaged *per sample*
+                (see src/models/loss.py) - so the effective beta scales roughly with
+                seq_len x n_features, and the same value means different things across
+                feature sets and sequence types. Unit-variance ELBO corresponds to about
+                2 / (seq_len * n_features).
             max_epochs (int): Maximum number of epochs for training.
             latent_dimension (int): Latent dimension size for embeddings.
             validation_data_split (int): Fraction of data to use for validation.
@@ -168,6 +183,7 @@ class PatternAnalysis:
         self.batch_size = batch_size
         self.normalization = normalization
         self.dropout = dropout
+        self.kld_weight = kld_weight
         self.max_epochs = max_epochs
         self.latent_dimension = latent_dimension
         self.validation_data_split = validation_data_split
@@ -655,6 +671,28 @@ class PatternAnalysis:
 
     ### EMBEDDING
 
+    def _model_basename(self, test_dataset: bool = False) -> str:
+        """Checkpoint filename stem for the current configuration (no directory, no suffix).
+
+        Kept in one place because `_check_model_training_status` and `_train_model` have to
+        agree on it exactly, or training silently writes a checkpoint the lookup will never
+        find. The stem deliberately encodes only a few fields (see the checkpoint note in
+        CLAUDE.md): configurations differing in anything else share a file.
+
+        `kld_weight` is appended only for the VAE family and only when it differs from the
+        default, so a sweep over it does not have every point overwrite the same file while
+        checkpoints trained at the default keep their existing names.
+        """
+        if test_dataset:
+            return "test_data"
+
+        stem = f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
+
+        if TORCH_AVAILABLE and isinstance(self.embedder, (VanillaVAE, TimeVAE)) and self.kld_weight != DEFAULT_KLD_WEIGHT:
+            stem += f"_kld{self.kld_weight:g}"
+
+        return stem
+
     def _check_model_training_status(self, return_path=False, test_dataset = False, use_best: bool = True) -> bool | tuple[bool, str]:
         """
         Check if a trained model already exists for the current configuration.
@@ -667,7 +705,7 @@ class PatternAnalysis:
             "trained_models",
             self.sequence_type,
             "f" + str(len(self.features_columns)),
-            "test_data" if test_dataset else f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}" 
+            self._model_basename(test_dataset),
         )
         
         model_path += "_best.pth" if use_best else "_last.pth"
@@ -708,8 +746,8 @@ class PatternAnalysis:
         os.makedirs(model_dir, exist_ok=True)
 
         model_path = os.path.join(
-             model_dir,
-            "test_data" if test_dataset else f"{self.embedder.__class__.__name__}_h{self.latent_dimension}_e{self.max_epochs}"
+            model_dir,
+            self._model_basename(test_dataset),
         )
 
         self._init_wandb_run()
@@ -733,6 +771,7 @@ class PatternAnalysis:
                 trainer = VAE_Trainer(
                     max_epochs= self.max_epochs,
                     batch_size=self.batch_size,
+                    kld_weight=self.kld_weight,
                     validation_split=self.validation_data_split,
                     verbose=self.verbose,
                     save_model=True,
@@ -2088,6 +2127,7 @@ class PatternAnalysis:
             "max_epochs": self.max_epochs,
             "batch_size": self.batch_size,
             "dropout": self.dropout,
+            "kld_weight": self.kld_weight,
             "latent_dimension": self.latent_dimension,
             "validation_data_split": self.validation_data_split,
             "elementwise_masking": self.elementwise_masking,

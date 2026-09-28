@@ -146,6 +146,18 @@ def parse_args() -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--kld-weight",
+        type=float,
+        default=0.00025,
+        help=(
+            "Weight on the KL term of the VAE objective (VAE/TimeVAE only; ignored by the "
+            "other embedders). The effective beta scales with seq_len x n_features because "
+            "the two loss terms are reduced differently, so unit-variance ELBO is roughly "
+            "2 / (seq_len * n_features) rather than 1 (default: 0.00025)."
+        ),
+    )
+
+    parser.add_argument(
         "--elementwise-masking",
         action="store_true",
         help="Enable elementwise masking (obs. mask) during training of pytorch models.",

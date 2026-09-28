@@ -117,6 +117,7 @@ spells them as negations.
 | [`general_training.yaml`](experiments/general_training.yaml) | Every embedder once, each at its own latent size (an `include` list — edit a line to change one architecture's dimensionality). |
 | [`embedder_sweep.yaml`](experiments/embedder_sweep.yaml) | Every embedder at a matched latent size, for comparing architectures. |
 | [`latent_sweep_transformer.yaml`](experiments/latent_sweep_transformer.yaml) | Latent dimension × sequence type for the transformer (replaces `array_train.sh`). |
+| [`kld_sweep.yaml`](experiments/kld_sweep.yaml) | KL weight × VAE/TimeVAE at a fixed latent size. The ladder is scaled to `seq_len × n_features`, so it is specific to that file's slicing and feature set. |
 | [`transformer.yaml`](experiments/transformer.yaml) / [`lstm.yaml`](experiments/lstm.yaml) / [`umap_baseline.yaml`](experiments/umap_baseline.yaml) | The former single-architecture scripts. |
 
 ## Submission modes
