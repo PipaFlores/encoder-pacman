@@ -1,27 +1,40 @@
-import os
 import hashlib
 import json
+import os
 import pickle
+import random
+import time
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import random
-import matplotlib.pyplot as plt
-import time
-
 import torch.utils.data.dataloader
-from src.utils import setup_logger, replace_inf_with_feature_max
 
 ### Data Handling
 from src.datahandlers import PacmanDataReader
+from src.utils import replace_inf_with_feature_max, setup_logger
 
 ### Embedding 
 ### trying lazy import first to avoid hpc environment issues. 
 try:
     import torch
     TORCH_AVAILABLE = True
-    from src.models import VanillaVAE, TimeVAE, VAE_Trainer, AE_Trainer, AELSTM, MLPAutoencoder, TSTransformerEncoder, Transformer_Trainer
-    from src.datahandlers import PacmanDataset, ImputationDataset, collate_dynamic_padding
+    from src.datahandlers import (
+        ImputationDataset,
+        PacmanDataset,
+        collate_dynamic_padding,
+    )
+    from src.models import (
+        AELSTM,
+        AE_Trainer,
+        MLPAutoencoder,
+        TimeVAE,
+        Transformer_Trainer,
+        TSTransformerEncoder,
+        VAE_Trainer,
+        VanillaVAE,
+    )
 except ImportError:
     TORCH_AVAILABLE = False
 
@@ -32,22 +45,22 @@ except ImportError:
     WANDB_AVAILABLE = False
 ## Reducing
 from umap import UMAP
+
 try:
     from pacmap import PaCMAP
 except ImportError:
     PACMAP_AVAILABLE = False
 
-from sklearn.decomposition import PCA
-
 ## Clustering
 from hdbscan import HDBSCAN
 from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
 
 # Validation
 from src.analysis import BehavletsEncoding
 
 ## Visualization
-from src.visualization import GameVisualizer, ClusterVisualizer
+from src.visualization import ClusterVisualizer, GameVisualizer
 
 logger = setup_logger(__name__)
 
@@ -78,6 +91,7 @@ class PatternAnalysis:
             data_folder: str = "../data",
             hpc_folder: str = "../hpc",
             cache_folder: str = "../cache",
+            gifs_folder: str | None = None,
             embedder: str | None = "LSTM",
             reducer: UMAP | PCA | None = None,
             clusterer: HDBSCAN | KMeans = None,
@@ -116,6 +130,9 @@ class PatternAnalysis:
                 validation encodings). Kept separate from hpc_folder since it's typically local to
                 each machine/environment (the source dataset it's fingerprinted against may differ
                 between them), unlike hpc_folder which may be shared/synced.
+            gifs_folder (str, optional): Where the per-sequence GIFs for the augmented interactive
+                plot live. Defaults to `<hpc_folder>/gifs`. They are rendered by
+                hpc/render_gifs.py, never by this pipeline.
             embedder (str | None): Type of embedder to use "LSTM", "DRNN", "DCNN", "ResNet" or None to skip embedding.
             reducer (UMAP | PCA | None): Dimensionality reduction method. If None, defaults to UMAP.
             clusterer (HDBSCAN | KMeans): Clustering algorithm to use.
@@ -129,7 +146,9 @@ class PatternAnalysis:
                 it follow clockwise.
             validation (str): Validation method for clusters (e.g., "Behavlets").
             feature_set (str): Name of feature set to be used in analysis
-            augmented_visualization (bool): Whether to use augmented visualization.
+            augmented_visualization (bool): Whether plot_interactive_overview() shows each
+                sequence's GIF on hover. Only reads GIFs from gifs_folder; missing ones are
+                reported, not rendered.
             batch_size (int): Batch size for neural network training.
             normalization (str): Can be `global`, `sequence`, `sample`, or `none`.
             dropout (float): Dropout for DNN training (Only for "LSTM" and "Transformer" models)
@@ -177,6 +196,9 @@ class PatternAnalysis:
 
         # CACHE CONFIG
         self.cache_folder = cache_folder ## for cached pipeline intermediates (make_data, validation encodings). Local per environment, kept separate from hpc_folder.
+
+        # GIFS for augmented visualization (rendered by hpc/render_gifs.py)
+        self.gifs_folder = gifs_folder if gifs_folder is not None else os.path.join(hpc_folder, "gifs")
         
 
             # for deep neural networks
@@ -275,7 +297,7 @@ class PatternAnalysis:
         
         if embedder == "LSTM":
             if not TORCH_AVAILABLE:
-                raise ModuleNotFoundError(f"Using LSTM requires torch in the environment")
+                raise ModuleNotFoundError("Using LSTM requires torch in the environment")
 
             self.using_torch = True
             return AELSTM(
@@ -285,7 +307,7 @@ class PatternAnalysis:
             ) # other params defined in trainer during fitting stage.
         if embedder == "MLP":
             if not TORCH_AVAILABLE:
-                raise ModuleNotFoundError(f"Using MLP requires torch in the environment")
+                raise ModuleNotFoundError("Using MLP requires torch in the environment")
 
             self.using_torch = True
 
@@ -301,7 +323,7 @@ class PatternAnalysis:
             )
         if embedder == "Transformer":
             if not TORCH_AVAILABLE:
-                raise ModuleNotFoundError(f"Using LSTM requires torch in the environment")
+                raise ModuleNotFoundError("Using LSTM requires torch in the environment")
 
             self.using_torch = True
             return TSTransformerEncoder(
@@ -317,7 +339,7 @@ class PatternAnalysis:
         
         if embedder == "VAE":
             if not TORCH_AVAILABLE:
-                raise ModuleNotFoundError(f"Using VAE requires torch in the environment")
+                raise ModuleNotFoundError("Using VAE requires torch in the environment")
 
             self.using_torch = True
 
@@ -337,7 +359,7 @@ class PatternAnalysis:
 
         if embedder == "TimeVAE":
             if not TORCH_AVAILABLE:
-                raise ModuleNotFoundError(f"Using TimeVAE requires torch in the environment")
+                raise ModuleNotFoundError("Using TimeVAE requires torch in the environment")
 
             self.using_torch = True
 
@@ -356,7 +378,6 @@ class PatternAnalysis:
     def fit(self,
             raw_sequences: list[pd.DataFrame] | None = None,
             processed_sequences: np.ndarray[float] = None,
-            gif_path_list: list[str] | None = None,
             features_columns: list[str] | None = None,
             trajectory_list: list | None = None,
             metadata_dictionary: dict | None = None,
@@ -384,14 +405,11 @@ class PatternAnalysis:
                 Numpy array of sequences, typically shape (n_sequences, sequence_length, n_features), where each sequence contains the extracted feature vectors. 
                 Together with raw_sequences, this is an output of the reader.make_data() method. 
                 If None, will be computed from raw_sequences.
-            gif_path_list (list[str], optional):
-                List of file paths to GIF visualizations corresponding to each input sequence, 
-                if augmented visualization is enabled. This is the third output of reader.make_data().
-                If None, will be computed as needed.
-            feature_columns (list[str], optional): 
-                List of feature column names used in the processed data. 
-                Should match the features used to generate processed_sequences. 
-                This is the fourth output of reader.make_data().
+            feature_columns (list[str], optional):
+                List of feature column names used in the processed data.
+                Should match the features used to generate processed_sequences.
+                This is the fourth output of reader.make_data(). (The third, the GIF names, is
+                not taken: GIF paths are always derived from raw_sequences.)
             trajectory_list (list[trajectory], optional):
                 List of trajectories used for aggregated visualization tools. Produced by reader.make_data()
             metadata_dictionary (dict, optional):
@@ -426,7 +444,7 @@ class PatternAnalysis:
             assert processed_sequences.shape[-1] == len(features_columns)
             self.raw_sequence_data = raw_sequences
             self.processed_sequence_data = processed_sequences
-            self.gif_path_list = gif_path_list
+            self.gif_path_list = self._gif_paths_for(raw_sequences)
             self.features_columns = features_columns
             self._data_fingerprint = None  # preloaded data has no known cache key
             self.trajectory_list = trajectory_list
@@ -489,7 +507,7 @@ class PatternAnalysis:
                 if validation_encodings is None:
                     self.validation_encodings = self.calculate_validation_encodings(self.raw_sequence_data, self.validation_method, ignore_cache=ignore_cache)
                 else:
-                    logger.info(f"Using preloaded validation encodings")
+                    logger.info("Using preloaded validation encodings")
                     self.validation_encodings = validation_encodings
 
                 self.validation_labels = self.recode_validation_labels(self.validation_encodings)
@@ -524,39 +542,15 @@ class PatternAnalysis:
             cache_path = self._data_cache_path(fingerprint)
             cached = None if ignore_cache else self._load_cache(cache_path, fingerprint)
 
+            # The third slot (gif names) is never read back from the cache: entries written before
+            # GIFs were named from the final sequences hold stale full paths there, and the names
+            # are cheap to derive from raw_sequence_data anyway (see _gif_paths_for below).
             if cached is not None:
                 logger.info(f"Using cached data ({cache_path})")
-                (self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list,
+                (self.raw_sequence_data, self.processed_sequence_data, _,
                  self.features_columns, self.trajectory_list, self.metadata_dictionary) = cached
-
-                # augmented_visualization doesn't affect raw/processed/trajectory/metadata, so it's
-                # not part of the fingerprint - a cache entry can be reused across it. But gifs
-                # themselves aren't cached data, they're rendered files, and there's no cheap way to
-                # get their paths without re-running make_data(); so if this entry was cached without
-                # them and gifs are wanted now, generate them once here and fold them into the cache.
-                if self.augmented_visualization and not self.gif_path_list:
-                    logger.info(
-                        "augmented_visualization=True but the cached entry has no gifs; "
-                        "generating them now (one-time cost, will be cached from here on)"
-                    )
-                    _, _, self.gif_path_list, _, _, _ = self.reader.make_data(
-                        feature_set=self.feature_set,
-                        sequence_type=self.sequence_type,
-                        context=self.context,
-                        rebase_scores=self.rebase_score,
-                        filter_by_pill=self.filter_by_pill,
-                        sort_ghost_distances=self.sort_distances,
-                        normalization=self.normalization,
-                        make_gif=True,
-                        max_samples=self.max_samples
-                    )
-                    self._save_cache(cache_path, fingerprint, (
-                        self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list,
-                        self.features_columns, self.trajectory_list, self.metadata_dictionary
-                    ))
-                    logger.info(f"Cached data (with gifs) at {cache_path}")
             else:
-                self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list, self.features_columns, self.trajectory_list, self.metadata_dictionary = self.reader.make_data(
+                self.raw_sequence_data, self.processed_sequence_data, gif_names, self.features_columns, self.trajectory_list, self.metadata_dictionary = self.reader.make_data(
                     feature_set=self.feature_set,
                     sequence_type=self.sequence_type,
                     context=self.context,
@@ -564,11 +558,10 @@ class PatternAnalysis:
                     filter_by_pill=self.filter_by_pill,
                     sort_ghost_distances=self.sort_distances,
                     normalization=self.normalization,
-                    make_gif=self.augmented_visualization,
                     max_samples=self.max_samples
                 )
                 self._save_cache(cache_path, fingerprint, (
-                    self.raw_sequence_data, self.processed_sequence_data, self.gif_path_list,
+                    self.raw_sequence_data, self.processed_sequence_data, gif_names,
                     self.features_columns, self.trajectory_list, self.metadata_dictionary
                 ))
                 logger.info(f"Cached data at {cache_path}")
@@ -578,8 +571,9 @@ class PatternAnalysis:
             if test_run == True:
                 self.raw_sequence_data = self.raw_sequence_data[:500]
                 self.processed_sequence_data = self.processed_sequence_data[:500]
-                self.gif_path_list = self.gif_path_list[:500]
                 self.trajectory_list = self.trajectory_list[:500]
+
+            self.gif_path_list = self._gif_paths_for(self.raw_sequence_data)
 
             logger.info(f"Loaded {len(self.raw_sequence_data)} sequences")
 
@@ -587,6 +581,32 @@ class PatternAnalysis:
         else:
             self._load_test_dataset()
             self._data_fingerprint = None
+
+    def _gif_paths_for(self, raw_sequences: list[pd.DataFrame] | None) -> list[str]:
+        """Where each sequence's GIF lives (or will, once hpc/render_gifs.py has run)."""
+        if not raw_sequences:
+            return []
+        return [os.path.join(self.gifs_folder, name) for name in self.reader.sequence_gif_names(raw_sequences)]
+
+    @staticmethod
+    def _gif_urls_relative_to(html_path: str, gif_paths: list[str]) -> list[str]:
+        """
+        `<img src>` values for gif_paths, as seen from the page saved at html_path.
+
+        A browser resolves a relative src against the page's own folder, not the process's
+        working directory, so each path is made relative to the folder the HTML is written to.
+        Falls back to an absolute file:// URI when there is no relative route (e.g. a GIF on
+        another drive than the HTML on Windows).
+        """
+        html_dir = os.path.dirname(os.path.abspath(html_path))
+        urls = []
+        for gif_path in gif_paths:
+            gif_abs = os.path.abspath(gif_path)
+            try:
+                urls.append(Path(os.path.relpath(gif_abs, start=html_dir)).as_posix())
+            except ValueError:
+                urls.append(Path(gif_abs).as_uri())
+        return urls
 
     ### CACHING
 
@@ -610,10 +630,8 @@ class PatternAnalysis:
         current configuration. Used to key the on-disk data cache and to invalidate it
         automatically when the config or the source dataset changes.
 
-        Deliberately excludes augmented_visualization: it only controls whether gif files
-        get rendered as a side effect, it doesn't change raw/processed/trajectory/metadata
-        content, so toggling it shouldn't force a recompute of those. See build_data(),
-        which backfills gifs into an existing cache entry on demand instead.
+        Deliberately excludes augmented_visualization and gifs_folder: they only decide how
+        results are plotted and where GIFs are looked up, not what make_data() returns.
         """
         config = {
             "feature_set": self.feature_set,
@@ -720,7 +738,6 @@ class PatternAnalysis:
         self.embedder.load_state_dict(torch.load(model_path, map_location=self.device))
         self.embedder.eval()
 
-        return
 
     def _train_model(self, 
                      padded_sequence_data: np.ndarray,
@@ -751,7 +768,8 @@ class PatternAnalysis:
         )
 
         self._init_wandb_run()
-    
+        training_started = int(time.time())  # whole seconds: some filesystems store mtime that way
+
         if self.using_torch:
             if isinstance(self.embedder, (AELSTM, MLPAutoencoder)):
                 trainer = AE_Trainer(
@@ -803,6 +821,15 @@ class PatternAnalysis:
                 
                 data_class = ImputationDataset(gamestates=padded_sequence_data, elementwise_masking=self.elementwise_masking)
                 trainer.fit(self.embedder, data_class)
+
+            # Every trainer leaves the *last* epoch's weights in memory. With use_best, embed
+            # with the best checkpoint instead - the same weights a later run would load from
+            # disk. The mtime check skips a stale file left by an earlier run under the same
+            # name, which survives when this run never improved on inf (e.g. NaN from epoch 1).
+            best_path = model_path + "_best.pth"
+            if self.use_best and os.path.exists(best_path) and os.path.getmtime(best_path) >= training_started:
+                logger.info(f"Loading best checkpoint {best_path} for embedding")
+                self._load_model(best_path)
             
 
     def embed(self, padded_data: np.ndarray) -> np.ndarray:
@@ -860,7 +887,7 @@ class PatternAnalysis:
                 self.wandbrun = None
 
             logger.info("Embedding with self.reducer (e.g., UMAP) from flat raw data to 2 dimensions..")
-            X = replace_inf_with_feature_max(padded_data)
+            X = replace_inf_with_feature_max(padded_data, padding_value=-999.0)
             X_flat = X.reshape(len(X), -1)
 
             embeddings = self.reducer.fit_transform(X_flat)
@@ -1109,7 +1136,7 @@ class PatternAnalysis:
                         summary_row[meta_feature] = self.metadata_dictionary[meta_feature][idx]
                     validation_rows.append(summary_row)
 
-                except Exception as e:
+                except Exception:
                     logger.warning(
                         f"Failed to calculate validation for gamestate idx {idx} (level_id {getattr(gamestate.iloc[0], 'level_id', 'unknown')})"
                     )
@@ -1141,7 +1168,7 @@ class PatternAnalysis:
             use_quantiles_for_bins: partitions the variable into the 10 deciles of the distribution.
         """
         # Binarize each column in validation_encodings: >0 -> 1, <=0 -> -1, unless all zeros (then None)
-        logger.info(f"Calcuating validation labels")
+        logger.info("Calcuating validation labels")
         validation_labels = pd.DataFrame(index=validation_encodings.index)
         for col in validation_encodings.columns:
             col_values = validation_encodings[col].to_numpy()
@@ -1248,7 +1275,12 @@ class PatternAnalysis:
         Returns:
             pd.DataFrame: DataFrame indexed by validation_set (column name), with columns 'ARI', 'AMI', 'NMI', 'neigh_hit'
         """
-        from sklearn.metrics import adjusted_rand_score, adjusted_mutual_info_score, normalized_mutual_info_score
+        from sklearn.metrics import (
+            adjusted_mutual_info_score,
+            adjusted_rand_score,
+            normalized_mutual_info_score,
+        )
+
         from src.utils.utils import neighborhood_hit
 
         if validation_labels is not None:
@@ -1306,7 +1338,7 @@ class PatternAnalysis:
             # If validation_labels is a 1D numpy array or list-like (single label set)
             else:
                 val_labels = np.asarray(validation_labels)
-                assert not pd.isnull(val_labels).any(), f"validation set has missing values, check label encoding"
+                assert not pd.isnull(val_labels).any(), "validation set has missing values, check label encoding"
 
                 mask = (val_labels != -1)
                 if np.sum(mask) == 0:
@@ -1467,43 +1499,29 @@ class PatternAnalysis:
         Args:
             plot_only_latent_space (bool, optional): If True, only the latent space embedding plot is shown. Defaults to False.
             metadata (optional): Additional metadata to be used for augmented visualization. Not implemented.
-            save_path (str, optional): If provided, saves the interactive plot to the specified file path.
+            save_path (str, optional): If provided, saves the interactive plot to the specified file path
+                (otherwise ./bokeh_plot.html). GIF links are written relative to this file, so the
+                HTML keeps working as long as it and gifs_folder keep their relative positions.
             plot_notebook (bool, optional): If True, displays the plot inline in a Jupyter notebook. Defaults to False.
 
         Returns:
             None. Displays the interactive Bokeh plots either inline (in a notebook) or in a browser window, and optionally saves to file.
         """
-        from bokeh.plotting import show, row, output_notebook, output_file
+        from bokeh.plotting import output_file, output_notebook, row, show
         
         if plot_notebook:
             output_notebook()
-            
 
-        if not hasattr(self, '_gif_paths_handled'):
-            if save_path is not None:
-                # Ensure file has .html extension
-                if not save_path.lower().endswith('.html'):
-                    save_path += '.html'
-                dir_name = os.path.dirname(save_path)
-                if dir_name:
-                    os.makedirs(dir_name, exist_ok=True)
-                output_file(save_path)
-
-                # If a save_path is supplied, update gif_path_list paths to be relative from save location.
-                rel_save_path = os.path.relpath(os.path.dirname(save_path) or ".", os.getcwd())
-                if rel_save_path == ".":
-                    n_ups = 0
-                else:
-                    n_ups = len([component for component in rel_save_path.split(os.sep) if component not in (".", "")])
-
-                if hasattr(self, "gif_path_list"):
-                    self.gif_path_list = [os.path.join(*(['..']*(n_ups-1)), *os.path.normpath(gif_path).split(os.sep)[1:])
-                                          if gif_path.startswith(".") else gif_path
-                                          for gif_path in self.gif_path_list]
-            else:
-                output_file("./bokeh_plot.html")
-            self._gif_paths_handled = True
-
+        if save_path is not None:
+            # Ensure file has .html extension
+            if not save_path.lower().endswith('.html'):
+                save_path += '.html'
+            dir_name = os.path.dirname(save_path)
+            if dir_name:
+                os.makedirs(dir_name, exist_ok=True)
+        else:
+            save_path = "./bokeh_plot.html"
+        output_file(save_path)
 
         metadata = {}
         if plot_metadata:
@@ -1520,9 +1538,7 @@ class PatternAnalysis:
                 raise KeyError(f"Could not find '{validation_set}'. "
                     f"Possible validation sets are: {list(self.validation_labels.columns)}")
             # If all values are None, set labels to None
-            if np.all(pd.isnull(labels)):
-                labels = None
-            elif np.sum(labels) == 0:
+            if np.all(pd.isnull(labels)) or np.sum(labels) == 0:
                 labels = None
         
         if isinstance(validation_set, list):
@@ -1534,9 +1550,20 @@ class PatternAnalysis:
 
         if self.augmented_visualization:
             logger.info("plotting augmented")
+            n_missing = sum(not os.path.exists(path) for path in self.gif_path_list)
+            if n_missing:
+                render_cmd = f"python hpc/render_gifs.py --sequence-type {self.sequence_type}"
+                if self.sequence_type == "pacman_attack":
+                    render_cmd += f" --context {self.context}"
+                    if self.filter_by_pill is not None:
+                        render_cmd += f" --filter-by-pill {self.filter_by_pill}"
+                logger.warning(
+                    f"{n_missing} of {len(self.gif_path_list)} GIFs are missing from {self.gifs_folder}; "
+                    f"those points show no animation on hover. Render them with: {render_cmd}"
+                )
             p2 = self.clustervisualizer.plot_augmented_trajectories_embedding_bokeh(
                 traj_embeddings=self.reduced_embeddings,
-                gif_path_list=self.gif_path_list,
+                gif_path_list=self._gif_urls_relative_to(save_path, self.gif_path_list),
                 labels=labels,
                 metadata=metadata
             )
@@ -1562,7 +1589,6 @@ class PatternAnalysis:
                 measure_type=self.similarity_measure)
             show(row(p1, p2))
 
-        return
     
     def plot_latent_space_overview(self,
                                    custom_embeddings: np.ndarray | list[float] | None = None,
@@ -1624,9 +1650,7 @@ class PatternAnalysis:
                         f"Possible validation sets are: {list(self.validation_labels.columns)}")
                 
                 # If all values are None, set labels to None
-                if np.all(pd.isnull(val_labels)):
-                    val_labels = None
-                elif np.sum(val_labels) == 0:
+                if np.all(pd.isnull(val_labels)) or np.sum(val_labels) == 0:
                     val_labels = None
                 
                 # Use the appropriate axis from the subplot array, handling both 1D and 2D cases
@@ -1658,7 +1682,9 @@ class PatternAnalysis:
                 if pretty_val_title:
                     if val_set.startswith(("Aggression", "Caution")):
                         try:
-                            from src.analysis.behavlets_config import BEHAVLET_NAME_MAPPING
+                            from src.analysis.behavlets_config import (
+                                BEHAVLET_NAME_MAPPING,
+                            )
                             val_set_prefix = val_set.split("_", 1)[0] if "_" in val_set else val_set
                             set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
                         except ImportError:
@@ -1686,9 +1712,7 @@ class PatternAnalysis:
                     raise KeyError(f"Could not find '{validation_set}'. "
                         f"Possible validation sets are: {list(self.validation_labels.columns)}")
                 # If all values are None, set labels to None
-                if np.all(pd.isnull(labels)):
-                    labels = None
-                elif np.sum(labels) == 0:
+                if np.all(pd.isnull(labels)) or np.sum(labels) == 0:
                     labels = None
 
             elif custom_labels is not None:
@@ -1730,9 +1754,7 @@ class PatternAnalysis:
                         f"Possible validation sets are: {list(self.validation_labels.columns)}")
                 
                 # If all values are None, set labels to None
-                if np.all(pd.isnull(val_labels)):
-                    val_labels = None
-                elif np.sum(val_labels) == 0:
+                if np.all(pd.isnull(val_labels)) or np.sum(val_labels) == 0:
                     val_labels = None
                 
                 # Use the appropriate axis from the subplot array
@@ -1758,7 +1780,9 @@ class PatternAnalysis:
                 if pretty_val_title:
                     if val_set.startswith(("Aggression", "Caution")):
                         try:
-                            from src.analysis.behavlets_config import BEHAVLET_NAME_MAPPING
+                            from src.analysis.behavlets_config import (
+                                BEHAVLET_NAME_MAPPING,
+                            )
                             val_set_prefix = val_set.split("_", 1)[0] if "_" in val_set else val_set
                             set_name = BEHAVLET_NAME_MAPPING.get(val_set_prefix, val_set)
                         except ImportError:
@@ -1854,7 +1878,6 @@ class PatternAnalysis:
             metadata_label="level_id",
         )
 
-        return
     
     def plot_reconstruction_check(
         self,
@@ -1905,7 +1928,9 @@ class PatternAnalysis:
         data_tensor = PacmanDataset(gamestates=self.processed_sequence_data, elementwise_masking=False)
         batch_size_ = self.batch_size
 
-        from torch.utils.data import DataLoader  # Ensure torch DataLoader is correctly imported
+        from torch.utils.data import (
+            DataLoader,  # Ensure torch DataLoader is correctly imported
+        )
         loader = DataLoader(dataset=data_tensor, batch_size=batch_size_, shuffle=False)
 
         # Find the selected sample in its batch

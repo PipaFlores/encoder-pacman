@@ -30,6 +30,7 @@ notebooks/
 playground/
 hpc/trained_models/
 hpc/videos/
+hpc/gifs/
 hpc/affinity_matrices/
 hpc/wandb/
 

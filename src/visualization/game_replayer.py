@@ -716,6 +716,24 @@ class GameReplayer:
         
         plt.close(fig)  # Clean up
 
+    @staticmethod
+    def video_frame_count(video_path: str) -> int | None:
+        """
+        Number of frames in a video, read with ffprobe; None if it can't be read.
+
+        A level video has one frame per game state, so this is how a complete video is told
+        apart from one cut short by an interrupted render - which still plays, just ends early.
+        """
+        try:
+            result = subprocess.run(
+                ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                 "-show_entries", "stream=nb_frames", "-of", "csv=p=0", video_path],
+                capture_output=True, text=True, stdin=subprocess.DEVNULL,
+            )
+        except FileNotFoundError:
+            raise ValueError("ffprobe not found. It ships with FFmpeg; make sure it is on PATH.")
+        out = result.stdout.strip()
+        return int(out) if out.isdigit() else None
 
     def extract_gamestate_subsequence_ffmpeg(self, video_path: str, start_gamestate: int, end_gamestate: int, 
                                            output_path: str, output_format: str = "gif"):
@@ -737,7 +755,8 @@ class GameReplayer:
             - Requires FFmpeg to be installed and available in the system PATH.
             - This method first generates a color palette for optimal GIF quality, then applies it to the output.
             - The resulting GIF will be scaled to 640 pixels wide (height is adjusted to maintain aspect ratio).
-            - Temporary files (e.g., palette.png) are cleaned up automatically.
+            - The palette is written beside output_path (not to the working directory), so several
+              processes can render at once, as hpc/render_gifs.py does.
         """
         
 
@@ -749,6 +768,8 @@ class GameReplayer:
         start_time = start_gamestate / 20.0
         duration = (end_gamestate - start_gamestate) / 20.0
         
+        palette_path = f"{os.path.splitext(output_path)[0]}.palette.png"
+
         try:
             if output_format.lower() == "gif":
                 # FFmpeg command for high-quality GIF with proper fps
@@ -768,7 +789,7 @@ class GameReplayer:
                     '-t', str(duration),
                     '-i', video_path,
                     '-vf', 'fps=20,scale=640:-1:flags=lanczos,palettegen=stats_mode=diff',
-                    'palette.png'
+                    palette_path
                 ]
                 
                 subprocess.run(palette_cmd, check=True, capture_output=True)
@@ -779,7 +800,7 @@ class GameReplayer:
                     '-ss', str(start_time),
                     '-t', str(duration),
                     '-i', video_path,
-                    '-i', 'palette.png',
+                    '-i', palette_path,
                     '-lavfi', 'fps=20,scale=640:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5',
                     output_path
                 ]
@@ -787,8 +808,8 @@ class GameReplayer:
                 subprocess.run(gif_cmd, check=True, capture_output=True)
                 
                 # Clean up palette file
-                if os.path.exists('palette.png'):
-                    os.remove('palette.png')
+                if os.path.exists(palette_path):
+                    os.remove(palette_path)
                     
             elif output_format.lower() == "mp4":
                 # FFmpeg command for MP4 with proper fps

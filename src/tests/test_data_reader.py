@@ -151,3 +151,28 @@ class TestPacmanDataReader:
         assert len(raw_sequences) > 0
         assert processed.shape[0] == len(raw_sequences)
         assert processed.shape[-1] == len(features)
+
+    def test_gif_names_cover_exactly_each_final_sequence(self, reader):
+        """
+        Regression test: slice_attack_modes trims its longest 5% of sequences after slicing,
+        and GIFs used to be named (and cut) from the untrimmed interval, so their animation ran
+        past the steps the model saw. A name's start/end must address exactly the sequence's
+        own rows within its level - checked on every trimmed sequence plus a few others.
+        """
+        raw_sequences = reader._slice_by_sequence_type(
+            sequence_type="pacman_attack", context=20, rebase_scores=False
+        )
+        names = reader.sequence_gif_names(raw_sequences)
+        assert len(names) == len(raw_sequences)
+
+        cut_len = max(len(seq) for seq in raw_sequences)
+        checked = [i for i, seq in enumerate(raw_sequences) if len(seq) == cut_len][:30] + list(range(10))
+
+        for i in checked:
+            seq = raw_sequences[i]
+            level_id, start, end = (int(part) for part in names[i][len("level_"):-len(".gif")].split("_"))
+            level_states = reader.gamestate_df[reader.gamestate_df["level_id"] == level_id]
+
+            assert level_id == seq["level_id"].iloc[0]
+            assert end - start + 1 == len(seq)
+            assert level_states.iloc[start:end + 1].index.equals(seq.index)

@@ -209,6 +209,39 @@ drift now fails at startup.
 
 It writes no results directory. Use `run_experiment.py` for anything you want a record of.
 
+## GIFs for the augmented interactive plot
+
+`PatternAnalysis.plot_interactive_overview()` with `augmented_visualization=True` shows each
+sequence's replay as a GIF on hover. The pipeline never renders those — it only looks them up
+in `gifs/` (`gifs_folder`, default `<hpc_folder>/gifs`) and warns about missing ones.
+`render_gifs.py` makes them, cutting each from its level's video in `videos/`:
+
+```bash
+python render_gifs.py --config experiments/general_training.yaml --dry-run  # count only
+sbatch render_gifs.sh --config experiments/general_training.yaml            # SLURM
+python render_gifs.py --sequence-type pacman_attack --context 20 --jobs 8   # locally
+```
+
+A GIF is named `level_<id>_<start>_<end>.gif`, the sequence's first and last step as
+positions within its level (end inclusive), which depends only on the steps it covers. One
+folder therefore serves every feature set, normalization and model, and `--config` renders
+the union over an experiment's distinct slicings. A GIF that exists with one frame per step
+is skipped, so a re-run (or a resubmission after a timeout) only renders what is missing or
+truncated. ffmpeg and ffprobe must be on `PATH`.
+
+A GIF can only be as complete as its level's video. Videos that end early — an interrupted
+render, or a copy/sync that didn't finish, still plays fine — are detected by frame count
+(one frame per game state): `render_gifs.py` skips and lists the affected levels, and
+
+```bash
+python video_rendering.py --check   # list missing or short videos, render nothing
+```
+
+lists them too; a normal `video_rendering.py` run re-renders exactly those.
+
+`gifs/` is gitignored and excluded from the rsync-to-cluster list (like `videos/`); it comes
+back with a from-cluster sync.
+
 ## Notes and gotchas
 
 **Checkpoints are shared and every run trains from scratch.** Models land in
@@ -230,5 +263,5 @@ reserved GPU also grants 72 CPU cores, which cost nothing extra.
 128 regardless of what is requested. `TimeVAE` with `all_features` (267 columns) builds a
 ~17 GB decoder weight at `pacman_attack` sequence lengths — use a smaller feature set.
 
-**`runs/` and `logs/` are gitignored**, along with `trained_models/`, and are excluded from
-the rsync-to-cluster list.
+**`runs/` and `logs/` are gitignored**, along with `trained_models/`, `videos/` and `gifs/`,
+and are excluded from the rsync-to-cluster list.

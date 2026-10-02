@@ -356,7 +356,6 @@ class PacmanDataReader:
         padding_value: float = -999.0,
         sort_ghost_distances: bool = True,
         normalization: str | None = None,
-        make_gif: bool = False,
         max_samples : int | None = None
     ):
         """
@@ -373,15 +372,15 @@ class PacmanDataReader:
                 it follow clockwise.
             sort_ghost_distances (bool): Whether to sort all columns ending in '_distance' for ghosts in ascending order per timestep/sample.
             normalization (str|None): Can be 'global', 'sequence', 'sample', or None. Specifies normalization strategy for features.
-            make_gif (bool): If True, generates GIFs (visualizations) for each sequence.
             max_samples (int): Max number of samples to be returnes. For fast debugging purposes
 
         Returns:
             If return_raw_sequences is True:
-                tuple: (raw_sequences, X_padded, gif_paths, features)
+                tuple: (raw_sequences, X_padded, gif_names, features)
                 - raw_sequences: list[pd.DataFrame] of each sliced sequence.
                 - X_padded: np.ndarray, shape (n_sequences, sequence_length, n_features), normalized and padded data.
-                - gif_paths: list[str], paths to any generated GIFs (if make_gif is True).
+                - gif_names: list[str], the GIF file name of each sequence (see sequence_gif_names()).
+                    Names only - nothing is rendered here; hpc/render_gifs.py does that.
                 - features: list[str], feature column names used for extraction.
                 - trajectory_list: list, list of trajectories for aggregate visualizations
                 - metadata_dictionary: dict, dictionary of high-level metadata. Always includes
@@ -411,21 +410,19 @@ class PacmanDataReader:
             Normalizer = FeatureNormalizer()
 
         # Slice sequences by type
-        raw_sequences, gif_paths = self._slice_by_sequence_type(sequence_type=seq_type, 
-                                                                context=context, 
-                                                                filter_by_pill=filter_by_pill,
-                                                                make_gif=make_gif, 
-                                                                rebase_scores=rebase_scores)
+        raw_sequences = self._slice_by_sequence_type(sequence_type=seq_type,
+                                                     context=context,
+                                                     filter_by_pill=filter_by_pill,
+                                                     rebase_scores=rebase_scores)
 
         ## If global normalization, then normalize before slicing
         if normalization == "global": ## full dataset normalization
             non_normalized_gamestate_df = self.gamestate_df.copy()
             self.gamestate_df = Normalizer.normalize(self.gamestate_df) # normalize raw dataframe for slicing method
-            normalized_sequences, _ = self._slice_by_sequence_type(sequence_type=seq_type, 
-                                                                   context=context, 
-                                                                   filter_by_pill=filter_by_pill,
-                                                                   make_gif=False, 
-                                                                   rebase_scores=rebase_scores)
+            normalized_sequences = self._slice_by_sequence_type(sequence_type=seq_type,
+                                                                context=context,
+                                                                filter_by_pill=filter_by_pill,
+                                                                rebase_scores=rebase_scores)
             self.gamestate_df = non_normalized_gamestate_df # return to original raw dataframe
 
         # Local normalizations
@@ -472,7 +469,10 @@ class PacmanDataReader:
         if max_samples:
             raw_sequences = raw_sequences[:max_samples]
             X_padded = X_padded[:max_samples]
-            gif_paths = gif_paths[:max_samples]
+
+        # Named from the final sequences - after slicing-time trimming and max_samples - so a
+        # GIF always shows exactly the steps its sequence contains.
+        gif_names = self.sequence_gif_names(raw_sequences)
 
         trajectory_list = [self.get_trajectory(game_states=(sequence.iloc[0].game_state_id, sequence.iloc[-1].game_state_id)) for sequence in raw_sequences]
         metadata_dictionary = {}
@@ -493,13 +493,39 @@ class PacmanDataReader:
         ## psychological (flow, bisbas, demographics) metadata, only available if read_games_only=False
         self._add_flow_and_bisbas_metadata(metadata_dictionary)
 
-        if make_gif:
-            assert len(raw_sequences) == len(gif_paths)
-        assert len(raw_sequences) == len(X_padded) == len(trajectory_list)
+        assert len(raw_sequences) == len(X_padded) == len(trajectory_list) == len(gif_names)
         assert X_padded.shape[-1] == len(features)
-    
 
-        return raw_sequences, X_padded, gif_paths, features, trajectory_list, metadata_dictionary
+
+        return raw_sequences, X_padded, gif_names, features, trajectory_list, metadata_dictionary
+
+    def sequence_gif_names(self, raw_sequences: list[pd.DataFrame]) -> list[str]:
+        """
+        GIF file name for each sequence: `level_<level_id>_<start>_<end>.gif`.
+
+        `start` and `end` are the sequence's first and last step as positions within its level
+        (0-based, end inclusive), which is also the frame range of `videos/<level_id>.mp4`. The
+        name depends only on which steps a sequence covers, so it doubles as a stable sequence
+        key: the same slice gets the same GIF whatever the feature set, normalization or model,
+        and one GIF folder serves every configuration.
+        """
+        if not raw_sequences:
+            return []
+
+        # Position of every game state within its own level, built once. The slicing methods
+        # take sequences from per-level views of gamestate_df in this same row order.
+        if getattr(self, "_level_positions", None) is None:
+            self._level_positions = self.gamestate_df.groupby("level_id", sort=False).cumcount()
+
+        first_ids = [seq.index[0] for seq in raw_sequences]
+        last_ids = [seq.index[-1] for seq in raw_sequences]
+        starts = self._level_positions.loc[first_ids].to_numpy()
+        ends = self._level_positions.loc[last_ids].to_numpy()
+
+        return [
+            f"level_{int(seq['level_id'].iloc[0])}_{start:06d}_{end:06d}.gif"
+            for seq, start, end in zip(raw_sequences, starts, ends)
+        ]
 
     
     def process_raw_sequences(
@@ -1496,10 +1522,7 @@ class PacmanDataReader:
         context: int = 20,
         rebase_scores: bool = True,
         filter_by_pill: int | None = None,
-        make_gif = False,
-        videos_directory= "../hpc/videos/",
-        gifs_directory = "./Results/subsequences/"
-    ) -> Tuple[list[pd.DataFrame], list[str]]:
+    ) -> list[pd.DataFrame]:
         """
         Load and slice data based on the specified sequence type.
 
@@ -1512,6 +1535,8 @@ class PacmanDataReader:
                 - "last_5_seconds"
                 - "pacman_attack"
                 - "first_50_steps" (for debugging)
+                - "sliding_window"
+                - "fixed_blocks"
         context : int, optional
             Context window (in steps) for special slicing modes, such as "pacman_attack". Default is 20.
         rebase_score (bool): 
@@ -1519,69 +1544,28 @@ class PacmanDataReader:
         filter_by_pill (int, optional): For sequence_type=pacman_attack. If not None, filter by Powerpill idx. I.e., only
             get slices associated with a particular pill. idxs are from 1 to 4. 1 is upper left, and
             it follow clockwise.
-        make_gif : bool, optional
-            Whether to generate GIFs for the sequences. Default is False.
-        videos_directory : str, optional
-            Directory containing input videos for GIF generation.
-        gifs_directory : str, optional
-            Directory to save generated GIFs.
 
         Returns
         -------
-        raw_sequence_list : pd.DataFrame
+        raw_sequence_list : list[pd.DataFrame]
             Extracted raw sequences for the selected sequence_type, containing all collected features.
-        gif_path_list: list[str]
-            If `make_gif = True`, returns a list of paths to each sequence's rendered .gif animation, for augmented visualization.
+            GIF names for them come from sequence_gif_names().
         """
 
         if sequence_type == "first_5_seconds":
-            raw_sequences, gif_paths = self.slice_seq_of_each_level(
-                start_step=0,
-                end_step=100,
-                make_gif=make_gif,
-                videos_directory=videos_directory,
-                gifs_directory=gifs_directory
-            )
+            raw_sequences = self.slice_seq_of_each_level(start_step=0, end_step=100)
         elif sequence_type == "whole_level":
-            raw_sequences, gif_paths = self.slice_seq_of_each_level(
-                start_step=0,
-                end_step=-1,
-                make_gif=make_gif,
-                videos_directory=videos_directory,
-                gifs_directory=gifs_directory
-            )
+            raw_sequences = self.slice_seq_of_each_level(start_step=0, end_step=-1)
         elif sequence_type == "last_5_seconds":
-            raw_sequences, gif_paths = self.slice_seq_of_each_level(
-                start_step=-100,
-                end_step=-1,
-                make_gif=make_gif,
-                videos_directory=videos_directory,
-                gifs_directory=gifs_directory
-            )
+            raw_sequences = self.slice_seq_of_each_level(start_step=-100, end_step=-1)
         elif sequence_type == "pacman_attack":
-            raw_sequences, gif_paths = self.slice_attack_modes(
-                CONTEXT=context,
-                make_gif=make_gif,
-                filter_by_pill = filter_by_pill,
-                videos_directory=videos_directory,
-                gifs_directory=gifs_directory
-            )
+            raw_sequences = self.slice_attack_modes(CONTEXT=context, filter_by_pill=filter_by_pill)
         elif sequence_type == "first_50_steps": # For fast debugging
-            raw_sequences, gif_paths = self.slice_seq_of_each_level(
-                start_step=0, 
-                end_step=50,
-                make_gif=make_gif,
-                videos_directory=videos_directory,
-                gifs_directory=gifs_directory
-            )
+            raw_sequences = self.slice_seq_of_each_level(start_step=0, end_step=50)
         elif sequence_type == "sliding_window":
-            raw_sequences, gif_paths = self.slice_sliding_window(
-            )
-
+            raw_sequences = self.slice_sliding_window()
         elif sequence_type == "fixed_blocks":
-            raw_sequences, gif_paths = self.slice_fixed_blocks(
-            )
-
+            raw_sequences = self.slice_fixed_blocks()
         else:    
             raise ValueError(f"Sequence type ({sequence_type}) not valid")
 
@@ -1593,18 +1577,14 @@ class PacmanDataReader:
                     if "score" in seq.columns and not seq.empty:
                         seq["score"] = seq["score"] - seq.iloc[0]["score"]
 
-        return raw_sequences, gif_paths
+        return raw_sequences
     
     def slice_fixed_blocks(self,
-                             make_gif=False,
                              window_len= 200,
                              overlapping=True,
-                             stride = 20,
-                             videos_directory="../hpc/videos/",
-                             gifs_directory="../Results/subsequences/"):
+                             stride = 20):
         
         raw_sequences = []
-        gif_path_list = []
 
         level_iter = self.level_df["level_id"].unique()
 
@@ -1626,19 +1606,15 @@ class PacmanDataReader:
             for start in start_indices:
                 raw_sequences.append(gamestates.iloc[start:start + window_len])
 
-        return raw_sequences, gif_path_list
+        return raw_sequences
     
     def slice_sliding_window(self,
-                             make_gif=False,
                              min_len = 100,
                              stride = 20,
                              window_growth = 100,
-                             videos_directory="../hpc/videos/",
-                             gifs_directory="../Results/subsequences/"
                              ):
         
         raw_sequences =  []
-        gif_path_list = []
 
         level_iter = self.level_df["level_id"].unique()
 
@@ -1663,17 +1639,14 @@ class PacmanDataReader:
                 window_len += window_growth
 
 
-        return raw_sequences , gif_path_list
+        return raw_sequences
 
 
     def slice_seq_of_each_level(
             self,
             start_step=0,
             end_step=-1,
-            make_gif=False,
-            videos_directory= "../hpc/videos/",
-            gifs_directory = "./Results/subsequences/"
-        )-> tuple[list[pd.DataFrame], list[str]]:
+        )-> list[pd.DataFrame]:
         """
         Extracts a slice (subsequence) of game states for each level, from `start_step` to `end_step`.
         These are iloc type of indices, not "game_state_id" indexs.
@@ -1681,25 +1654,12 @@ class PacmanDataReader:
         Args:
             start_step (int, optional): The starting index (inclusive) of the slice for each level. Defaults to 0.
             end_step (int, optional): The ending index (exclusive) of the slice for each level. If -1, includes all steps to the end. Defaults to -1.
-            make_gif (bool, optional): If True, generates a GIF for each level's subsequence and returns the file paths. Defaults to False.
-            videos_directory (str, optional): Directory containing the videos for each level. Defaults to "../hpc/videos/".
         Returns:
-            tuple:
-                raw_sequences : list[pd.DataFrame] List of DataFrames, each containing all, unfiltered, features for the sliced sequence of a level, with their named columns (useful for behavlets calculations)
-                gif_path_list: list[str] List of GIF file paths (empty if make_gif is False).
+            raw_sequences : list[pd.DataFrame] List of DataFrames, each containing all, unfiltered, features for the sliced sequence of a level, with their named columns (useful for behavlets calculations)
         """
         raw_sequences = []
 
-        gif_path_list = []
-
-        if make_gif:
-            from src.visualization import GameReplayer
-            from tqdm import tqdm
-            replayer = GameReplayer()
-            logger.info("Using augmented visualization, checking for .gif or creating (can take long)")
-            level_iter = tqdm(self.level_df["level_id"].unique(), desc="Processing levels for GIFs")
-        else:
-            level_iter = self.level_df["level_id"].unique()
+        level_iter = self.level_df["level_id"].unique()
 
         for level_id in level_iter:
             gamestates, _ = self._filter_gamestate_data(level_id=level_id, include_metadata=False)
@@ -1723,32 +1683,13 @@ class PacmanDataReader:
 
             raw_sequences.append(gamestates)
 
-
-            ## and create video_sequence
-            if make_gif:
-                gif_path = os.path.join(gifs_directory, f"level_{level_id}_{start_step_:06d}_{end_step_:06d}.gif")
-                gif_path_list.append(gif_path)
-                if not os.path.exists(gif_path):
-                    replayer.extract_gamestate_subsequence_ffmpeg(
-                        video_path=os.path.join(videos_directory, f"{level_id}.mp4"),
-                        start_gamestate=start_step_, 
-                        end_gamestate=end_step_,
-                        output_path=gif_path)
-                    
-                else:
-                    # print(f"sequence for level_id {level_id} already exists, skipping")
-                    pass
-
-        return raw_sequences, gif_path_list
+        return raw_sequences
     
 
     def slice_attack_modes(self,
                            CONTEXT: int = 20,
-                           make_gif: bool=False,
                            filter_by_pill:int | None = None,
-                           cut_long_outliers = True,
-                           videos_directory= "../hpc/videos/",
-                           gifs_directory = "./Results/subsequences/"):
+                           cut_long_outliers = True):
         """
         Extracts and slices sequences of game states where Pac-Man is in "attack mode".
 
@@ -1762,26 +1703,18 @@ class PacmanDataReader:
             filter_by_pill (int, optional): If not None, filter by Powerpill idx. I.e., only
                 get slices associated with a particular pill. idxs are from 1 to 4. 1 is upper left, and
                 it follow clockwise.
-            cut_long_outliers (bool, optional): Default to True. It removes long sequences that are a
-                combination of two sequential attack modes (less than 2% of the sample).
+            cut_long_outliers (bool, optional): Default to True. Trims the longest 5% of sequences
+                (mostly two attack modes in a row) down to the 95th-percentile length, keeping
+                their start.
             
         Returns:
             raw_sequences (list): List of DataFrames, each containing a sequence of game states
                 where Pac-Man is in attack mode for a given level.
-            gif_path_list (list): Empty list (reserved for future use, e.g., GIF generation).
         """
 
         raw_sequences = []
-        gif_path_list = []
 
-        if make_gif:
-            from src.visualization import GameReplayer
-            from tqdm import tqdm
-            replayer = GameReplayer()
-            logger.info("Using augmented visualization, checking for .gif or creating (can take long if first time)")
-            level_iter = tqdm(self.level_df["level_id"].unique(), desc="Processing levels for GIFs")
-        else:
-            level_iter = self.level_df["level_id"].unique()
+        level_iter = self.level_df["level_id"].unique()
 
         for level_id in level_iter:
             gamestates = self._filter_gamestate_data(level_id=level_id)[0]
@@ -1827,38 +1760,8 @@ class PacmanDataReader:
                     first_pill_to_change_idx = first_change_col_idx + 1 # to align with 1,2,3,4 og indexs of pills
                     if first_pill_to_change_idx == filter_by_pill:
                         raw_sequences.append(sliced_sequence)
-                                            ## and create video_sequence
-                        if make_gif:
-                            gif_path = os.path.join(gifs_directory, f"level_{level_id}_{start_index:06d}_{end_index:06d}.gif")
-                            gif_path_list.append(gif_path)
-                            if not os.path.exists(gif_path):
-                                replayer.extract_gamestate_subsequence_ffmpeg(
-                                    video_path=os.path.join(videos_directory, f"{level_id}.mp4"),
-                                    start_gamestate=start_index, 
-                                    end_gamestate=end_index,
-                                    output_path=gif_path)
-                                
-                            else:
-                                # print(f"sequence for level_id {level_id} already exists, skipping")
-                                pass
-                    else:
-                        pass
                 else: # if no filtering by pill, append all found sequences
                     raw_sequences.append(sliced_sequence)
-                    ## and create video_sequence
-                    if make_gif:
-                        gif_path = os.path.join(gifs_directory, f"level_{level_id}_{start_index:06d}_{end_index:06d}.gif")
-                        gif_path_list.append(gif_path)
-                        if not os.path.exists(gif_path):
-                            replayer.extract_gamestate_subsequence_ffmpeg(
-                                video_path=os.path.join(videos_directory, f"{level_id}.mp4"),
-                                start_gamestate=start_index, 
-                                end_gamestate=end_index,
-                                output_path=gif_path)
-                            
-                        else:
-                            # print(f"sequence for level_id {level_id} already exists, skipping")
-                            pass
             
         if cut_long_outliers:
             lengths = [len(seq) for seq in raw_sequences]
@@ -1869,7 +1772,7 @@ class PacmanDataReader:
                 cut_len = lengths_sorted[cut_idx]
                 raw_sequences = [seq[:cut_len] if len(seq) > cut_len else seq for seq in raw_sequences]
 
-        return raw_sequences, gif_path_list
+        return raw_sequences
 
 
     @staticmethod

@@ -406,7 +406,7 @@ if __name__ == '__main__':
     print("Loading data (pacman_attack slices using ghost astar distances)")
     reader = PacmanDataReader(data_folder="data/")
     
-    raw_sequence_list, _ = reader.slice_attack_modes(
+    raw_sequence_list = reader.slice_attack_modes(
             CONTEXT=20
         )
     

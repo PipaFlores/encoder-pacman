@@ -114,53 +114,46 @@ class TestValidationEncodingsCache:
         assert not os.path.exists(cache_path)
 
 
-class TestGifBackfill:
-    """augmented_visualization is excluded from the data-cache fingerprint (it doesn't affect
-    raw/processed/trajectory/metadata), so an entry cached without gifs is reused across it.
-    But gif paths aren't derivable from the cached data - the only way to get them is another
-    reader.make_data(make_gif=True) call - so build_data() must backfill them into the cache
-    on demand rather than silently returning an empty list. reader.make_data is mocked here so
-    the test doesn't depend on ffmpeg or real video files, only on build_data()'s control flow."""
+class TestGifPaths:
+    """GIF paths are derived from the sequences on every build_data(), never read from the
+    cache, so they follow gifs_folder and survive cache entries written by older code."""
 
-    def test_backfills_gifs_into_a_gifless_cache_entry(self, tmp_path, monkeypatch):
-        pa = make_pattern_analysis(tmp_path, augmented_visualization=False)
+    def test_same_paths_on_cache_miss_and_hit_under_gifs_folder(self, tmp_path):
+        gifs = tmp_path / "gifs"
+        pa = make_pattern_analysis(tmp_path, augmented_visualization=True)
+        pa.gifs_folder = str(gifs)
         pa.build_data()
-        assert pa.gif_path_list == []
+
+        assert len(pa.gif_path_list) == MAX_SAMPLES
+        assert all(os.path.dirname(p) == str(gifs) for p in pa.gif_path_list)
+
+        # A stale third slot (as written before GIFs were named from the final sequences)
+        # must not leak through on a cache hit.
         fingerprint = pa._data_fingerprint
-        real_raw, real_processed, real_features, real_traj, real_meta = (
-            pa.raw_sequence_data, pa.processed_sequence_data, pa.features_columns,
-            pa.trajectory_list, pa.metadata_dictionary,
-        )
+        cache_path = pa._data_cache_path(fingerprint)
+        cached = list(pa._load_cache(cache_path, fingerprint))
+        cached[2] = ["./Results/subsequences/stale.gif"] * MAX_SAMPLES
+        pa._save_cache(cache_path, fingerprint, tuple(cached))
 
-        pa2 = make_pattern_analysis(tmp_path, augmented_visualization=True)
-        assert pa2._compute_data_fingerprint() == fingerprint  # same cache entry is reused
+        pa_hit = make_pattern_analysis(tmp_path, augmented_visualization=True)
+        pa_hit.gifs_folder = str(gifs)
+        pa_hit.build_data()
+        assert pa_hit.gif_path_list == pa.gif_path_list
 
-        calls = []
 
-        def fake_make_data(**kwargs):
-            calls.append(kwargs.get("make_gif"))
-            fake_gifs = [f"fake_{i}.gif" for i in range(len(real_raw))]
-            return real_raw, real_processed, fake_gifs, real_features, real_traj, real_meta
+class TestGifUrlsRelativeToHtml:
+    """`<img src>` must resolve from the folder the HTML is saved in, wherever that is
+    relative to the GIFs (the old rewrite only worked for one particular save folder)."""
 
-        monkeypatch.setattr(pa2.reader, "make_data", fake_make_data)
-        pa2.build_data()
+    @pytest.mark.parametrize("html", ["out.html", "figs/out.html", "a/b/out.html", "gifs/out.html"])
+    def test_url_resolves_from_html_folder(self, tmp_path, html):
+        gif = tmp_path / "hpc" / "gifs" / "level_1_000000_000099.gif"
+        html_path = tmp_path / "notebooks" / html
 
-        assert calls == [True]  # exactly one backfill call, requesting gifs
-        assert pa2.gif_path_list == [f"fake_{i}.gif" for i in range(MAX_SAMPLES)]
+        (url,) = PatternAnalysis._gif_urls_relative_to(str(html_path), [str(gif)])
 
-        cache_path = pa2._data_cache_path(fingerprint)
-        cached = pa2._load_cache(cache_path, fingerprint)
-        assert cached[2] == pa2.gif_path_list  # the cache entry now carries the backfilled gifs
-
-        # A further augmented_visualization=True run must hit the now-complete cache entry
-        # without calling reader.make_data() again.
-        def fail_make_data(**kwargs):
-            raise AssertionError("should not recompute: cache already has gifs")
-
-        pa3 = make_pattern_analysis(tmp_path, augmented_visualization=True)
-        monkeypatch.setattr(pa3.reader, "make_data", fail_make_data)
-        pa3.build_data()
-        assert pa3.gif_path_list == pa2.gif_path_list
+        assert "\\" not in url
+        assert (html_path.parent / url).resolve() == gif.resolve()
 
 
 class TestIgnoreCache:
@@ -175,17 +168,22 @@ class TestIgnoreCache:
         fingerprint = pa._data_fingerprint
         cache_path = pa._data_cache_path(fingerprint)
 
-        pa._save_cache(cache_path, fingerprint, ("tampered", None, None, None, None, None))
+        # Tampered = well-formed but recognisably wrong (3 sequences instead of MAX_SAMPLES), since
+        # build_data() derives GIF names from whatever sequences it loads.
+        n_tampered = 3
+        pa._save_cache(cache_path, fingerprint, (
+            pa.raw_sequence_data[:n_tampered], pa.processed_sequence_data[:n_tampered], None,
+            pa.features_columns, pa.trajectory_list[:n_tampered], pa.metadata_dictionary,
+        ))
 
         # Sanity check: without ignore_cache, the tampered entry would be trusted as-is.
         pa_trusting = make_pattern_analysis(tmp_path)
         pa_trusting.build_data()
-        assert pa_trusting.raw_sequence_data == "tampered"
+        assert len(pa_trusting.raw_sequence_data) == n_tampered
 
         # ignore_cache=True must skip the tampered entry and recompute for real.
         pa_ignoring = make_pattern_analysis(tmp_path)
         pa_ignoring.build_data(ignore_cache=True)
-        assert pa_ignoring.raw_sequence_data != "tampered"
         assert len(pa_ignoring.raw_sequence_data) == MAX_SAMPLES
 
         # ...and it must have overwritten the cache with that fresh result.
