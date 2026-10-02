@@ -1,10 +1,11 @@
-from typing import Tuple
-import pandas as pd
 import functools
-import time
-import numpy as np
 import os
+import time
+
+import numpy as np
+import pandas as pd
 from sklearn.neighbors import NearestNeighbors
+
 
 def timer(func):
     @functools.wraps(func)
@@ -128,7 +129,7 @@ def pos_mirroring(df, return_quadrant=False):
 
 def calculate_velocities(
     trajectory: np.ndarray, round: bool = True
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Calculate velocities from position data, it rounds and removes signed zeros to avoid noise issues.
 
@@ -162,7 +163,7 @@ def calculate_velocities(
 
 
 
-def replace_inf_with_feature_max(data: np.ndarray) -> np.ndarray:
+def replace_inf_with_feature_max(data: np.ndarray, padding_value: float | None = None) -> np.ndarray:
     """
     Replace infinite values with the largest finite value of their own feature.
 
@@ -179,6 +180,8 @@ def replace_inf_with_feature_max(data: np.ndarray) -> np.ndarray:
 
     Args:
         data: Array whose last axis is the feature axis, e.g. [n_samples, seq_len, n_features].
+        padding_value: Padding sentinel to leave out of the per-feature maximum. It is finite, so
+            without this an all-inf feature would be filled with the sentinel instead of 0.
 
     Returns:
         np.ndarray: The input unchanged when it holds no infinities, otherwise a copy with them
@@ -190,7 +193,10 @@ def replace_inf_with_feature_max(data: np.ndarray) -> np.ndarray:
     cleaned = data.copy()
     for feat_idx in range(data.shape[-1]):
         feat_data = data[..., feat_idx]
-        finite_values = feat_data[np.isfinite(feat_data)]
+        candidates = np.isfinite(feat_data)
+        if padding_value is not None:
+            candidates &= feat_data != padding_value
+        finite_values = feat_data[candidates]
         fill_value = finite_values.max() if finite_values.size else 0.0
         cleaned[..., feat_idx] = np.where(np.isinf(feat_data), fill_value, feat_data)
 

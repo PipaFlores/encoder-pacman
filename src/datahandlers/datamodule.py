@@ -1,9 +1,9 @@
 
-from torch.utils.data import DataLoader, Dataset, random_split
-import torch
-import pandas as pd
-import numpy as np
 import sys
+
+import numpy as np
+import torch
+from torch.utils.data import Dataset
 
 sys.path.append("..")
 
@@ -49,7 +49,7 @@ class PacmanDataset(Dataset):
             self.obs_mask = torch.ones_like(self.gamestates, dtype=torch.float) ## obs_mask deactivated (all True)
 
         if torch.isinf(self.gamestates).any():
-            self.gamestates = replace_inf(self.gamestates)
+            self.gamestates = replace_inf(self.gamestates, padding_value=padding_value)
 
         # Padded timesteps still hold the raw padding_value sentinel at this point.
         # Zero them out so no model ever sees that out-of-distribution value directly;
@@ -110,7 +110,7 @@ class ImputationDataset(Dataset):
             distribution: The distribution from which mask lengths are sampled.
             exclude_feats: List of features (by index) not to be masked.
         """
-        super(ImputationDataset, self).__init__()
+        super().__init__()
         self.masking_ratio = masking_ratio
         self.mean_mask_length = mean_mask_length
         self.mode = mode
@@ -134,7 +134,7 @@ class ImputationDataset(Dataset):
 
 
         if torch.isinf(self.gamestates).any():
-            self.gamestates = replace_inf(self.gamestates)
+            self.gamestates = replace_inf(self.gamestates, padding_value=padding_value)
 
         # Padded timesteps still hold the raw padding_value sentinel at this point.
         # Zero them out so no model ever sees that out-of-distribution value directly;
@@ -221,27 +221,34 @@ def collate_dynamic_padding(batch: list[dict]) -> dict:
     return default_collate(trimmed)
 
 
-def replace_inf(array: np.ndarray):
+def replace_inf(array: np.ndarray, padding_value: float | None = None):
     """
-    Replace infinite values (np.inf or -np.inf) in a multi-dimensional array with the maximum finite value of 
+    Replace infinite values (np.inf or -np.inf) in a multi-dimensional array with the maximum finite value of
     their corresponding feature (last dimension/column).
 
     This function:
     - Flattens the array across the first dimensions, preserving the last dimension as features.
-    - Computes the maximum finite value for each feature, ignoring any infinite entries.
+    - Computes the maximum finite value for each feature, ignoring any infinite entries (and any
+      `padding_value` entries).
     - For each feature, all infinite values are replaced with that feature's maximum finite value.
       If an entire feature consists only of infinite values, those entries are set to 0.
 
     Args:
-        array (np.ndarray): Input array of shape (..., feature_dim) containing numerical values. Infinite values 
+        array (np.ndarray): Input array of shape (..., feature_dim) containing numerical values. Infinite values
             will be replaced.
+        padding_value (float, optional): Padding sentinel to leave out of the per-feature maximum. The
+            sentinel is finite, so without this a feature that is inf at every real timestep (e.g. a
+            ghost that never leaves the house in first_5_seconds) would take the sentinel as its
+            "maximum" and feed it to the model at every real timestep.
 
     Returns:
         np.ndarray: Array of the same shape as the input, with infinite values replaced as described above.
     """
     flat = array.view(-1, array.shape[-1])
-    # Mask out inf values for max computation
+    # Mask out inf (and padding) values for max computation
     finite_mask = torch.isfinite(flat)
+    if padding_value is not None:
+        finite_mask = finite_mask & (flat != padding_value)
     # For each feature, get max of finite values
     max_per_feature = torch.where(
         finite_mask.any(dim=0),

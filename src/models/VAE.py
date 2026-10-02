@@ -3,6 +3,11 @@ import math
 import os
 from torch import nn, Tensor
 from torch.nn import functional as F
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
 
 
 class VanillaVAE(nn.Module):
@@ -358,6 +363,7 @@ class VAE_Trainer():
         for epoch in range(self.max_epochs):
             self.model.train()
             loss_sum = 0
+            kld_sum = 0
 
             for batch in train_iter:
                 x = batch["data"].to(self.device)
@@ -380,9 +386,10 @@ class VAE_Trainer():
                                           mu=mu,
                                           log_var=log_var,
                                           padding_mask=padding_mask, 
-                                          obs_mask=obs_mask) 
+                                          obs_mask=obs_mask)
                 loss_sum += batch_loss.item()
-                
+                kld_sum += kld_loss.item()
+
                 batch_loss.backward()
                 # Gradient clipping in case of exploding gradients
                 if self.gradient_clipping is not None:
@@ -391,7 +398,8 @@ class VAE_Trainer():
 
             if self.validation_split > 0:
                 self.model.eval()
-                val_loss_sum = 0 
+                val_loss_sum = 0
+                val_kld_sum = 0
 
                 for batch in val_iter:
                     with torch.no_grad():
@@ -405,23 +413,45 @@ class VAE_Trainer():
                         if obs_mask is not None:
                             obs_mask = batch["obs_mask"].to(self.device)
 
-                        batch_loss, kls_loss = loss.forward(recon=x_h,
+                        batch_loss, kld_loss = loss.forward(recon=x_h,
                                                   input=x,
                                                   mu=mu,
                                                   log_var=log_var,
-                                                  padding_mask=padding_mask, 
+                                                  padding_mask=padding_mask,
                                                   obs_mask=obs_mask)
                         val_loss_sum += batch_loss.item()
+                        val_kld_sum += kld_loss.item()
 
 
+            # VAELoss returns (recon + kld_weight * kld, kld), so the reconstruction term
+            # is recovered from the total. The KLD is kept unweighted so runs with
+            # different kld_weight values stay comparable.
             epoch_train_loss = loss_sum / len(train_iter)
+            epoch_train_kld = kld_sum / len(train_iter)
+            epoch_train_recon = epoch_train_loss - self.kld_weight * epoch_train_kld
             self.train_loss_list.append(epoch_train_loss)
             self.model.loss_history = self.train_loss_list
 
             if self.validation_split > 0:
                 epoch_val_loss = val_loss_sum / len(val_iter)
+                epoch_val_kld = val_kld_sum / len(val_iter)
+                epoch_val_recon = epoch_val_loss - self.kld_weight * epoch_val_kld
                 self.val_loss_list.append(epoch_val_loss)
                 self.model.val_loss_history = self.val_loss_list
+
+            # A NaN/inf loss never recovers (the weights are already non-finite), and it can
+            # never beat best_loss, so carrying on only burns epochs and overwrites
+            # last_path. Stop here: keep the best checkpoint if this run saved one,
+            # otherwise there is no usable model and the caller must hear about it.
+            monitored_loss = epoch_val_loss if self.validation_split > 0 else epoch_train_loss
+            if not (math.isfinite(epoch_train_loss) and math.isfinite(monitored_loss)):
+                message = (f"Non-finite loss at epoch {epoch + 1} "
+                           f"(train={epoch_train_loss}, monitored={monitored_loss})")
+                if self.save_model and math.isfinite(best_loss):
+                    print(f"WARNING: {message}; stopping training and keeping the best checkpoint "
+                          f"(loss={best_loss}) at {self.best_path}")
+                    break
+                raise FloatingPointError(f"{message} and no finite epoch to fall back on")
 
             if self.save_model:
                 if self.best_path is None or self.last_path is None:
@@ -443,17 +473,29 @@ class VAE_Trainer():
 
             if self.verbose:
                 print(f"Epoch {epoch + 1}: Train loss={epoch_train_loss}, Val loss={epoch_val_loss if self.validation_split > 0 else ''}")
-            
-            # FIXME setup logging
-            # if self.wandb_run and WANDB_AVAILABLE:
-            #     self.wandb_run.log(
-            #         {
-            #             "epoch": epoch + 1,
-            #             "train_loss" : epoch_train_loss,
-            #             "val_loss": epoch_val_loss if self.validation_split > 0 else None,
-            #         }
-            #     )
-        
+            if self.wandb_run and WANDB_AVAILABLE:
+                has_val = self.validation_split > 0
+                self.wandb_run.log(
+                    {
+                        "epoch": epoch + 1,
+                        "train_loss" : epoch_train_loss,
+                        "train_recon_loss": epoch_train_recon,
+                        "train_kld": epoch_train_kld,
+                        "val_loss": epoch_val_loss if has_val else None,
+                        "val_recon_loss": epoch_val_recon if has_val else None,
+                        "val_kld": epoch_val_kld if has_val else None,
+                    }
+                )
+
+        if self.wandb_run and WANDB_AVAILABLE and self.save_model:
+            artifact = wandb.Artifact('model', type='model')
+
+            # Add both best and last model files as artifact assets
+            artifact.add_file(self.best_path)
+            artifact.add_file(self.last_path)
+
+            self.wandb_run.log_artifact(artifact)
+
 
     def plot_loss(self, save_path: str | None = None):
         import matplotlib.pyplot as plt

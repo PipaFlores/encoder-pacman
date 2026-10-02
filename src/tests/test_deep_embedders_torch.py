@@ -16,10 +16,10 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from src.datahandlers import ImputationDataset, PacmanDataset  # noqa: E402
-from src.models import (  # noqa: E402
-    AE_Trainer,
+from src.datahandlers import ImputationDataset, PacmanDataset
+from src.models import (
     AELSTM,
+    AE_Trainer,
     MLPAutoencoder,
     TimeVAE,
     Transformer_Trainer,
@@ -165,6 +165,54 @@ class TestVanillaVAE:
         assert len(trainer.train_loss_list) == 1
         assert math.isfinite(trainer.train_loss_list[-1])
 
+    def test_non_finite_loss_from_the_start_raises(self):
+        """NaN on every epoch leaves no checkpoint to fall back on, so training must fail
+        loudly rather than run to max_epochs and leave the caller without a _best.pth."""
+        data = make_synthetic_sequences()
+        data[0, 0, 0] = np.nan  # obs_mask zeroes its loss, but NaN * 0 is still NaN
+        model = VanillaVAE(input_dim=N_FEATURES, seq_len=SEQ_LEN, latent_dim=LATENT_DIM, hidden_dims=[8, 16])
+        trainer = VAE_Trainer(max_epochs=5, batch_size=N_SAMPLES, validation_split=0, verbose=False)
+
+        with pytest.raises(FloatingPointError):
+            trainer.fit(model, PacmanDataset(gamestates=data))
+
+        assert len(trainer.train_loss_list) == 1
+
+    def test_non_finite_loss_after_a_good_epoch_keeps_the_best_checkpoint(self, tmp_path):
+        """Divergence after a finite epoch stops training early and leaves that epoch's
+        checkpoint on disk for the caller to embed with."""
+
+        class DivergesOnSecondEpoch(VanillaVAE):
+            epochs_started = 0
+
+            def train(self, mode: bool = True):
+                if mode:
+                    self.epochs_started += 1
+                return super().train(mode)
+
+            def forward(self, *args, **kwargs):
+                recon, mu, log_var = super().forward(*args, **kwargs)
+                if self.epochs_started >= 2:
+                    recon = recon * float("nan")
+                return [recon, mu, log_var]
+
+        model = DivergesOnSecondEpoch(input_dim=N_FEATURES, seq_len=SEQ_LEN, latent_dim=LATENT_DIM, hidden_dims=[8, 16])
+        trainer = VAE_Trainer(
+            max_epochs=5,
+            batch_size=4,
+            validation_split=0.3,
+            verbose=False,
+            save_model=True,
+            best_path=str(tmp_path / "best.pth"),
+            last_path=str(tmp_path / "last.pth"),
+        )
+
+        trainer.fit(model, PacmanDataset(gamestates=make_synthetic_sequences()))
+
+        assert len(trainer.train_loss_list) == 2
+        state = torch.load(tmp_path / "best.pth")
+        assert all(torch.isfinite(t).all() for t in state.values() if t.is_floating_point())
+
     def test_decoder_output_is_unbounded(self):
         """The reconstruction must be able to reach any real value, since global
         normalization z-scores most features and ~28% of pacman_attack values exceed +-1.
@@ -221,3 +269,33 @@ class TestTimeVAE:
 
         assert len(trainer.train_loss_list) == 1
         assert math.isfinite(trainer.train_loss_list[-1])
+
+
+class TestInfReplacement:
+    """A feature that is inf at every real timestep (a ghost that never leaves the house in
+    first_5_seconds) must not inherit the -999 padding sentinel as its "maximum"."""
+
+    PADDING = -999.0
+
+    def make_padded_with_all_inf_feature(self):
+        data = make_synthetic_sequences()
+        data[..., 1] = np.inf  # feature 1 is never finite on a real timestep
+        data[:, -3:, :] = self.PADDING  # last 3 timesteps are padding
+        return data
+
+    @pytest.mark.parametrize("dataset_cls", [PacmanDataset, ImputationDataset])
+    def test_datasets_fill_an_all_inf_feature_with_zero(self, dataset_cls):
+        dataset = dataset_cls(gamestates=self.make_padded_with_all_inf_feature(), padding_value=self.PADDING)
+
+        valid = dataset.padding_mask.bool()
+        assert torch.isfinite(dataset.gamestates).all()
+        assert (dataset.gamestates[valid][:, 1] == 0).all()
+        assert (dataset.gamestates[~valid] == 0).all()
+
+    def test_numpy_helper_ignores_padding(self):
+        from src.utils import replace_inf_with_feature_max
+
+        cleaned = replace_inf_with_feature_max(self.make_padded_with_all_inf_feature(), padding_value=self.PADDING)
+
+        assert (cleaned[:, :-3, 1] == 0).all()
+        assert (cleaned[:, -3:, :] == self.PADDING).all()  # padding itself is left for the caller
