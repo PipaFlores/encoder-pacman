@@ -654,33 +654,28 @@ class PacmanDataReader:
         """
         Calculates and inserts A* (Astar) distances between Pacman and each ghost for every game state.
 
-        This method iterates through each row in the gamestate DataFrame, extracts the positions of Pacman and all ghosts,
-        and uses the Astar algorithm to compute the shortest path distance from each ghost to Pacman, taking into account
-        the maze's wall layout. The resulting distances are inserted as new columns (Ghost1_distance, Ghost2_distance, etc.)
-        in the gamestate DataFrame.
+        Distances are the maze shortest-path distance from each ghost to Pacman, inserted as new columns
+        (Ghost1_distance, Ghost2_distance, etc.) in the gamestate DataFrame; inf when no path exists
+        (e.g. a ghost inside the ghost house).
+
+        Rather than running A* per row, this looks them up in a `MazeDistances` table, precomputed once
+        on the same lattice and neighbour rule as `Astar.calculate_path_and_distance` and identical to it
+        query for query, so the whole dataset takes seconds instead of most of an hour.
 
         Returns:
             pd.DataFrame: The updated gamestate DataFrame with Astar distances for each ghost.
         """
-        from src.utils import Astar
-        from tqdm import tqdm
+        from src.utils import Astar, MazeDistances
 
         gamestate_df = self.gamestate_df.copy()
-        wall_grid = Astar.generate_squared_walls(load_maze_data()[0])
+        maze_distances = MazeDistances(Astar.generate_squared_walls(load_maze_data()[0]))
 
-        for state in tqdm(gamestate_df.itertuples(), total=len(gamestate_df), desc="Calculating A* distances"):
-            pac_pos = (state.Pacman_X, state.Pacman_Y)
-            ghost_positions = [
-                (getattr(state, f"Ghost{i + 1}_X"), getattr(state, f"Ghost{i + 1}_Y"))
-                for i in range(4)
-            ]
-            results = Astar.calculate_ghost_paths_and_distances(
-                pacman_pos=pac_pos,
-                ghost_positions=ghost_positions,
-                grid=wall_grid
+        pacman_positions = gamestate_df[["Pacman_X", "Pacman_Y"]].to_numpy()
+        for i in range(1, 5):
+            gamestate_df[f"Ghost{i}_distance"] = maze_distances.distances(
+                starts=gamestate_df[[f"Ghost{i}_X", f"Ghost{i}_Y"]].to_numpy(),
+                goals=pacman_positions,
             )
-            for idx, result in enumerate(results):
-                gamestate_df.at[state.game_state_id, f"Ghost{idx+1}_distance"] = result[1]
 
         return gamestate_df
 

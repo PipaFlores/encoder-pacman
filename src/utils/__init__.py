@@ -2,6 +2,7 @@ from .utils import *
 from .Astar import *
 from .logger import setup_logger
 from .grid_analyzer import GridAnalyzer
+from .maze_distances import MazeDistances
 
 __all__ = [
     "calculate_velocities",
@@ -12,4 +13,5 @@ __all__ = [
     "Astar",
     "setup_logger",
     "GridAnalyzer",
+    "MazeDistances",
 ]
