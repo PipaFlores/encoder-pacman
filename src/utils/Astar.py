@@ -1,9 +1,31 @@
 import math
 
+# The two ends of the side tunnel, adjacent to each other through the wrap.
+TUNNEL_POS = [(-13.5, -0.5), (13.5, -0.5)]
+
 
 def manhattan_distance(pos1, pos2):
     """Calculate the Manhattan distance between two positions."""
     return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1])
+
+
+def tunnel_aware_distance(pos1, pos2, wrap_cost):
+    """
+    A* heuristic: Manhattan distance, allowing a route through the side tunnel.
+
+    Plain Manhattan distance treats the two tunnel ends as ~27 units apart although they are
+    adjacent, so it overestimates any route through the tunnel and A* returns the longer way
+    round. Taking the shorter of the direct estimate and the two estimates via the wrap keeps
+    the heuristic admissible, so A* returns exact shortest paths.
+
+    `wrap_cost` must equal what the search charges for stepping between the tunnel ends.
+    """
+    left, right = TUNNEL_POS
+    return min(
+        manhattan_distance(pos1, pos2),
+        manhattan_distance(pos1, left) + wrap_cost + manhattan_distance(right, pos2),
+        manhattan_distance(pos1, right) + wrap_cost + manhattan_distance(left, pos2),
+    )
 
 
 def transform_to_grid(pos):
@@ -49,7 +71,6 @@ def generate_squared_walls(wall_positions):
 def get_neighbors(pos, wall_positions, step, blocked_positions=None):
     """Get valid neighboring positions (up, right, down, left)."""
     # print(f"getting neighbor for {pos}")
-    TUNNEL_POS = [(-13.5, -0.5), (13.5, -0.5)]
     x, y = pos
     neighbors = [
         (x, y + step),  # up
@@ -131,7 +152,9 @@ def calculate_path_and_distance(start, goal, grid, blocked_positions=None):
 
             if next_pos not in cost_so_far or new_cost < cost_so_far[next_pos]:
                 cost_so_far[next_pos] = new_cost
-                priority = new_cost + manhattan_distance(next_pos, goal)
+                priority = new_cost + tunnel_aware_distance(
+                    next_pos, goal, wrap_cost=STEP
+                )
                 heappush(frontier, (priority, next_pos))
                 came_from[next_pos] = current
 
