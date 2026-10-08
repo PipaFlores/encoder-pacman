@@ -152,6 +152,25 @@ class TestPacmanDataReader:
         assert processed.shape[0] == len(raw_sequences)
         assert processed.shape[-1] == len(features)
 
+    def test_make_data_speed_correction(self, reader):
+        """
+        Speed correction resamples only the model input: first_5_seconds becomes 80 steps at
+        every level (the distance a level-1 Pac-Man covers in 100 frames), while raw_sequences
+        keep every frame for behavlets, GIFs and trajectories.
+        """
+        raw_sequences, processed, _, features, _, _ = reader.make_data(
+            feature_set="Pacman",
+            sequence_type="first_5_seconds",
+            max_samples=50,
+            speed_correction=True,
+        )
+
+        full_length = [i for i, seq in enumerate(raw_sequences) if len(seq) == 100]
+        assert full_length
+        assert processed.shape[1] == 80
+        valid_steps = (processed[full_length] != -999.0).any(axis=-1).sum(axis=1)
+        assert (valid_steps == 80).all()
+
     def test_gif_names_cover_exactly_each_final_sequence(self, reader):
         """
         Regression test: slice_attack_modes trims its longest 5% of sequences after slicing,

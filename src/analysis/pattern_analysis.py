@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import pickle
 import random
@@ -113,6 +114,7 @@ class PatternAnalysis:
             elementwise_masking: bool = False,
             use_best: bool = True,
             sort_distances: bool = False,
+            speed_correction: bool = False,
             random_seed: int | None = None,
             verbose: bool = False,
             max_samples: int | None = False,
@@ -166,9 +168,13 @@ class PatternAnalysis:
             elementwise_masking (bool): Whether or not to use element-wise masking during training (only pytorch models)
             use_best (bool): Whether to use best or last autoencoder model.
             sort_distance (bool): If using Astar distances as features, sort them in ascending order.
+            speed_correction (bool): Resample the model input so every step covers the same
+                distance at every level, removing Pac-Man's per-level speed-up (see
+                PacmanDataReader.speed_correction_positions). raw_sequence_data keeps every frame.
             random_seed (int | None): Random seed for reproducibility.
             max_samples (int | None): Max number of samples to be used, for fast debugging purposes
-            verbose (bool): If True, enables verbose logging.
+            verbose (bool): If True, enables verbose (INFO) logging, for this class and for the
+                data reader (loading steps, speed correction).
             wandb_logging
             wandb_logging_comment
 
@@ -211,6 +217,7 @@ class PatternAnalysis:
         self.validation_data_split = validation_data_split
         self.use_best = use_best
         self.sort_distances = sort_distances
+        self.speed_correction = speed_correction
         self.max_samples = max_samples
         self.elementwise_masking = elementwise_masking
 
@@ -226,6 +233,10 @@ class PatternAnalysis:
 
         # Core components
         self.reader = reader if reader is not None else PacmanDataReader(data_folder, read_games_only= read_games_only)
+        if verbose:
+            # The reader logs its own steps (loading, speed correction) on its module's logger.
+            # Set it only now: a newly created reader resets that logger to WARNING in __init__.
+            logging.getLogger(PacmanDataReader.__module__).setLevel("INFO")
         # Neural-Network embedding -> Reducer -> clusterer
         self.feature_set = feature_set
         self.features_columns = self._get_feature_columns(feature_set)
@@ -558,7 +569,8 @@ class PatternAnalysis:
                     filter_by_pill=self.filter_by_pill,
                     sort_ghost_distances=self.sort_distances,
                     normalization=self.normalization,
-                    max_samples=self.max_samples
+                    max_samples=self.max_samples,
+                    speed_correction=self.speed_correction,
                 )
                 self._save_cache(cache_path, fingerprint, (
                     self.raw_sequence_data, self.processed_sequence_data, gif_names,
@@ -641,6 +653,7 @@ class PatternAnalysis:
             "filter_by_pill": self.filter_by_pill,
             "sort_distances": self.sort_distances,
             "normalization": self.normalization,
+            "speed_correction": self.speed_correction,
             "max_samples": self.max_samples,
             "read_games_only": self.reader.read_games_only,
             "source_data": self._source_data_fingerprint(),
@@ -699,7 +712,9 @@ class PatternAnalysis:
 
         `kld_weight` is appended only for the VAE family and only when it differs from the
         default, so a sweep over it does not have every point overwrite the same file while
-        checkpoints trained at the default keep their existing names.
+        checkpoints trained at the default keep their existing names. `speed_correction` is
+        appended the same way, only when on: it changes what the model is trained on (and the
+        sequence length), so corrected and uncorrected models must not share a file.
         """
         if test_dataset:
             return "test_data"
@@ -708,6 +723,9 @@ class PatternAnalysis:
 
         if TORCH_AVAILABLE and isinstance(self.embedder, (VanillaVAE, TimeVAE)) and self.kld_weight != DEFAULT_KLD_WEIGHT:
             stem += f"_kld{self.kld_weight:g}"
+
+        if self.speed_correction:
+            stem += "_speedcorr"
 
         return stem
 
@@ -868,6 +886,7 @@ class PatternAnalysis:
                         "validation_data_split": 0,
                         "elementwise_masking": False,
                         "sort_distances": self.sort_distances,
+                        "speed_correction": self.speed_correction,
                         "filter_by_pill": self.filter_by_pill,
                         "rebase_score": self.rebase_score,
                         # Model architecture
@@ -2157,6 +2176,7 @@ class PatternAnalysis:
             "validation_data_split": self.validation_data_split,
             "elementwise_masking": self.elementwise_masking,
             "sort_distances": self.sort_distances,
+            "speed_correction": self.speed_correction,
             "filter_by_pill": self.filter_by_pill,
             "rebase_score": self.rebase_score,
             # Model architecture

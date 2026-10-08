@@ -100,6 +100,7 @@ class RunConfig:
     feature_set: str = "Pacman"
     normalization: Optional[str] = None
     sort_ghost_distances: bool = False
+    speed_correction: bool = False
 
     # Embedding
     embedder: Optional[str] = "LSTM"
@@ -397,6 +398,7 @@ def build_analysis(config: RunConfig) -> "PatternAnalysis":
         max_samples=config.max_samples,
         dropout=config.dropout,
         sort_distances=config.sort_ghost_distances,
+        speed_correction=config.speed_correction,
         random_seed=config.seed,
         verbose=config.verbose,
         wandb_logging=not config.disable_wandb,

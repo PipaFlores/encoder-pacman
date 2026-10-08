@@ -101,6 +101,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Sort ghost distance channels per frame when using Ghost_Distances.",
     )
+    parser.add_argument(
+        "--speed-correction",
+        action="store_true",
+        help="Resample sequences so every step covers the same distance at every level.",
+    )
 
     # Embedding -----------------------------------------------------------------
     parser.add_argument(

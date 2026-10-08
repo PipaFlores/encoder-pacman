@@ -95,6 +95,7 @@ spells them as negations.
 | `feature_set` | `Pacman` | | `umap_metric` | `euclidean` |
 | `normalization` | `null` | | `clusterer` | `hdbscan` |
 | `sort_ghost_distances` | `false` | | `min_cluster_size` | `20` |
+| `speed_correction` | `false` | | | |
 | `embedder` | `LSTM` | | `min_samples` | `null` |
 | `latent_space` | `256` | | `cluster_selection_epsilon` | `0.0` |
 | `n_epochs` | `500` | | `kmeans_k` | `6` |
