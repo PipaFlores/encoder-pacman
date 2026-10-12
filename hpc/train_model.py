@@ -174,6 +174,15 @@ def parse_args() -> argparse.Namespace:
         help="Use the last checkpoint instead of the best one when loading a trained embedder.",
     )
 
+    parser.add_argument(
+        "--test-initialized-model",
+        action="store_true",
+        help=(
+            "Embed with the freshly initialized, untrained embedder - nothing is trained or "
+            "loaded. The control for how much of the latent structure training adds."
+        ),
+    )
+
     # Reducer -------------------------------------------------------------------
     parser.add_argument(
         "--reducer",

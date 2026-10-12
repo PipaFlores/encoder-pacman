@@ -5,7 +5,8 @@ reduce -> cluster) across the main variations of the analysis pipeline:
 
 - the standard flow (deep embedder -> UMAP down to 2 dimensions -> HDBSCAN) for
   the two main sequence types ("first_5_seconds" and "pacman_attack");
-- every supported embedder (LSTM, MLP, Transformer, VAE, TimeVAE);
+- every supported embedder (LSTM, MLP, Transformer, VAE, TimeVAE), trained and as the
+  untrained control (test_initialized_model);
 - the no-deep-embedder configuration, where the reducer embeds the flat raw
   data itself instead of a trained model's latent space;
 - the PCA baseline, in both of its forms - PCA as the embedder (the fully linear
@@ -112,6 +113,7 @@ def make_pattern_analysis(
     latent_dimension=LATENT_DIM,
     validation_method=None,
     reducer=None,
+    test_initialized_model=False,
 ):
     return PatternAnalysis(
         reader=reader,
@@ -133,6 +135,7 @@ def make_pattern_analysis(
         latent_dimension=latent_dimension,
         batch_size=8,
         validation_method=validation_method,
+        test_initialized_model=test_initialized_model,
         verbose=False,
         random_seed=0,
     )
@@ -180,6 +183,26 @@ def test_fit_with_torch_embedders(reader, cache_folder, tmp_path, embedder):
     assert_pipeline_outputs(pa, LATENT_DIM)
     assert len(pa.embedder.loss_history) == MAX_EPOCHS
     assert all(np.isfinite(pa.embedder.loss_history))
+
+
+@pytest.mark.parametrize("embedder", ["LSTM", *TORCH_EMBEDDERS])
+def test_fit_with_initialized_model(reader, cache_folder, tmp_path, monkeypatch, embedder):
+    """test_initialized_model runs the whole pipeline on the untrained weights - the control
+    the trained embedders are compared against - even with force_training=True, which is
+    what every HPC run passes."""
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("the untrained control must neither train nor load a checkpoint")
+
+    monkeypatch.setattr(PatternAnalysis, "_train_model", must_not_run)
+    monkeypatch.setattr(PatternAnalysis, "_load_model", must_not_run)
+
+    pa = make_pattern_analysis(reader, cache_folder, tmp_path, embedder=embedder, test_initialized_model=True)
+
+    pa.fit(force_training=True)
+
+    assert_pipeline_outputs(pa, LATENT_DIM)
+    assert not hasattr(pa.embedder, "loss_history")
+    assert not (tmp_path / "hpc" / "trained_models").exists()
 
 
 def test_fit_without_deep_embedder(reader, cache_folder, tmp_path):

@@ -105,7 +105,7 @@ class PatternAnalysis:
             feature_set: str = "Pacman",
             augmented_visualization: bool = False,
             batch_size: int = 32,
-            normalization: str | None = None,
+            normalization: str | None = "global",
             dropout: float = 0.1,
             kld_weight: float = DEFAULT_KLD_WEIGHT,
             max_epochs: int = 500,
@@ -113,7 +113,8 @@ class PatternAnalysis:
             validation_data_split: int = 0.3,
             elementwise_masking: bool = False,
             use_best: bool = True,
-            sort_distances: bool = False,
+            test_initialized_model: bool = False,
+            sort_distances: bool = True,
             speed_correction: bool = False,
             random_seed: int | None = None,
             verbose: bool = False,
@@ -167,6 +168,11 @@ class PatternAnalysis:
             validation_data_split (int): Fraction of data to use for validation.
             elementwise_masking (bool): Whether or not to use element-wise masking during training (only pytorch models)
             use_best (bool): Whether to use best or last autoencoder model.
+            test_initialized_model (bool): Embed with the freshly initialized, untrained
+                embedder - nothing is trained, loaded or saved, and fit()'s force_training is
+                ignored. The control for how much of the latent structure training adds over
+                what the architecture alone produces (random weights, positional encodings,
+                pooling). Meaningless without a deep embedder, so ignored when embedder=None.
             sort_distance (bool): If using Astar distances as features, sort them in ascending order.
             speed_correction (bool): Resample the model input so every step covers the same
                 distance at every level, removing Pac-Man's per-level speed-up (see
@@ -216,6 +222,10 @@ class PatternAnalysis:
         self.latent_dimension = latent_dimension
         self.validation_data_split = validation_data_split
         self.use_best = use_best
+        if test_initialized_model and embedder is None:
+            logger.warning("test_initialized_model=True has no effect without a deep embedder, ignoring it")
+            test_initialized_model = False
+        self.test_initialized_model = test_initialized_model
         self.sort_distances = sort_distances
         self.speed_correction = speed_correction
         self.max_samples = max_samples
@@ -243,7 +253,7 @@ class PatternAnalysis:
         # Embedder initialized after make_data, as some models look for data's size/length
         self.embedder_type = embedder
         self.embedder = embedder
-        self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="euclidean", random_state=random_seed)
+        self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="cosine", random_state=random_seed)
         self.clusterer = clusterer if clusterer is not None else HDBSCAN(min_cluster_size=20, min_samples=None)
         self.similarity_measure = similarity_measure
 
@@ -274,8 +284,8 @@ class PatternAnalysis:
 
         # Logging
         self.wandb_logging = wandb_logging 
-        # Set by _init_wandb_run() during fit(); stays None when logging is off, or when
-        # no model gets trained (e.g. a trained one is loaded instead).
+        # Set by _init_wandb_run() during fit(); stays None when logging is off, or when a
+        # trained model is loaded instead (the untrained control does get a run).
         self.wandbrun = None
         self.wandb_logging_comment = wandb_logging_comment
 
@@ -457,7 +467,8 @@ class PatternAnalysis:
             validation_encodings (pd.DataFrame, optional):
                 Precomputed validation encodings for the raw_sequences (e.g., Behavlet features).
             force_training (bool, optional):
-                If True, trains deep embedding models even if there is an available model (will replace it)
+                If True, trains deep embedding models even if there is an available model (will replace it).
+                Ignored when the instance was built with test_initialized_model=True.
             ignore_cache (bool, optional):
                 If True, bypasses the on-disk cache for make_data() and validation encodings and
                 recomputes both from scratch (still overwrites the cache with the fresh result).
@@ -497,6 +508,15 @@ class PatternAnalysis:
 
         if self.embedder is not None:
             self.embedder = self._initialize_deep_embedder(embedder = self.embedder_type)
+
+        if self.embedder is not None and self.test_initialized_model:
+            # The untrained control: the rest of the pipeline runs on the initial weights, so
+            # its validation measures can be set against those of the same trained embedder.
+            logger.info(f"test_initialized_model=True: embedding with the untrained {self.embedder.__class__.__name__}, no checkpoint is trained, loaded or saved")
+            self.model_path = None
+            self._init_wandb_run()
+
+        elif self.embedder is not None:
             is_model_trained_, self.model_path = self._check_model_training_status(return_path=True, test_dataset=test_dataset, use_best=self.use_best)
 
             if is_model_trained_:
@@ -2174,6 +2194,7 @@ class PatternAnalysis:
                 config= wandb_config,
                 name=self._wandb_run_name(),
                 tags=[self.sequence_type, self.embedder.__class__.__name__]
+                + (["initialized_model"] if self.test_initialized_model else [])
             )
         else:
             self.wandbrun = None
@@ -2186,9 +2207,10 @@ class PatternAnalysis:
         so a run in the wandb UI can be traced back to its files on disk.
 
         Otherwise: a timestamp, the slicing scheme, the feature set and the embedder's
-        class name. Note `self.embedder` holds the *instantiated* model by this point,
-        so it has to be the class name - interpolating the object itself puts
-        nn.Module.__repr__(), i.e. the entire architecture, into the run name.
+        class name, plus `_init` for the untrained control (test_initialized_model). Note
+        `self.embedder` holds the *instantiated* model by this point, so it has to be the
+        class name - interpolating the object itself puts nn.Module.__repr__(), i.e. the
+        entire architecture, into the run name.
         """
         import datetime
 
@@ -2198,7 +2220,8 @@ class PatternAnalysis:
 
         embedder_name = self.embedder.__class__.__name__ if self.embedder is not None else "NoEmbedder"
         stamp = datetime.datetime.now().strftime("%m%d_%H%M")
-        return f"{stamp}_{self.sequence_type}_{self.feature_set}_{embedder_name}_h{self.latent_dimension}"
+        name = f"{stamp}_{self.sequence_type}_{self.feature_set}_{embedder_name}_h{self.latent_dimension}"
+        return name + "_init" if self.test_initialized_model else name
 
     def _get_wandb_config(self):
 
@@ -2222,6 +2245,7 @@ class PatternAnalysis:
             "speed_correction": self.speed_correction,
             "filter_by_pill": self.filter_by_pill,
             "rebase_score": self.rebase_score,
+            "test_initialized_model": self.test_initialized_model,
             # Model architecture
             "embedder_type": self.embedder.__class__.__name__,
             "reducer": self.reducer.__class__.__name__,

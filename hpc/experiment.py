@@ -98,9 +98,9 @@ class RunConfig:
     filter_by_pill: Optional[int] = None
     rebase_score: bool = True
     feature_set: str = "Pacman"
-    normalization: Optional[str] = None
-    sort_ghost_distances: bool = False
-    speed_correction: bool = False
+    normalization: Optional[str] = "global"
+    sort_ghost_distances: bool = True
+    speed_correction: bool = True
 
     # Embedding
     embedder: Optional[str] = "LSTM"
@@ -116,13 +116,16 @@ class RunConfig:
     kld_weight: float = DEFAULT_KLD_WEIGHT
     elementwise_masking: bool = False
     use_best: bool = True
+    # The untrained control: embed with the initial weights, train nothing. Gridded against
+    # `false`, it measures how much of the latent structure training adds per embedder.
+    test_initialized_model: bool = False
 
     # Reducer
     reducer: Optional[str] = "umap"
     reducer_components: int = 2
     umap_neighbors: int = 15
     umap_min_dist: float = 0.1
-    umap_metric: str = "euclidean"
+    umap_metric: str = "cosine"
 
     # Clustering
     clusterer: str = "hdbscan"
@@ -151,6 +154,12 @@ class RunConfig:
             value = getattr(self, key)
             if isinstance(value, str) and value.lower() == "none":
                 setattr(self, key, None)
+
+        # Without a deep embedder there are no weights to leave untrained. Normalizing the
+        # flag lets expand() drop the duplicate no-embedder run that gridding
+        # `test_initialized_model: [false, true]` against `embedder: [..., none]` produces.
+        if self.embedder is None:
+            self.test_initialized_model = False
 
         # HDBSCAN's own default for min_samples is None, and the CLI spells that -1.
         if self.min_samples is not None and self.min_samples < 0:
@@ -187,11 +196,16 @@ class RunConfig:
         by index and hash) but not for the `label` column or a wandb run name.
         `kld_weight` is appended under the same rule as the checkpoint stem: VAE family
         only, and only when it differs from the default, so existing labels are unchanged.
+        `_init` marks the untrained control, which would otherwise share its trained
+        counterpart's label.
         """
         label = f"{self.sequence_type}_{self.feature_set}_{self.embedder or 'NoEmbedder'}_h{self.latent_space}"
 
         if self.embedder in ("VAE", "TimeVAE") and self.kld_weight != DEFAULT_KLD_WEIGHT:
             label += f"_kld{self.kld_weight:g}"
+
+        if self.test_initialized_model:
+            label += "_init"
 
         return label
 
@@ -397,6 +411,7 @@ def build_analysis(config: RunConfig) -> "PatternAnalysis":
         elementwise_masking=config.elementwise_masking,
         kld_weight=config.kld_weight,
         use_best=config.use_best,
+        test_initialized_model=config.test_initialized_model,
         max_samples=config.max_samples,
         dropout=config.dropout,
         sort_distances=config.sort_ghost_distances,
@@ -467,7 +482,8 @@ def run_one(config: RunConfig, index: int = 0, run_dir: Optional[Path] = None) -
 
     # force_training is not configurable on purpose: checkpoints are shared across
     # configurations (see the module docstring), so reusing one risks loading weights
-    # trained under a different feature set or normalization.
+    # trained under a different feature set or normalization. test_initialized_model
+    # overrides it - that run neither trains nor touches a checkpoint.
     analysis.fit(
         force_training=True,
         ignore_cache=config.ignore_cache,

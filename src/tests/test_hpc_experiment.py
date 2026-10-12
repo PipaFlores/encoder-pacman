@@ -1,4 +1,4 @@
-"""Unit tests for the hpc/ configuration layer (RunConfig, build_reducer).
+"""Unit tests for the hpc/ configuration layer (RunConfig, build_reducer, expand).
 
 Deliberately data-free and fast, unlike the rest of src/tests: everything here is about
 the vocabulary shared between experiment YAML files and train_model.py's flags, which is
@@ -8,7 +8,7 @@ PatternAnalysis produces a sweep whose points are all the same run.
 
 import pytest
 
-from hpc.experiment import RunConfig, build_reducer
+from hpc.experiment import RunConfig, build_reducer, expand
 
 
 def test_pca_reducer_is_built_from_config():
@@ -75,6 +75,29 @@ def test_kld_weight_distinguishes_sweep_labels():
     # The embedders without a KL term never carry it, whatever the value
     assert "kld" not in RunConfig(embedder="LSTM", kld_weight=0.0016).label()
     assert "kld" not in RunConfig(embedder=None, kld_weight=0.0016).label()
+
+
+def test_initialized_model_is_its_own_run():
+    """The untrained control must not collide with its trained counterpart in results.csv,
+    the run directories (named by hash) or wandb (named by label)."""
+    trained = RunConfig(embedder="Transformer", latent_space=128)
+    control = RunConfig.from_dict({"embedder": "Transformer", "latent_space": 128, "test_initialized_model": True})
+
+    assert control.config_hash() != trained.config_hash()
+    assert control.label() == trained.label() + "_init"
+
+
+def test_initialized_model_grid_has_one_no_embedder_run():
+    """Gridding the flag against `embedder: [..., none]` keeps a single no-embedder run:
+    there are no weights to leave untrained, so both points are the same configuration."""
+    configs = expand({
+        "defaults": {"latent_space": 128},
+        "grid": {"embedder": ["MLP", "none"], "test_initialized_model": [False, True]},
+    })
+
+    assert [(c.embedder, c.test_initialized_model) for c in configs] == [
+        ("MLP", False), ("MLP", True), (None, False),
+    ]
 
 
 def test_unknown_configuration_key_is_named():

@@ -95,7 +95,7 @@ spells them as negations.
 | `feature_set` | `Pacman` | | `umap_metric` | `euclidean` |
 | `normalization` | `null` | | `clusterer` | `hdbscan` |
 | `sort_ghost_distances` | `false` | | `min_cluster_size` | `20` |
-| `speed_correction` | `false` | | | |
+| `speed_correction` | `false` | | `test_initialized_model` | `false` |
 | `embedder` | `LSTM` | | `min_samples` | `null` |
 | `latent_space` | `256` | | `cluster_selection_epsilon` | `0.0` |
 | `n_epochs` | `500` | | `kmeans_k` | `6` |
@@ -118,6 +118,7 @@ spells them as negations.
 | [`general_training.yaml`](experiments/general_training.yaml) | Every embedder once, each at its own latent size (an `include` list — edit a line to change one architecture's dimensionality). |
 | [`embedder_sweep.yaml`](experiments/embedder_sweep.yaml) | Every embedder at a matched latent size, for comparing architectures. |
 | [`latent_sweep_transformer.yaml`](experiments/latent_sweep_transformer.yaml) | Latent dimension × sequence type for the transformer (replaces `array_train.sh`). |
+| [`initialized_model_control.yaml`](experiments/initialized_model_control.yaml) | Every embedder trained and untrained (`test_initialized_model`), plus the no-embedder baseline. The gap between a label and its `_init` twin in `results.csv` is what training adds over the architecture. |
 | [`kld_sweep.yaml`](experiments/kld_sweep.yaml) | KL weight × VAE/TimeVAE at a fixed latent size. The ladder is scaled to `seq_len × n_features`, so it is specific to that file's slicing and feature set. |
 | [`transformer.yaml`](experiments/transformer.yaml) / [`lstm.yaml`](experiments/lstm.yaml) / [`umap_baseline.yaml`](experiments/umap_baseline.yaml) | The former single-architecture scripts. |
 

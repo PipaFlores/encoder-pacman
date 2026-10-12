@@ -1,0 +1,54 @@
+# Untrained-model control: every deep embedder twice, trained and with its initial weights
+# (test_initialized_model). The two runs of a pair share every other setting, so the gap in
+# their validation measures (ARI/AMI/NMI/neighborhood hit) in results.csv - a label and its
+# `_init` twin - is what training adds over the architecture alone. A small gap means the
+# latent structure comes from the architecture (random projections, positional encodings,
+# pooling) rather than from learning.
+#
+# The `_init` runs skip training, so they finish far faster than their trained twins. The
+# no-embedder run is the raw-data UMAP baseline, kept in the same results.csv for reference
+# (the flag does not apply to it, so expansion keeps a single one).
+#
+# Initialization and UMAP are random, so one pair is one sample of the gap: set `seed`, or
+# grid over it, to tell the gap apart from run-to-run variance.
+#
+#   python run_experiment.py --config experiments/initialized_model_control.yaml --dry-run
+#   ./submit_experiment.sh experiments/initialized_model_control.yaml
+name: initialized_model_control
+description: "initialized model control - each embedder trained vs. untrained"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "02:00:00"
+
+defaults:
+  sequence_type: pacman_attack
+  feature_set: Experimental2
+  normalization: global
+  # The Transformer's d_model with n_heads=8, so it must stay a multiple of 8.
+  latent_space: 128
+  n_epochs: 100
+  batch_size: 32
+  validation_split: 0.3
+  dropout: 0.1
+  context: 20
+  filter_by_pill: null
+  elementwise_masking: false
+  rebase_score: true
+  sort_ghost_distances: true
+  speed_correction: true
+  clusterer: hdbscan
+  reducer: umap
+  validation_method: Behavlets
+  verbose: true
+
+grid:
+  embedder: [LSTM, MLP, Transformer, VAE, TimeVAE, none]
+  test_initialized_model: [false, true]
