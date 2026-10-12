@@ -288,8 +288,7 @@ class PatternAnalysis:
         projection - see VanillaVAE/TimeVAE/MLPAutoencoder's `pooling` argument. Logs a
         warning when padding is found, since it changes which encoder architecture gets built.
         """
-        padding_value = -999.0
-        valid_lengths = (self.processed_sequence_data != padding_value).any(axis=-1).sum(axis=1)
+        valid_lengths = self._valid_sequence_lengths()
         has_padding = bool(valid_lengths.min() < self.processed_sequence_data.shape[1])
         if has_padding:
             logger.warning(
@@ -299,6 +298,36 @@ class PatternAnalysis:
                 int(valid_lengths.min()), self.processed_sequence_data.shape[1], embedder
             )
         return has_padding
+
+    def _valid_sequence_lengths(self, padding_value: float = -999.0) -> np.ndarray:
+        """Unpadded length of each sequence in processed_sequence_data - the number of
+        steps the embedder actually sees (after speed correction, when that is on)."""
+        return (self.processed_sequence_data != padding_value).any(axis=-1).sum(axis=1)
+
+    def _with_sequence_length(self, validation_encodings: pd.DataFrame, raw_sequence_data) -> pd.DataFrame:
+        """
+        Adds a "sequence_length" column to validation_encodings, so the latent space can be
+        checked for encoding how long a sequence is (and so how much padding it carries)
+        rather than what happens in it.
+
+        The length is the one the embedder sees: the unpadded length in processed_sequence_data
+        when validating the pipeline's own data (it differs from the raw length under speed
+        correction), the raw frame count otherwise. Left out when every sequence has the same
+        length (fixed-length sequence types), as it then carries no information. Derived here
+        rather than cached with the rest, since it is cheap and data-dependent only.
+        """
+        if raw_sequence_data is self.raw_sequence_data and self.processed_sequence_data is not None:
+            lengths = self._valid_sequence_lengths()
+        else:
+            lengths = np.array([len(sequence) for sequence in raw_sequence_data])
+
+        if len(np.unique(lengths)) < 2:
+            logger.info("All sequences have the same length, not adding sequence_length as a validation label")
+            return validation_encodings
+
+        validation_encodings = validation_encodings.copy()
+        validation_encodings["sequence_length"] = lengths
+        return validation_encodings
 
     def _initialize_deep_embedder(self, embedder:str):
 
@@ -1079,7 +1108,7 @@ class PatternAnalysis:
                 cached = self._load_cache(cache_path, self._data_fingerprint)
                 if cached is not None:
                     logger.info(f"Using cached validation encodings ({cache_path})")
-                    return cached
+                    return self._with_sequence_length(cached, raw_sequence_data)
 
         if validation_method == "Behavlets":
             # Use BehavletsEncoding for validation
@@ -1173,7 +1202,7 @@ class PatternAnalysis:
                 self._save_cache(cache_path, self._data_fingerprint, validation_encodings)
                 logger.info(f"Cached validation encodings at {cache_path}")
 
-            return validation_encodings
+            return self._with_sequence_length(validation_encodings, raw_sequence_data)
         else:
             raise NotImplementedError(f"Validation method not supported ({validation_method})")
         
@@ -1232,6 +1261,7 @@ class PatternAnalysis:
                 "overall_score/time",
                 "overall_max_level_reached",
                 "overall_win_ratio",
+                "sequence_length",
                 ]:
                 # Some of these (e.g. flow_z_score) can have real per-row NaNs (e.g. no
                 # repeat-measure z-score for that player), rather than being entirely absent.

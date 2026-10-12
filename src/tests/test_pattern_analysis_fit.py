@@ -323,6 +323,12 @@ def test_fit_with_behavlets_validation(reader, cache_folder, tmp_path):
     assert len(pa.validation_encodings) == MAX_SAMPLES
     assert len(pa.validation_labels) == MAX_SAMPLES
 
+    # pacman_attack sequences vary in length, so it is a validation set too: the unpadded
+    # length the embedder saw, binned into deciles like the other continuous labels
+    lengths = pa.validation_encodings["sequence_length"].to_numpy()
+    np.testing.assert_array_equal(lengths, pa._valid_sequence_lengths())
+    assert pa.validation_labels["sequence_length"].between(0, 9).all()
+
     # One row of measures per validation label set, minus any that carried no signal at this
     # sample size and were skipped (see calculate_validation_measures)
     assert 0 < len(pa.validation_measures) <= len(pa.validation_labels.columns)
