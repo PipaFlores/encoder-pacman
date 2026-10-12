@@ -1306,7 +1306,12 @@ class PatternAnalysis:
             - ARI (Adjusted Rand Index)
             - AMI (Adjusted Mutual Information)
             - NMI (Normalized Mutual Information)
-            - neighborhood_hit (fraction of same-label neighbors in low-dim embedding, if embeddings is provided)
+            - neigh_hit (fraction of same-label neighbors in low-dim embedding, if embeddings is provided)
+            - neigh_hit_chance (the neighborhood hit expected if labels had no neighborhood structure)
+            - neigh_hit_adj (chance-adjusted neighborhood hit: 0 at chance, 1 when every neighbor
+              shares the label). Unlike the raw hit, comparable across validation sets with
+              different class balance - see src.utils.utils.adjusted_neighborhood_hit for the
+              rationale and references.
 
         Validation sets with no signal at all (every value missing - see recode_validation_labels)
         are skipped with a warning and get no row in the result; ones that are merely degenerate
@@ -1322,7 +1327,8 @@ class PatternAnalysis:
             neighborhood_metric (str, optional): Distance metric for neighborhood_hit, default "euclidean".
 
         Returns:
-            pd.DataFrame: DataFrame indexed by validation_set (column name), with columns 'ARI', 'AMI', 'NMI', 'neigh_hit'
+            pd.DataFrame: DataFrame indexed by validation_set (column name), with columns 'ARI', 'AMI', 'NMI',
+                'neigh_hit', 'neigh_hit_chance', 'neigh_hit_adj'
         """
         from sklearn.metrics import (
             adjusted_mutual_info_score,
@@ -1330,7 +1336,27 @@ class PatternAnalysis:
             normalized_mutual_info_score,
         )
 
-        from src.utils.utils import neighborhood_hit
+        from src.utils.utils import (
+            chance_adjusted_neighborhood_hit,
+            neighborhood_hit,
+            neighborhood_hit_chance,
+        )
+
+        def neighborhood_measures(val_labels) -> dict:
+            if embeddings is None:
+                return {"neigh_hit": np.nan, "neigh_hit_chance": np.nan, "neigh_hit_adj": np.nan}
+            hit = neighborhood_hit(
+                embeddings, val_labels, n_neighbors=neighborhood_k, metric=neighborhood_metric,
+                no_null_instances=no_null_instances
+            )
+            chance = neighborhood_hit_chance(val_labels, no_null_instances=no_null_instances)
+            return {
+                "neigh_hit": hit,
+                "neigh_hit_chance": chance,
+                "neigh_hit_adj": chance_adjusted_neighborhood_hit(hit, chance),
+            }
+
+        no_neighborhood_measures = {"neigh_hit": np.nan, "neigh_hit_chance": np.nan, "neigh_hit_adj": np.nan}
 
         if validation_labels is not None:
             validation_measures_rows = []
@@ -1361,28 +1387,21 @@ class PatternAnalysis:
                         ari = np.nan
                         ami = np.nan
                         nmi = np.nan
-                        neigh_hit = np.nan
+                        neighborhood = no_neighborhood_measures
                     else:
                         if not no_null_instances:
                             mask = np.ones_like(mask).astype(bool)
                         ari = adjusted_rand_score(val_labels[mask], labels[mask])
                         ami = adjusted_mutual_info_score(val_labels[mask], labels[mask])
                         nmi = normalized_mutual_info_score(val_labels[mask], labels[mask])
-                        if embeddings is not None:
-                            # neighborhood_hit ignores masked (NaN) indices, so mask them out if present
-                            neigh_hit = neighborhood_hit(
-                                embeddings, val_labels, n_neighbors=neighborhood_k, metric=neighborhood_metric,
-                                no_null_instances=no_null_instances
-                            )
-                        else:
-                            neigh_hit = np.nan
+                        neighborhood = neighborhood_measures(val_labels)
 
                     validation_measures_rows.append({
                         "validation_set": col,
                         "ARI": ari,
                         "AMI": ami,
                         "NMI": nmi,
-                        "neigh_hit": neigh_hit
+                        **neighborhood,
                     })
             # If validation_labels is a 1D numpy array or list-like (single label set)
             else:
@@ -1395,27 +1414,21 @@ class PatternAnalysis:
                     ari = np.nan
                     ami = np.nan
                     nmi = np.nan
-                    neigh_hit = np.nan
+                    neighborhood = no_neighborhood_measures
                 else:
                     if not no_null_instances:
                             mask = np.ones_like(mask).astype(bool)
                     ari = adjusted_rand_score(val_labels[mask], labels[mask])
                     ami = adjusted_mutual_info_score(val_labels[mask], labels[mask])
                     nmi = normalized_mutual_info_score(val_labels[mask], labels[mask])
-                    if embeddings is not None:
-                        neigh_hit = neighborhood_hit(
-                            embeddings, val_labels, n_neighbors=neighborhood_k, metric=neighborhood_metric, 
-                            no_null_instances=no_null_instances
-                        )
-                    else:
-                        neigh_hit = np.nan
+                    neighborhood = neighborhood_measures(val_labels)
 
                 validation_measures_rows.append({
                     "validation_set": "validation_labels",
                     "ARI": ari,
                     "AMI": ami,
                     "NMI": nmi,
-                    "neigh_hit": neigh_hit
+                    **neighborhood,
                 })
             validation_measures = pd.DataFrame(validation_measures_rows)
             return validation_measures

@@ -332,4 +332,6 @@ def test_fit_with_behavlets_validation(reader, cache_folder, tmp_path):
     # One row of measures per validation label set, minus any that carried no signal at this
     # sample size and were skipped (see calculate_validation_measures)
     assert 0 < len(pa.validation_measures) <= len(pa.validation_labels.columns)
-    assert set(pa.validation_measures.columns) == {"validation_set", "ARI", "AMI", "NMI", "neigh_hit"}
+    assert set(pa.validation_measures.columns) == {
+        "validation_set", "ARI", "AMI", "NMI", "neigh_hit", "neigh_hit_chance", "neigh_hit_adj"
+    }

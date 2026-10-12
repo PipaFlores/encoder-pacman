@@ -211,6 +211,20 @@ def neighborhood_hit(X_embedded,
     """
     Compute the neighborhood hit ratio for a low-dimensional embedding.
 
+    The neighborhood hit (Paulovich et al., 2008) is the mean fraction of each point's
+    k nearest neighbors that share its label. Its value under no structure at all depends
+    on the label's class balance, so raw values are not comparable across label sets -
+    see adjusted_neighborhood_hit() for the chance-corrected version.
+
+    References:
+        Paulovich, F. V., Nonato, L. G., Minghim, R., & Levkowitz, H. (2008). Least Square
+            Projection: A fast high-precision multidimensional projection technique and its
+            application to document mapping. IEEE Transactions on Visualization and
+            Computer Graphics, 14(3), 564-575.
+        Espadoto, M., Martins, R. M., Kerren, A., Hirata, N. S. T., & Telea, A. C. (2021).
+            Toward a quantitative survey of dimension reduction techniques. IEEE
+            Transactions on Visualization and Computer Graphics, 27(3), 2153-2173.
+
     Args:
         X_embedded: Array of shape (n_samples, n_components) with embedded points.
         labels: Array of shape (n_samples,) with class labels.
@@ -249,6 +263,112 @@ def neighborhood_hit(X_embedded,
         result = same_label.mean()
 
     return result
+
+
+def neighborhood_hit_chance(labels, no_null_instances=True) -> float:
+    """
+    Expected neighborhood hit when labels carry no neighborhood structure.
+
+    Exact expectation of neighborhood_hit() under a random permutation of the labels over
+    a fixed neighbor graph: a query point of class c has each neighbor (any other point,
+    including absent ones) in class c with probability (n_c - 1) / (n - 1), so
+
+        E = sum_c (n_c / n_query) * (n_c - 1) / (n - 1)
+
+    over the query classes - every class except -1 when no_null_instances is True (absent
+    points still count as neighbors, as in neighborhood_hit), every class otherwise. It
+    does not depend on the number of neighbors. For large classes this is close to the
+    Simpson index sum_c p_c^2; the (n_c - 1) / (n - 1) term is what keeps it exact for small
+    samples and rare classes. With a single query class (a presence/absence label with
+    absences excluded) it is that class's prevalence among the other points.
+
+    Args:
+        labels: Array of shape (n_samples,) with class labels.
+        no_null_instances: If True, samples labeled -1 are not queried (matching
+            neighborhood_hit's argument of the same name).
+
+    Returns:
+        float: Expected neighborhood hit, or NaN when it is undefined (fewer than two
+            samples, or no query samples).
+    """
+    labels = np.asarray(labels)
+    n_samples = labels.shape[0]
+    query_labels = labels[labels != -1] if no_null_instances else labels
+    if n_samples < 2 or query_labels.size == 0:
+        return float("nan")
+
+    _, counts = np.unique(query_labels, return_counts=True)
+    return float(np.sum((counts / query_labels.size) * (counts - 1) / (n_samples - 1)))
+
+
+def chance_adjusted_neighborhood_hit(hit: float, chance: float) -> float:
+    """
+    Rescale a neighborhood hit so chance level maps to 0 and a perfect hit to 1:
+    (hit - chance) / (1 - chance). Negative values mean neighbors share labels less often
+    than chance. NaN when chance is 1 (every point in one class), where there is nothing
+    left to separate.
+
+    See adjusted_neighborhood_hit() for the rationale and references.
+    """
+    if np.isnan(hit) or np.isnan(chance) or chance >= 1.0:
+        return float("nan")
+    return float((hit - chance) / (1.0 - chance))
+
+
+def adjusted_neighborhood_hit(X_embedded,
+                              labels,
+                              n_neighbors=5,
+                              no_null_instances=True,
+                              metric='euclidean') -> float:
+    """
+    Chance-adjusted neighborhood hit: (NH - E[NH]) / (1 - E[NH]).
+
+    The raw neighborhood hit (Paulovich et al., 2008) has a chance level that depends on
+    class balance: with one dominant class, random neighbors already agree most of the time,
+    while with ten balanced classes they agree about 10% of the time. That makes raw values
+    incomparable across validation label sets. Subtracting the expected value under random
+    labels (neighborhood_hit_chance) and dividing by its maximum attainable gain puts every
+    label on the same scale: 0 at chance, 1 when every neighbor shares the label, negative
+    when neighbors share labels less than chance.
+
+    This is the same chance correction as Cohen's kappa, and the one behind the Adjusted
+    Rand Index (Hubert & Arabie, 1985) and Adjusted Mutual Information (Vinh et al., 2010)
+    used for the clusterings, so it reads on the same scale as those. Computed on the
+    k-nearest-neighbor graph, it has the form of Newman's (2003) assortativity coefficient
+    for categorical node attributes, with the expected term taken under label permutation
+    rather than from edge-end marginals.
+
+    References:
+        Paulovich, F. V., Nonato, L. G., Minghim, R., & Levkowitz, H. (2008). Least Square
+            Projection: A fast high-precision multidimensional projection technique and its
+            application to document mapping. IEEE Transactions on Visualization and
+            Computer Graphics, 14(3), 564-575.
+        Cohen, J. (1960). A coefficient of agreement for nominal scales. Educational and
+            Psychological Measurement, 20(1), 37-46.
+        Hubert, L., & Arabie, P. (1985). Comparing partitions. Journal of Classification,
+            2(1), 193-218.
+        Vinh, N. X., Epps, J., & Bailey, J. (2010). Information theoretic measures for
+            clusterings comparison: Variants, properties, normalization and correction for
+            chance. Journal of Machine Learning Research, 11, 2837-2854.
+        Newman, M. E. J. (2003). Mixing patterns in networks. Physical Review E, 67(2),
+            026126.
+
+    Args:
+        X_embedded: Array of shape (n_samples, n_components) with embedded points.
+        labels: Array of shape (n_samples,) with class labels.
+        n_neighbors: Number of nearest neighbors to consider.
+        no_null_instances: If True, samples labeled -1 are not queried (they still count
+            as neighbors), as in neighborhood_hit.
+        metric: Distance metric used by ``NearestNeighbors``.
+
+    Returns:
+        float: Chance-adjusted neighborhood hit, NaN when undefined (see
+            chance_adjusted_neighborhood_hit).
+    """
+    hit = neighborhood_hit(X_embedded, labels, n_neighbors=n_neighbors,
+                           no_null_instances=no_null_instances, metric=metric)
+    chance = neighborhood_hit_chance(labels, no_null_instances=no_null_instances)
+    return chance_adjusted_neighborhood_hit(hit, chance)
 
 
 def make_synth_data(n_per_category: int | tuple[int] = (1000, 1000),

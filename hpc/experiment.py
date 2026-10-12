@@ -215,6 +215,8 @@ class RunResult:
     mean_ami: Optional[float] = None
     mean_nmi: Optional[float] = None
     mean_neigh_hit: Optional[float] = None
+    # Chance-adjusted, so validation sets with different class balance average on one scale
+    mean_neigh_hit_adj: Optional[float] = None
     best_ari: Optional[float] = None
     best_ari_set: Optional[str] = None
     n_validation_sets: Optional[int] = None
@@ -427,6 +429,7 @@ def _summarize_validation(analysis: "PatternAnalysis", result: RunResult, run_di
     result.mean_ami = float(measures["AMI"].mean(skipna=True))
     result.mean_nmi = float(measures["NMI"].mean(skipna=True))
     result.mean_neigh_hit = float(measures["neigh_hit"].mean(skipna=True))
+    result.mean_neigh_hit_adj = float(measures["neigh_hit_adj"].mean(skipna=True))
 
     if measures["ARI"].notna().any():
         best = measures.loc[measures["ARI"].idxmax()]
