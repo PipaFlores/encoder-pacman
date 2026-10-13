@@ -1,0 +1,44 @@
+# Speed correction comparison: train each embedder, plus the no-embedder baseline, with and
+# without per-level Pac-Man speed correction, everything else held fixed.
+#
+# Speed correction is in the checkpoint name (`_speedcorr`), so the two runs of an embedder
+# keep separate checkpoints and can safely run as concurrent array tasks.
+#
+#   ./submit_experiment.sh experiments/speed_correction.yaml
+name: speed_correction
+description: "speed_correction - testing speed correction effects (hypothesized change in hunt latent structure)"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "02:00:00"
+
+defaults:
+  sequence_type: pacman_attack
+  feature_set: Experimental2
+  normalization: global
+  latent_space: 128
+  n_epochs: 100
+  batch_size: 32
+  validation_split: 0.3
+  dropout: 0.1
+  context: 20
+  filter_by_pill: null
+  elementwise_masking: False
+  rebase_score: true
+  sort_ghost_distances: true
+  # speed_correction: true
+  clusterer: hdbscan
+  reducer: umap
+  validation_method: Behavlets
+  verbose: true
+
+grid:
+  speed_correction: [true, false]
+  embedder: [LSTM, MLP, Transformer, none]

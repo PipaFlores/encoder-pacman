@@ -3,16 +3,20 @@
 # resample_stride keeps one step in N (issue #34). With speed_correction on (the default), a
 # step is N frames of Pac-Man movement at full speed, so every level is compressed by the
 # same factor. Values are read at each kept step, never averaged over it, so positions stay
-# on the maze. Stride 1 is the uncompressed reference; at stride 4 quick reversals (about 5
-# frames) start to fall between steps.
+# on the maze. At stride 4 quick reversals (about 5 frames) start to fall between steps.
+#
+# Stride 1, the uncompressed reference, is left out of the grid: at stride 1 the checkpoint
+# name has no _stride suffix, so it would overwrite the existing <Class>_h512_e100_speedcorr
+# models. With `seed: 42` those runs are identical to general_sweep.yaml's (same config
+# hash), so take the reference from that run's results instead of retraining it.
 #
 # Each model is a bundle: an embedder together with its own latent size, written once and
 # crossed with every stride. Set latent_space to the values your latent sweep identified;
-# the 128s below are placeholders (what general_training.yaml uses today). The transformer's
+# the values below are placeholders until that is settled. The transformer's
 # latent_space is its d_model with 8 heads, so it must stay a multiple of 8.
 #
-# Each stride trains its own checkpoints (suffix _stride<n>) and gets its own label, so the
-# runs do not overwrite or shadow each other.
+# Strides other than 1 train their own checkpoints (suffix _stride<n>) and get their own
+# label, so the runs do not overwrite or shadow each other or any earlier model.
 #
 #   python run_experiment.py --config experiments/resample_stride.yaml --dry-run
 #   ./submit_experiment.sh experiments/resample_stride.yaml
@@ -28,7 +32,7 @@ slurm:
   # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
   # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
   gres: "gpu:gh200:1"         # 1 GPU per node
-  time: "02:00:00"
+  time: "04:00:00"
 
 defaults:
   sequence_type: pacman_attack
@@ -44,6 +48,7 @@ defaults:
   rebase_score: true
   sort_ghost_distances: true
   speed_correction: true
+  seed: 42                  # matches general_sweep.yaml, whose runs are the stride-1 reference
   clusterer: hdbscan
   reducer: umap
   validation_method: Behavlets
@@ -55,4 +60,5 @@ grid:
     - {embedder: MLP,         latent_space: 128}   # placeholder: set the optimal value
     - {embedder: Transformer, latent_space: 128}   # placeholder: multiple of 8
     - {embedder: none}                             # UMAP on the raw sequences, no latent size
-  resample_stride: [1, 2, 4]
+  resample_stride: [2, 4]   # stride 1 would overwrite existing checkpoints - see the header
+  feature_set: [Experimental2, all_features]

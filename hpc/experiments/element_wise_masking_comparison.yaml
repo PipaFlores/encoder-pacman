@@ -1,0 +1,47 @@
+# Element-wise masking comparison: train each embedder with and without element-wise
+# masking of non-finite values (the ghost distances), everything else held fixed.
+#
+#   ./submit_experiment.sh experiments/element_wise_masking_comparison.yaml
+name: compare_element_wise_mask
+description: "comparing_element_wise_masking"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "02:00:00"            # all six in sequence took ~1 h in the 12 Oct run
+  # One sequential job, not an array: the checkpoint name does not encode
+  # elementwise_masking, so an embedder's masked and unmasked runs write the same file, and
+  # as concurrent array tasks each could reload the other's best weights for embedding.
+  use_array: false
+
+defaults:
+  sequence_type: pacman_attack
+  feature_set: Experimental2  ## Only here the elementwise masking would matter
+  latent_space: 128
+  normalization: global
+  n_epochs: 200
+  batch_size: 32
+  validation_split: 0.3
+  dropout: 0.1
+  context: 20
+  filter_by_pill: null
+  # elementwise_masking: true
+  rebase_score: true
+  sort_ghost_distances: true
+  speed_correction: true
+  clusterer: hdbscan
+  reducer: umap
+  validation_method: Behavlets
+  verbose: true
+
+grid:
+  elementwise_masking: [true, false]
+  # feature_set: [all_features, Experimental2]
+  embedder: [LSTM, MLP, Transformer]
+

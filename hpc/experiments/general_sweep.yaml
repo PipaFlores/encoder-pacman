@@ -1,0 +1,55 @@
+# General sweep: every embedder across both feature sets, five latent sizes and both
+# sequence types, plus a no-embedder UMAP baseline per feature set and sequence type.
+#
+# latent_sweep.yaml is this grid without `seed`, so the two share checkpoint names: don't
+# run them at the same time.
+#
+#   ./submit_experiment.sh experiments/general_sweep.yaml
+name: general_sweep
+description: "general config sweep"
+
+slurm:
+  partition: gpumedium
+  account: project_2012947
+  nodes: 1
+  ntasks_per_node: 1
+  cpus_per_task: 72          # 72 cores per reserved GPU, and they cost nothing extra
+  # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
+  # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
+  gres: "gpu:gh200:1"         # 1 GPU per node
+  time: "04:00:00"            # all_features Transformer on pacman_attack: ~2 h at 100 epochs
+
+defaults:
+  # feature_set: all_features
+  # embedder: Transformer
+  clusterer: hdbscan
+  reducer: umap
+  normalization: global
+  n_epochs: 100
+  batch_size: 32
+  validation_split: 0.3
+  context: 20
+  elementwise_masking: false
+  seed: 42
+  filter_by_pill: null
+  rebase_score: true
+  sort_ghost_distances: true
+  speed_correction: true
+  validation_method: Behavlets
+  verbose: true
+
+grid:
+  # TSTransformerEncoder uses latent_space as d_model with n_heads=8, so these must stay
+  # divisible by 8 - the old LSTM sweep's `2` is not a valid transformer latent size.
+  embedder: [Transformer, MLP, VAE, LSTM]
+  feature_set: [all_features, Experimental2]
+  latent_space: [32, 64, 128, 256, 512]
+  sequence_type: [pacman_attack, first_5_seconds]
+  # test_initialized_model: [true, false]
+
+include:
+  # Non-learned floor: UMAP straight on the sequences (latent_space doesn't apply)
+  - {embedder: null, feature_set: all_features,  sequence_type: pacman_attack}
+  - {embedder: null, feature_set: all_features,  sequence_type: first_5_seconds}
+  - {embedder: null, feature_set: Experimental2, sequence_type: pacman_attack}
+  - {embedder: null, feature_set: Experimental2, sequence_type: first_5_seconds}

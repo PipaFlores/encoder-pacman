@@ -25,11 +25,11 @@ slurm:
   # No mem_per_cpu: Roihu grants the reserved GH200's full 217 GiB automatically, and
   # that is also the QOS ceiling - requesting memory explicitly can only overshoot it.
   gres: "gpu:gh200:1"         # 1 GPU per node
-  time: "02:00:00"
+  time: "05:00:00"            # all_features Transformer on pacman_attack: ~4 h at 200 epochs
 
 defaults:
   sequence_type: pacman_attack
-  feature_set: Experimental2
+  feature_set: all_features
   normalization: global
   n_epochs: 200
   batch_size: 32
@@ -38,6 +38,9 @@ defaults:
   context: 20
   filter_by_pill: null
   elementwise_masking: true
+  rebase_score: true
+  sort_ghost_distances: true
+  speed_correction: true
   clusterer: hdbscan
   reducer: umap
   validation_method: Behavlets
@@ -46,11 +49,11 @@ defaults:
 # One line per configuration. `latent_space` is the knob this file exists to expose.
 include:
   - {embedder: LSTM,        latent_space: 128}
-  - {embedder: MLP,         latent_space: 64}
+  - {embedder: MLP,         latent_space: 128}
   # latent_space is the transformer's d_model and n_heads is 8, so this must stay a
   # multiple of 8 - torch raises at construction otherwise.
-  - {embedder: Transformer, latent_space: 64}
-  - {embedder: VAE,         latent_space: 64}
-  - {embedder: TimeVAE,     latent_space: 64}
+  - {embedder: Transformer, latent_space: 128}
+  # - {embedder: VAE,         latent_space: 64}
+  # - {embedder: TimeVAE,     latent_space: 64}
   # No learned embedding: UMAP reduces the raw sequences. latent_space does not apply.
   - {embedder: null}
