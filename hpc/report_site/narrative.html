@@ -1,0 +1,54 @@
+<!--
+  The report's interpretation, kept apart from the template so the two change for different
+  reasons. Everything here quotes numbers from one run and has to be re-read against the new
+  numbers whenever the report is rebuilt from another run.
+
+  - Each <section data-slot="..."> replaces the matching slot marker in template.html.
+  - data-run names the run this text was written for. build_report_site.py puts a visible
+    warning on the page when it does not match the run being built, so a stale
+    interpretation can never pass silently. Update data-run only after re-reading the text.
+-->
+<article data-run="20261012-170356">
+
+<section data-slot="findings">
+  <li><span class="tag">RQ1</span><span>On attack sequences, a trained LSTM groups play by ghost kills far better than chance (adjusted neighbourhood hit 0.86). An untrained copy of the same LSTM reaches 0.53 and UMAP on the raw sequences 0.50, so the input already carries much of this structure and training sharpens it.</span></li>
+  <li><span class="tag">RQ1</span><span>That only holds with the five ghost-distance and score features. With all 267 features, every model is close to chance on the four attack Behavlets.</span></li>
+  <li><span class="tag">RQ1</span><span>The first five seconds of a level split into clusters that are each one opening route through the maze.</span></li>
+  <li><span class="tag">RQ2</span><span>Path length, step novelty and the recurrence measures rank participants much the same in the LSTM and UMAP-only spaces (Spearman ρ 0.77–0.82), so they describe players more than they describe the encoder.</span></li>
+  <li><span class="tag">RQ2</span><span>None of the measures relates to performance, flow or BIS/BAS after correcting for 130 tests, and several mostly track how many levels a participant played.</span></li>
+</section>
+
+<section data-slot="rq1-compare">
+  <p>Four Behavlets carry the attack-phase constructs: ghost kills, chasing ghosts rather than collecting dots, and the average distance kept from ghosts outside and during the power-pill phase.</p>
+  <p>With the five Experimental2 features (four ghost distances and the score), every trained encoder groups sequences by these Behavlets better than UMAP alone. The LSTM leads on ghost kills, 0.86 at latent size 512 against 0.50 for UMAP only, and it gains the most from a larger latent space. The untrained LSTM lands near UMAP only, which places the gain in training rather than in the architecture. With all 267 features, every model sits close to chance on all four, so the extra columns bury the attack behaviour rather than add to it.</p>
+</section>
+
+<section data-slot="rq1-views">
+  <p>Each panel colours one two-dimensional layout by one Behavlet. In the trained LSTM, ghost kills occupy their own regions, from one kill in the middle to three or four at the bottom left, and the chase-or-collect Behavlet follows the same layout. The untrained LSTM already splits kill counts into separate islands, because kills show up as score jumps in its input, but it mixes them more within each island. UMAP only forms islands by sequence length and mixes kill counts inside them.</p>
+</section>
+
+<section data-slot="rq2-measures">
+  <p>Sixty-three of the 263 participants played at least ten levels. For them, measures built on distances along the path agree closely between the two spaces: mean step length, step novelty, recurrence rate, laminarity and the longest vertical line all have ρ near 0.8. Cluster-based measures agree less (0.58–0.77), because HDBSCAN draws different borders in each space. Population novelty (0.40) and the unclustered share (0.35) depend on where each space happens to be dense, and are the least portable.</p>
+</section>
+
+<section data-slot="rq2-correlations">
+  <p>No measure correlates with performance, flow or BIS/BAS once the 130 measure × variable tests are Bonferroni-corrected, in either space. Uncorrected, 18 pairs (LSTM) and 16 pairs (UMAP only) reach p &lt; .05. That is more than the six or seven expected by chance, but the tests are not independent and the pairs differ between the two spaces. The strongest LSTM result, lower cluster entropy alongside a higher maximum score (r = −0.40, corrected p = .13), has no counterpart in the UMAP-only space.</p>
+  <p>Part of what remains is how much a participant played. The number of levels correlates with maximum score (r = 0.42) and, inside the latent measures, with clusters visited (0.50–0.56), the longest vertical line (0.36–0.44) and cluster entropy (−0.35 to −0.37). A follow-up should partial it out before reading any of these as style. BIS/BAS scores exist for 56 of the 63 participants.</p>
+</section>
+
+<section data-slot="methods">
+  <p><strong>The sweep.</strong> 84 configurations: four encoders (LSTM, MLP, VAE, Transformer) × five latent sizes (32–512) × two feature sets × two sequence types, plus UMAP with no encoder for each feature set and sequence type. Every encoder trained for 100 epochs with seed 42, global normalisation and per-level speed correction. Latent vectors were reduced to two dimensions with UMAP (cosine metric, 15 neighbours) and clustered with HDBSCAN (minimum cluster size 20).</p>
+  <p><strong>Validation.</strong> Behavlets and per-sequence metadata are binned into levels. Neighbourhood hit is the share of each sequence's five nearest neighbours in the 2-D layout that share its level, computed without sequences that have no instance of the Behavlet, then adjusted so that 0 is chance. The comparison table and line chart read the sweep's own numbers.</p>
+  <p><strong>Rebuilt spaces.</strong> The figures and all of RQ2 need per-sequence coordinates, which the sweep does not keep. Those spaces were rebuilt on this machine from the sweep's saved checkpoints, using the sweep's own configuration and code path and without retraining. The table below shows how closely each rebuild matches the sweep.</p>
+  <p><strong>Participant measures.</strong> Gaussian KDE with one Scott-rule bandwidth for the whole space. Step novelty is the negative log density of a level under a KDE fitted to the participant's earlier levels (after two levels of history), calibrated across participants with a quantile transform. Population novelty uses a KDE fitted to all sequences. Recurrence quantification uses a fixed radius of 10% of the space's largest pairwise distance and Euclidean distance. Only participants with at least ten levels are summarised.</p>
+</section>
+
+<section data-slot="caveats">
+  <li><strong>One seed per configuration.</strong> Differences of about 0.01 between latent sizes or models are inside run-to-run variation that this sweep does not measure. Rank models only on gaps well above that.</li>
+  <li><strong>The Experimental2 features are what the focus Behavlets are computed from.</strong> Caution2 is literally the average ghost distance, and ghost kills appear as jumps in the score. The encoders never saw a label, so the agreement is real, but part of it reflects the input already carrying these quantities. The untrained LSTM shows how much: 0.53 on ghost kills before training, 0.86 after.</li>
+  <li><strong>UMAP only sees sequence length on attack sequences.</strong> Without an encoder, the flattened input keeps the padding, so the layout follows how long each attack lasted. That is why it scores almost perfectly on level and sequence length, and why those sets are left out of the comparison. First-five-second sequences all have the same length, so the baseline is fair there.</li>
+  <li><strong>Rebuilt spaces are close to the sweep, not identical.</strong> Adjusted neighbourhood hit differs by at most 0.015, but HDBSCAN finds a different number of clusters. UMAP only differs as well, so the cause sits upstream of the encoder: numerical differences between the cluster and this machine, or differences in data or code between them.</li>
+  <li><strong>Participant analyses are exploratory.</strong> They cover 63 participants, use Pearson correlations, and do not yet adjust for the number of levels played.</li>
+</section>
+
+</article>

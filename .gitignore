@@ -32,6 +32,8 @@ trained_models/
 hpc/videos/
 hpc/gifs/
 *.html
+# The report page's template and narrative are source, not output.
+!hpc/report_site/*.html
 *.gif
 
 wandb/

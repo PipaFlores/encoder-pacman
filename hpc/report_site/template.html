@@ -1,0 +1,799 @@
+<title>Pac-Man Latent Space Results</title>
+<!--
+  Report page template. hpc/build_report_site.py fills it:
+    slot markers   replaced by the matching section of narrative.html (written by hand for one run)
+    report_data.js replaced by the run's data, inlined
+  Everything else is driven by that data: models, latent sizes, feature sets and the rebuilt
+  spaces are read from it, so a new sweep needs no edits here.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,400;0,600;0,700;1,400&display=swap">
+<style>
+/* Layout: one reading column (~68ch prose) inside a wide figure band; sticky contents rail on desktop.
+   UH identity: black and white grounds, blue as the only accent and never as a large area, square corners. */
+@font-face { font-family: "Hack"; src: url("fonts/Hack-Regular.ttf") format("truetype"); font-weight: 400; font-display: swap; }
+:root {
+  --ground: #ffffff;
+  --ground-alt: #f0f0f0;
+  --ink: #323232;
+  --ink-muted: #5b5b5b;
+  --rule: #d6d6d6;
+  --mark: #969696;
+  --mark-soft: #d6d6d6;
+  --accent: #009bff;
+  --accent-ink: #005a94;
+  --accent-soft: #ccebff;
+  --faculty: #fcd116;
+  --figure-ground: #323232;
+  --font-ui: "Open Sans", Arial, Helvetica, sans-serif;
+  --font-mono: "Hack", ui-monospace, Consolas, "Courier New", monospace;
+  --step--1: 0.8125rem;
+  --step-0: 1rem;
+  --step-1: 1.25rem;
+  --step-2: 1.625rem;
+  --step-3: 2.25rem;
+  --gutter: clamp(16px, 4vw, 40px);
+  --measure: 68ch;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #323232; --ground-alt: #3c3c3c; --ink: #ffffff; --ink-muted: #adadad; --rule: #5b5b5b;
+    --mark: #848484; --mark-soft: #5b5b5b; --accent: #33afff; --accent-ink: #99d7ff; --accent-soft: #1d4a66;
+    --figure-ground: #262626; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #323232; --ground-alt: #3c3c3c; --ink: #ffffff; --ink-muted: #adadad; --rule: #5b5b5b;
+  --mark: #848484; --mark-soft: #5b5b5b; --accent: #33afff; --accent-ink: #99d7ff; --accent-soft: #1d4a66;
+  --figure-ground: #262626; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-ui); font-size: var(--step-0); line-height: 1.6; }
+.page { max-width: 1240px; margin: 0 auto; padding-inline: var(--gutter); padding-block: 40px 96px; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 48px; }
+@media (max-width: 960px) { .page { grid-template-columns: minmax(0, 1fr); gap: 24px; } .toc { position: static !important; } }
+h1, h2, h3, h4 { text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: var(--step-3); font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: var(--step-2); font-weight: 700; letter-spacing: -0.015em; }
+h3 { font-size: var(--step-1); font-weight: 700; }
+h4 { font-size: var(--step-0); font-weight: 700; }
+p { margin: 0; max-width: var(--measure); }
+a { color: var(--accent-ink); }
+a:focus-visible, button:focus-visible, select:focus-visible, canvas:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+.eyebrow { font-size: var(--step--1); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); }
+.muted { color: var(--ink-muted); }
+.small { font-size: var(--step--1); }
+
+.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; display: grid; gap: 4px; font-size: var(--step--1); }
+.toc a { color: var(--ink-muted); text-decoration: none; padding: 4px 0 4px 10px; border-left: 2px solid var(--rule); }
+.toc a:hover { color: var(--ink); border-left-color: var(--ink); }
+.toc .toc-rq { color: var(--ink); font-weight: 700; margin-top: 12px; }
+
+main { display: grid; gap: 72px; min-width: 0; }
+.masthead { display: grid; gap: 18px; padding-bottom: 32px; border-bottom: 1px solid var(--rule); }
+.masthead .lead { font-size: var(--step-1); line-height: 1.45; max-width: 60ch; }
+.findings { display: grid; gap: 14px; margin: 8px 0 0; padding: 0; list-style: none; max-width: var(--measure); }
+.findings li { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: baseline; }
+.findings .tag { font-size: var(--step--1); font-weight: 700; color: var(--accent-ink); letter-spacing: 0.04em; }
+
+section.rq { display: grid; gap: 40px; }
+.rq-head { display: grid; gap: 10px; }
+.block { display: grid; gap: 16px; min-width: 0; }
+.prose { display: grid; gap: 12px; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 8px 20px; align-items: center; font-size: var(--step--1); }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--rule); }
+.seg button { font: inherit; font-size: var(--step--1); background: var(--ground); color: var(--ink-muted); border: 0; padding: 6px 12px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--rule); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+select { font: inherit; font-size: var(--step--1); color: var(--ink); background: var(--ground); border: 1px solid var(--rule); padding: 6px 8px; border-radius: 0; }
+label.ctl { display: inline-flex; gap: 8px; align-items: center; color: var(--ink-muted); }
+
+.table-wrap { overflow-x: auto; border-top: 1px solid var(--ink); }
+table { border-collapse: collapse; width: 100%; font-size: var(--step--1); font-variant-numeric: tabular-nums; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+thead th { font-weight: 700; color: var(--ink-muted); white-space: nowrap; }
+td.num, th.num { text-align: right; }
+tr.is-key td { font-weight: 700; }
+tr.is-base td { color: var(--ink-muted); }
+.cell-bar { display: grid; grid-template-columns: 1fr 52px; gap: 8px; align-items: center; min-width: 120px; }
+.cell-bar .track { height: 6px; background: var(--ground-alt); position: relative; }
+.cell-bar .fill { position: absolute; inset: 0 auto 0 0; background: var(--mark); }
+tr.is-key .cell-bar .fill { background: var(--accent); }
+.cell-bar span { text-align: right; }
+
+figure { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+figcaption { font-size: var(--step--1); color: var(--ink-muted); max-width: var(--measure); }
+.plate { background: var(--figure-ground); padding: 10px; }
+.plate img { display: block; width: 100%; height: auto; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--ink-muted); font-family: var(--font-ui); font-size: 12px; }
+.lines { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; max-width: 760px; }
+@media (min-width: 1180px) { .lines { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: none; } }
+.two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+@media (max-width: 760px) { .two-col { grid-template-columns: minmax(0, 1fr); } }
+
+.callout { border-left: 3px solid var(--faculty); padding: 4px 0 4px 16px; max-width: var(--measure); display: grid; gap: 6px; }
+
+.explorer { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; }
+@media (max-width: 900px) { .explorer { grid-template-columns: minmax(0, 1fr); } }
+.canvas-box { position: relative; width: 100%; aspect-ratio: 1 / 1; max-width: 100%; border: 1px solid var(--rule); }
+.canvas-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+.side { display: grid; gap: 20px; align-content: start; min-width: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--step--1); color: var(--ink-muted); align-items: center; }
+.swatch { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 6px; }
+.ramp { display: inline-block; width: 64px; height: 8px; vertical-align: 0; margin: 0 6px; }
+.readout { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; font-size: var(--step--1); font-variant-numeric: tabular-nums; }
+.readout dt { color: var(--ink-muted); }
+.readout dd { margin: 0; text-align: right; }
+.readout .fam { grid-column: 1 / -1; margin-top: 8px; font-weight: 700; color: var(--ink); text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; }
+.rp-box { width: 100%; max-width: 280px; aspect-ratio: 1 / 1; border: 1px solid var(--rule); }
+.rp-box canvas { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+
+.strips { display: grid; gap: 2px; }
+.strip-row { display: grid; grid-template-columns: minmax(150px, 220px) minmax(0, 1fr) 76px; gap: 12px; align-items: center; font-size: var(--step--1); padding: 4px 0; border-bottom: 1px solid var(--rule); }
+.strip-row .fam-label { grid-column: 1 / -1; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; font-size: 0.72rem; padding-top: 12px; border: 0; }
+.strip-row svg { width: 100%; height: 22px; display: block; }
+.strip-row .rho { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .strip-row { grid-template-columns: minmax(0, 1fr) 64px; } .strip-row svg { grid-column: 1 / -1; grid-row: 2; } }
+
+.heat-wrap { overflow-x: auto; }
+.heat-wrap svg { display: block; min-width: 640px; width: 100%; height: auto; }
+.heat-wrap text { font-family: var(--font-ui); font-size: 11px; fill: var(--ink); }
+.heat-wrap .lab { fill: var(--ink-muted); }
+
+details { border-top: 1px solid var(--rule); padding-top: 12px; }
+summary { cursor: pointer; font-weight: 600; font-size: var(--step--1); }
+details[open] summary { margin-bottom: 12px; }
+ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: var(--measure); }
+.status { display: inline-block; font-size: 0.72rem; font-weight: 700; padding: 1px 6px; border: 1px solid currentColor; letter-spacing: 0.04em; }
+.status.ok { color: var(--accent-ink); }
+.status.warn { color: var(--ink); background: var(--faculty); border-color: var(--faculty); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+</style>
+
+<div class="page">
+  <nav class="toc" aria-label="Contents">
+    <span class="eyebrow">Contents</span>
+    <a class="toc-rq" href="#rq1">RQ1 Latent structure</a>
+    <a href="#rq1-compare">Attack sequences vs Behavlets</a>
+    <a href="#rq1-views">Attack latent spaces</a>
+    <a href="#rq1-clusters">Spatial clusters</a>
+    <a class="toc-rq" href="#rq2">RQ2 Participant dynamics</a>
+    <a href="#rq2-explorer">Participant explorer</a>
+    <a href="#rq2-measures">Measures across participants</a>
+    <a href="#rq2-correlations">Performance and traits</a>
+    <a class="toc-rq" href="#methods">Methods and provenance</a>
+  </nav>
+
+  <main>
+    <header class="masthead">
+      <span class="eyebrow">Pac-Man encoder · results from sweep <span class="mono" id="run-id"></span></span>
+      <h1>Pac-Man Latent Space Results</h1>
+      <p class="lead">Two questions, one pipeline. Do unsupervised sequence embeddings organise gameplay by meaningful behavioural constructs, and what do participants' paths through that space say about how they play?</p>
+      <!-- slot:stale-warning -->
+      <ul class="findings" id="findings"><!-- slot:findings --></ul>
+    </header>
+
+    <!-- ============================== RQ1 ============================== -->
+    <section class="rq" id="rq1" aria-labelledby="rq1-title">
+      <div class="rq-head">
+        <span class="eyebrow">Research question 1</span>
+        <h2 id="rq1-title">Do unsupervised latent spaces capture behavioural constructs?</h2>
+        <p>Every model below was trained without labels, reduced to two dimensions with UMAP, and only then compared with Behavlets: hand-coded measures of what the player did in each sequence. The comparison metric is the chance-adjusted neighbourhood hit, the share of a sequence's five nearest latent neighbours that carry the same Behavlet level, with 0 meaning chance. It reads the continuous layout directly and does not depend on HDBSCAN finding discrete clusters, which these spaces mostly do not form.</p>
+      </div>
+
+      <div class="block" id="rq1-compare">
+        <h3>Attack sequences: agreement with the focus Behavlets</h3>
+        <div class="prose"><!-- slot:rq1-compare --></div>
+        <div class="controls">
+          <label class="ctl">Feature set <span class="seg" id="ctl-fs"></span></label>
+          <label class="ctl" for="ctl-h">Latent size <select id="ctl-h"></select></label>
+          <label class="ctl">Metric
+            <span class="seg" id="ctl-metric">
+              <button type="button" data-v="neigh_hit_adj" aria-pressed="true">Neighbourhood hit (adj.)</button>
+              <button type="button" data-v="NMI" aria-pressed="false">NMI (clusters)</button>
+            </span>
+          </label>
+        </div>
+        <div class="table-wrap"><table id="rq1-table"></table></div>
+        <p class="small muted" id="rq1-table-note"></p>
+        <figure class="chart">
+          <div class="lines" id="rq1-lines"></div>
+          <figcaption id="rq1-lines-cap"></figcaption>
+        </figure>
+      </div>
+
+      <div class="block" id="rq1-views">
+        <h3>What the attack latent space looks like</h3>
+        <div class="prose"><!-- slot:rq1-views --></div>
+        <div class="controls"><span class="seg" id="ctl-view"></span></div>
+        <figure>
+          <div class="plate"><img id="view-img" alt="Latent space of attack sequences coloured by the focus Behavlets"></div>
+          <figcaption id="view-cap"></figcaption>
+        </figure>
+        <details id="grids">
+          <summary id="grids-summary"></summary>
+          <div class="two-col" id="grids-body"></div>
+        </details>
+      </div>
+
+      <div class="block" id="rq1-clusters">
+        <h3>Spatial clusters</h3>
+        <p>Short opening sequences are mostly about where Pac-Man heads first, so these spaces are read through their clusters and the routes they share rather than through Behavlets, which hardly occur that early. Pick a cluster on the map, or from the list, to see its aggregated movement.</p>
+        <div class="controls">
+          <span class="seg" id="ctl-cspace"></span>
+          <label class="ctl" for="ctl-cluster">Cluster <select id="ctl-cluster"></select></label>
+          <span class="small muted" id="cluster-summary"></span>
+        </div>
+        <div class="explorer">
+          <figure>
+            <div class="canvas-box"><canvas id="cluster-map" tabindex="0" aria-label="Latent map of the sequences; click to select a cluster"></canvas></div>
+            <figcaption id="cluster-map-cap"></figcaption>
+          </figure>
+          <figure>
+            <div class="plate"><img id="cluster-img" alt="Velocity grid, heatmap and sample trajectories of the selected cluster"></div>
+            <figcaption>Selected cluster: direction of movement per maze cell, normalised visit heatmap, and four sampled trajectories coloured by time.</figcaption>
+          </figure>
+        </div>
+        <figure>
+          <div class="plate"><img id="heatmaps-img" loading="lazy" alt="Visit heatmaps of every cluster"></div>
+          <figcaption>Visit heatmaps of every cluster, normalised within each cluster.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ============================== RQ2 ============================== -->
+    <section class="rq" id="rq2" aria-labelledby="rq2-title">
+      <div class="rq-head">
+        <span class="eyebrow">Research question 2</span>
+        <h2 id="rq2-title">How do participants move through the latent space?</h2>
+        <p>Each participant's sequences, in the order they played them, trace a path through the latent space. Three families of measures summarise that path: continuous ones from kernel density estimates, discrete ones from the clusters a participant visits, and recurrence quantification of how often and how persistently they return to the same region. Everything here is computed on each latent space in the controls, so a result that holds in only one of them shows up.</p>
+      </div>
+
+      <div class="block" id="rq2-explorer">
+        <h3>Participant explorer</h3>
+        <div class="controls">
+          <label class="ctl" for="ctl-user">Participant <select id="ctl-user"></select></label>
+          <span class="seg" id="ctl-space"></span>
+        </div>
+        <div class="explorer">
+          <figure>
+            <div class="canvas-box"><canvas id="nav-map" aria-label="Selected participant's path through the latent space"></canvas></div>
+            <div class="legend">
+              <span><span class="swatch" style="background: var(--mark-soft)"></span>all sequences</span>
+              <span><span class="swatch" style="background: var(--accent-soft)"></span>participant density (KDE)</span>
+              <span>first<span class="ramp" id="ramp"></span>last level</span>
+            </div>
+          </figure>
+          <div class="side">
+            <figure class="chart">
+              <h4>Novelty along the path</h4>
+              <div id="novelty-chart"></div>
+              <div class="legend">
+                <span><span class="swatch" style="background: var(--accent)"></span>step novelty: unlike this participant's own earlier play</span>
+                <span><span class="swatch" style="background: var(--mark)"></span>population novelty: rare across all players</span>
+              </div>
+            </figure>
+            <figure class="chart">
+              <h4>Clusters visited, in order</h4>
+              <div id="cluster-timeline"></div>
+            </figure>
+            <div class="two-col">
+              <figure>
+                <h4>Recurrence plot</h4>
+                <div class="rp-box"><canvas id="rp"></canvas></div>
+                <figcaption id="rp-cap"></figcaption>
+              </figure>
+              <dl class="readout" id="readout"></dl>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="block" id="rq2-measures">
+        <h3>Measures across participants</h3>
+        <div class="prose"><!-- slot:rq2-measures --></div>
+        <div class="strips" id="strips"></div>
+        <p class="small muted" id="strips-note"></p>
+      </div>
+
+      <div class="block" id="rq2-correlations">
+        <h3>Relation to performance and traits</h3>
+        <div class="prose"><!-- slot:rq2-correlations --></div>
+        <div class="controls"><span class="seg" id="ctl-cspace2"></span></div>
+        <div class="heat-wrap" id="heat"></div>
+        <p class="small muted" id="heat-note"></p>
+      </div>
+    </section>
+
+    <!-- ============================== Methods ============================== -->
+    <section class="rq" id="methods" aria-labelledby="methods-title">
+      <div class="rq-head">
+        <span class="eyebrow">Methods and provenance</span>
+        <h2 id="methods-title">Where every number comes from</h2>
+      </div>
+      <div class="block">
+        <div class="prose"><!-- slot:methods --></div>
+        <div class="table-wrap"><table id="prov-table"></table></div>
+      </div>
+      <div class="block">
+        <h3>Read these results with care</h3>
+        <ul class="plain"><!-- slot:caveats --></ul>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="report_data.js"></script>
+<script>
+(() => {
+  "use strict";
+  const D = window.REPORT_DATA;
+  const $ = (s, el = document) => el.querySelector(s);
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? "–" : Number(v).toFixed(d));
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const svgEl = (tag, attrs = {}, parent) => {
+    const el = document.createElementNS(SVGNS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (parent) parent.appendChild(el);
+    return el;
+  };
+  const mean = (a) => { const v = a.filter((x) => x != null && !Number.isNaN(x)); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+  const hexToRgb = (h) => { const m = h.replace("#", ""); const n = parseInt(m.length === 3 ? m.split("").map((c) => c + c).join("") : m, 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+  const mix = (a, b, t) => { const A = hexToRgb(a), B = hexToRgb(b); return `rgb(${A.map((x, i) => Math.round(x + (B[i] - x) * t)).join(",")})`; };
+  const lum = (rgb) => { const m = rgb.match(/\d+/g).map(Number); return (0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]) / 255; };
+  // Segmented control built from [value, label] options; returns a getter for the pressed value.
+  function segmented(id, options, initial, onChange) {
+    const box = $(id);
+    box.innerHTML = options.map(([v, label]) => `<button type="button" data-v="${esc(v)}" aria-pressed="${String(v) === String(initial)}">${esc(label)}</button>`).join("");
+    box.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      box.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      onChange(b.dataset.v);
+    });
+    return () => box.querySelector('[aria-pressed="true"]').dataset.v;
+  }
+  function staticSegmented(id, onChange) {
+    const box = $(id);
+    box.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      box.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      onChange(b.dataset.v);
+    });
+    return () => box.querySelector('[aria-pressed="true"]').dataset.v;
+  }
+  const redrawers = [];
+  const onTheme = (fn) => redrawers.push(fn);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => redrawers.forEach((f) => f()));
+  new MutationObserver(() => redrawers.forEach((f) => f())).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  let resizeTimer; addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => redrawers.forEach((f) => f()), 120); });
+
+  $("#run-id").textContent = D.run;
+
+  // ------------------------------------------------------------------ names
+  const BEHAVLET = {
+    Aggression1: "Hunt close to ghost house", Aggression3: "Ghost kills", Aggression4: "Hunt after pill ends",
+    Aggression6: "Chase ghosts or collect dots", Caution1: "Times trapped", Caution2a: "Ghost distance, off pill",
+    Caution2b: "Ghost distance, on pill", Caution3: "Close calls",
+  };
+  const ALL_BEH = Object.keys(BEHAVLET);
+  const behName = (s) => BEHAVLET[s] || s;
+  const MEASURE_NAMES = {
+    n_sequences: "Levels played", latent_path_mean_distance: "Mean step length", latent_centroid_mean_distance: "Spread around own centre",
+    kde_step_novelty_mean: "Step novelty", kde_pop_relative_novelty_mean: "Population novelty",
+    visited_clusters: "Clusters visited", Shannon_entropy_normalized: "Cluster entropy (normalised)", cluster_dominant_fraction: "Dominant-cluster share",
+    cluster_noise_fraction: "Unclustered share", cluster_transition_rate: "Cluster switch rate",
+    Recurrence_Rate: "Recurrence rate", Laminarity: "Laminarity", Trapping_Time: "Trapping time", V_max: "Longest vertical line",
+  };
+  const FAMILIES = [
+    ["Continuous (KDE)", ["latent_path_mean_distance", "latent_centroid_mean_distance", "kde_step_novelty_mean", "kde_pop_relative_novelty_mean"]],
+    ["Discrete (clusters)", ["visited_clusters", "Shannon_entropy_normalized", "cluster_dominant_fraction", "cluster_transition_rate", "cluster_noise_fraction"]],
+    ["Recurrence (RQA)", ["Recurrence_Rate", "Laminarity", "Trapping_Time", "V_max"]],
+  ];
+  const CORR_MEASURES = ["n_sequences", "latent_path_mean_distance", "kde_step_novelty_mean", "kde_pop_relative_novelty_mean", "visited_clusters", "Shannon_entropy_normalized", "cluster_dominant_fraction", "cluster_noise_fraction", "cluster_transition_rate", "Recurrence_Rate", "Laminarity", "Trapping_Time", "V_max"];
+  const EXTERNAL = { max_score: "Max score", mean_score: "Mean score", score_per_time: "Score / s", max_level_reached: "Max level", win_ratio: "Win ratio", mean_flow: "Flow", BIS: "BIS", REW: "BAS reward", DRIVE: "BAS drive", FUN: "BAS fun" };
+
+  // ------------------------------------------------------------------ selections
+  const S = D.selections;
+  const shortName = (k) => {
+    const s = S[k]; if (!s) return k; const c = s.config;
+    if (s.kind === "baseline") return "UMAP only";
+    return `${c.embedder} h${c.latent_space}${s.kind === "untrained" ? " (untrained)" : ""}`;
+  };
+  const nOf = (k) => (S[k] && S[k].reproduction ? S[k].reproduction.n_samples : null);
+
+  // ------------------------------------------------------------------ RQ1 data
+  const ATTACK = "pacman_attack";
+  const cols = D.rq1.columns;
+  const R1 = new Map();
+  const attackRows = [];
+  for (const row of D.rq1.rows) {
+    const r = Object.fromEntries(cols.map((c, i) => [c, row[i]]));
+    R1.set(`${r.sequence_type}|${r.feature_set}|${r.embedder}|${r.latent_space}|${r.set}`, r);
+    if (r.sequence_type === ATTACK) attackRows.push(r);
+  }
+  const PREFERRED = ["LSTM", "MLP", "VAE", "Transformer", "TimeVAE"];
+  const MODELS = [...new Set(attackRows.map((r) => r.embedder).filter((e) => e !== "UMAP-only"))]
+    .sort((a, b) => ((PREFERRED.indexOf(a) + 1 || 99) - (PREFERRED.indexOf(b) + 1 || 99)) || a.localeCompare(b));
+  const SIZES = [...new Set(attackRows.map((r) => r.latent_space).filter((h) => h > 0))].sort((a, b) => a - b);
+  const FEATURE_SETS = Object.keys(D.feature_sets);
+  const CONTROL = D.control; // {key, embedder, feature_set, latent_space} of the untrained control, or null
+  const KEY_MODEL = CONTROL ? CONTROL.embedder : MODELS[0];
+  const ctrl = new Map(D.rq1.control.map((r) => [`${r[0]}|${r[1]}`, { neigh_hit_adj: r[2], neigh_hit: r[3], NMI: r[4], ARI: r[5] }]));
+  const get1 = (fs, emb, h, set, metric) => {
+    const r = R1.get(`${ATTACK}|${fs}|${emb}|${emb === "UMAP-only" ? 0 : h}|${set}`);
+    return r ? r[metric] : null;
+  };
+  const focusMean = (fs, emb, h, metric = "neigh_hit_adj") => mean(D.focus.map((s) => get1(fs, emb, h, s, metric)));
+  const nFocus = D.focus.length;
+
+  const fsLabel = (fs) => `${fs}${D.feature_sets[fs] ? ` (${D.feature_sets[fs]})` : ""}`;
+  const getFs = segmented("#ctl-fs", FEATURE_SETS.map((fs) => [fs, fsLabel(fs)]), CONTROL ? CONTROL.feature_set : FEATURE_SETS[0], () => drawRq1Table());
+  const getMetric = staticSegmented("#ctl-metric", () => drawRq1Table());
+  const defaultH = CONTROL && SIZES.includes(CONTROL.latent_space) ? CONTROL.latent_space : SIZES[SIZES.length - 1];
+  $("#ctl-h").innerHTML = SIZES.map((h) => `<option ${h === defaultH ? "selected" : ""}>${h}</option>`).join("");
+  $("#ctl-h").addEventListener("change", () => drawRq1Table());
+
+  function drawRq1Table() {
+    const fs = getFs(), metric = getMetric(), h = Number($("#ctl-h").value);
+    const rows = MODELS.map((m) => ({ name: `${m} h${h}`, key: m === KEY_MODEL, vals: D.focus.map((s) => get1(fs, m, h, s, metric)), all: mean(ALL_BEH.map((s) => get1(fs, m, h, s, metric))) }));
+    const controlShown = CONTROL && fs === CONTROL.feature_set && h === CONTROL.latent_space;
+    if (controlShown) {
+      const val = (s) => (ctrl.get(`untrained|${s}`) || {})[metric] ?? null;
+      rows.push({ name: `${CONTROL.embedder} h${h}, untrained`, base: true, vals: D.focus.map(val), all: mean(ALL_BEH.map(val)) });
+    }
+    rows.push({ name: "UMAP only (no encoder)", base: true, vals: D.focus.map((s) => get1(fs, "UMAP-only", 0, s, metric)), all: mean(ALL_BEH.map((s) => get1(fs, "UMAP-only", 0, s, metric))) });
+    rows.forEach((r) => (r.mean = mean(r.vals)));
+    const colMax = D.focus.map((_, i) => Math.max(...rows.map((r) => r.vals[i] ?? 0), 0.001));
+    const meanMax = Math.max(...rows.map((r) => r.mean ?? 0), 0.001);
+    const allMax = Math.max(...rows.map((r) => r.all ?? 0), 0.001);
+    const bar = (v, max) => `<div class="cell-bar"><div class="track"><div class="fill" style="width:${Math.max(0, (v ?? 0) / max) * 100}%"></div></div><span>${fmt(v, 3)}</span></div>`;
+    $("#rq1-table").innerHTML = `<thead><tr><th>Model</th>${D.focus.map((s) => `<th>${esc(behName(s))}<div class="muted small mono">${esc(s)}</div></th>`).join("")}<th>Mean of ${nFocus}</th><th>All ${ALL_BEH.length} Behavlets</th></tr></thead><tbody>${rows
+      .map((r) => `<tr class="${r.key ? "is-key" : ""} ${r.base ? "is-base" : ""}"><td>${esc(r.name)}</td>${r.vals.map((v, i) => `<td>${bar(v, colMax[i])}</td>`).join("")}<td>${bar(r.mean, meanMax)}</td><td>${bar(r.all, allMax)}</td></tr>`)
+      .join("")}</tbody>`;
+    let note = metric === "NMI"
+      ? "NMI compares HDBSCAN clusters with Behavlet levels, so it drops whenever HDBSCAN finds only a handful of clusters. Treat it as secondary."
+      : "Adjusted neighbourhood hit: 0 is chance, 1 is a perfectly separated Behavlet. Bars are scaled within each column.";
+    if (CONTROL && fs === CONTROL.feature_set) {
+      note += controlShown ? " The untrained row comes from a local rebuild (see Methods); every other row is the sweep's own result." : ` The untrained control was run at h${CONTROL.latent_space} only.`;
+    }
+    $("#rq1-table-note").textContent = note;
+  }
+
+  function drawRq1Lines() {
+    const host = $("#rq1-lines"); host.innerHTML = "";
+    const ink = cssVar("--ink"), muted = cssVar("--ink-muted"), accent = cssVar("--accent"), mark = cssVar("--mark"), rule = cssVar("--rule");
+    const others = [{ c: ink, dash: "" }, { c: mark, dash: "" }, { c: muted, dash: "4 3" }, { c: ink, dash: "4 3" }, { c: mark, dash: "2 2" }];
+    const styles = {}; let o = 0;
+    for (const m of MODELS) styles[m] = m === KEY_MODEL ? { c: accent, w: 2.5, dash: "" } : { ...others[o++ % others.length], w: 1.5 };
+    const all = FEATURE_SETS.flatMap((fs) => [...MODELS.flatMap((m) => SIZES.map((h) => focusMean(fs, m, h))), focusMean(fs, "UMAP-only", 0)]).filter((v) => v != null);
+    const yMax = Math.ceil(Math.max(...all, 0.1) * 10) / 10 + 0.02;
+    const l0 = Math.log2(SIZES[0]), l1 = Math.log2(SIZES[SIZES.length - 1]);
+    for (const fs of FEATURE_SETS) {
+      const title = `${fs}${D.feature_sets[fs] ? ` · ${D.feature_sets[fs]} features` : ""}`;
+      const W = 460, H = 280, m = { l: 40, r: 96, t: 28, b: 36 };
+      const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Mean focus Behavlet agreement by latent size, ${title}` });
+      const x = (h) => m.l + (l1 > l0 ? (Math.log2(h) - l0) / (l1 - l0) : 0.5) * (W - m.l - m.r);
+      const y = (v) => H - m.b - (v / yMax) * (H - m.t - m.b);
+      svgEl("text", { x: m.l, y: 14, style: `fill:${ink};font-weight:700;font-size:12px` }, svg).textContent = title;
+      for (let t = 0; t <= yMax + 1e-9; t += 0.1) {
+        svgEl("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: rule, "stroke-width": t === 0 ? 1 : 0.5 }, svg);
+        svgEl("text", { x: m.l - 6, y: y(t) + 4, "text-anchor": "end" }, svg).textContent = t.toFixed(1);
+      }
+      SIZES.forEach((h) => { svgEl("text", { x: x(h), y: H - m.b + 16, "text-anchor": "middle" }, svg).textContent = h; });
+      svgEl("text", { x: (m.l + W - m.r) / 2, y: H - 2, "text-anchor": "middle" }, svg).textContent = "latent size";
+      const labels = [];
+      const base = focusMean(fs, "UMAP-only", 0);
+      if (base != null) {
+        svgEl("line", { x1: m.l, x2: W - m.r, y1: y(base), y2: y(base), stroke: ink, "stroke-dasharray": "2 3", "stroke-width": 1 }, svg);
+        labels.push({ t: "UMAP only", y: y(base), c: ink });
+      }
+      for (const mdl of MODELS) {
+        const pts = SIZES.map((h) => [h, focusMean(fs, mdl, h)]).filter((p) => p[1] != null).map(([h, v]) => [x(h), y(v), h, v]);
+        if (!pts.length) continue;
+        svgEl("polyline", { points: pts.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: styles[mdl].c, "stroke-width": styles[mdl].w, "stroke-dasharray": styles[mdl].dash }, svg);
+        pts.forEach(([px, py, h, v]) => { const c = svgEl("circle", { cx: px, cy: py, r: mdl === KEY_MODEL ? 3.2 : 2.4, fill: styles[mdl].c }, svg); svgEl("title", {}, c).textContent = `${mdl} h${h}: ${fmt(v, 3)}`; });
+        labels.push({ t: mdl, y: pts[pts.length - 1][1], c: styles[mdl].c });
+      }
+      labels.sort((a, b) => a.y - b.y);
+      for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 15) labels[i].y = labels[i - 1].y + 15;
+      labels.forEach((l) => svgEl("text", { x: W - m.r + 8, y: l.y + 4, style: `fill:${l.c};font-weight:${l.t === KEY_MODEL ? 700 : 400}` }, svg).textContent = l.t);
+      const fig = document.createElement("div"); fig.appendChild(svg); host.appendChild(fig);
+    }
+    $("#rq1-lines-cap").textContent = `Mean adjusted neighbourhood hit over the ${nFocus} focus Behavlets, by latent size. The dashed line is UMAP applied straight to the sequences, with no learned encoder. Each point is one training run.`;
+  }
+
+  // ------------------------------------------------------------------ RQ1 views (images)
+  const VIEWS = D.figures.focus;
+  const viewCaption = (k) => {
+    const s = S[k], c = s.config, n = nOf(k);
+    const where = `${c.sequence_type}, ${c.feature_set} features${n ? `, n = ${n.toLocaleString("en")}` : ""}`;
+    if (s.kind === "untrained") return `${shortName(k)} (${where}): the same architecture with its initial random weights, same data, UMAP and seed, no training. Whatever the trained panel adds over this is what training bought.`;
+    if (s.kind === "baseline") return `UMAP straight on the flattened sequences, with no encoder (${where}). Its input keeps the padding, so the layout mainly follows sequence length.`;
+    return `${shortName(k)} (${where}). Grey points carry no instance of a count Behavlet.`;
+  };
+  if (VIEWS.length) {
+    const showView = (k) => { $("#view-img").src = `fig/${k}_focus_behavlets.jpg`; $("#view-cap").textContent = viewCaption(k); };
+    segmented("#ctl-view", VIEWS.map((k) => [k, shortName(k)]), VIEWS[0], showView);
+    showView(VIEWS[0]);
+  } else {
+    $("#rq1-views").hidden = true;
+  }
+  const GRIDS = D.figures.grids;
+  const nAttackSets = new Set(attackRows.map((r) => r.set)).size;
+  if (GRIDS.length) {
+    $("#grids-summary").textContent = `All ${nAttackSets} validation sets for ${GRIDS.map(shortName).join(", ")}`;
+    $("#grids-body").innerHTML = GRIDS.map((k) => `<figure><div class="plate"><img loading="lazy" src="fig/${k}_validation_grid.jpg" alt="${esc(shortName(k))} latent space coloured by every validation set"></div><figcaption>${esc(shortName(k))}.</figcaption></figure>`).join("");
+  } else {
+    $("#grids").hidden = true;
+  }
+
+  // ------------------------------------------------------------------ canvas helpers
+  function setupCanvas(canvas) {
+    const r = canvas.getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.round(r.width * dpr)); canvas.height = Math.max(1, Math.round(r.height * dpr));
+    const ctx = canvas.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w: r.width, h: r.height };
+  }
+  function boundsOf(points) {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const p of points) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+    const span = Math.max(x1 - x0, y1 - y0) * 1.06, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    return { x0: cx - span / 2, y0: cy - span / 2, span };
+  }
+  const proj = (b, w, h) => ({ px: (x) => ((x - b.x0) / b.span) * w, py: (y) => h - ((y - b.y0) / b.span) * h });
+  const SP = D.rq2.spaces;
+  const SPACES = Object.keys(SP);
+  const BOUNDS = Object.fromEntries(SPACES.map((k) => [k, boundsOf(SP[k].points)]));
+
+  // ------------------------------------------------------------------ RQ1 cluster map
+  const CLUSTER_SPACES = SPACES.filter((k) => D.figures.clusters[k]);
+  let cSpace = CLUSTER_SPACES[0], cSel = null;
+  function fillClusterSelect() {
+    const s = SP[cSpace], sel = $("#ctl-cluster");
+    const clusters = [...s.clusters].sort((a, b) => a[0] - b[0]);
+    if (cSel == null) cSel = [...clusters].sort((a, b) => b[1] - a[1])[0][0];
+    sel.innerHTML = clusters.map((c) => `<option value="${c[0]}" ${c[0] === cSel ? "selected" : ""}>${c[0]} · ${c[1]} sequences</option>`).join("");
+    const noise = s.points.filter((p) => p[2] === -1).length;
+    $("#cluster-summary").textContent = `${clusters.length} clusters · ${noise} unclustered sequences`;
+    const c = S[cSpace].config;
+    $("#cluster-map-cap").textContent = `Each point is one sequence (${c.sequence_type}, ${c.feature_set} features, n = ${s.points.length.toLocaleString("en")}). Numbers mark cluster centres; the selected cluster is in blue.`;
+    $("#heatmaps-img").src = `fig/${cSpace}_cluster_heatmaps.jpg`;
+    showCluster();
+  }
+  function showCluster() { $("#cluster-img").src = `fig/clusters/${cSpace}/cluster_${String(cSel).padStart(2, "0")}.jpg`; }
+  function drawClusterMap() {
+    if (!cSpace) return;
+    const canvas = $("#cluster-map"); const { ctx, w, h } = setupCanvas(canvas);
+    const s = SP[cSpace], P = proj(BOUNDS[cSpace], w, h);
+    ctx.fillStyle = cssVar("--ground"); ctx.fillRect(0, 0, w, h);
+    const soft = cssVar("--mark-soft"), mark = cssVar("--mark"), accent = cssVar("--accent"), ink = cssVar("--ink"), muted = cssVar("--ink-muted");
+    for (const p of s.points) { if (p[2] === cSel) continue; ctx.fillStyle = p[2] === -1 ? soft : mark; ctx.globalAlpha = p[2] === -1 ? 0.6 : 0.55; ctx.fillRect(P.px(p[0]) - 1.2, P.py(p[1]) - 1.2, 2.4, 2.4); }
+    ctx.globalAlpha = 1; ctx.fillStyle = accent;
+    for (const p of s.points) if (p[2] === cSel) ctx.fillRect(P.px(p[0]) - 2, P.py(p[1]) - 2, 4, 4);
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    for (const c of s.clusters) { ctx.fillStyle = c[0] === cSel ? ink : muted; ctx.font = `${c[0] === cSel ? 700 : 600} ${c[0] === cSel ? 13 : 10}px 'Open Sans', Arial, sans-serif`; ctx.fillText(String(c[0]), P.px(c[2]), P.py(c[3])); }
+  }
+  if (CLUSTER_SPACES.length) {
+    segmented("#ctl-cspace", CLUSTER_SPACES.map((k) => [k, shortName(k)]), cSpace, (v) => { cSpace = v; cSel = null; fillClusterSelect(); drawClusterMap(); });
+    $("#ctl-cluster").addEventListener("change", (e) => { cSel = Number(e.target.value); showCluster(); drawClusterMap(); });
+    $("#cluster-map").addEventListener("click", (e) => {
+      const r = e.currentTarget.getBoundingClientRect(); const s = SP[cSpace]; const P = proj(BOUNDS[cSpace], r.width, r.height);
+      let best = null, bd = Infinity;
+      for (const p of s.points) { if (p[2] === -1) continue; const d = (P.px(p[0]) - (e.clientX - r.left)) ** 2 + (P.py(p[1]) - (e.clientY - r.top)) ** 2; if (d < bd) { bd = d; best = p; } }
+      if (best && bd < 400) { cSel = best[2]; $("#ctl-cluster").value = String(cSel); showCluster(); drawClusterMap(); }
+    });
+    onTheme(drawClusterMap);
+  } else {
+    $("#rq1-clusters").hidden = true;
+  }
+
+  // ------------------------------------------------------------------ RQ2 data
+  const MIN_SEQ = (SP[SPACES[0]] && SP[SPACES[0]].parameters.min_sequences) || 10;
+  const MCOLS = {};
+  for (const k of SPACES) MCOLS[k] = Object.fromEntries(SP[k].measure_columns.map((c, i) => [c, i]));
+  const MEASURES_BY_USER = {};
+  for (const k of SPACES) {
+    MEASURES_BY_USER[k] = new Map(SP[k].measures.map((row) => [row[MCOLS[k].user_id], Object.fromEntries(SP[k].measure_columns.map((c, i) => [c, row[i]]))]));
+  }
+  const measureOf = (k, u) => MEASURES_BY_USER[k].get(u) || null;
+  const eligible = (k) => [...MEASURES_BY_USER[k].values()].filter((r) => r.n_sequences >= MIN_SEQ).map((r) => r.user_id);
+  const USERS = SPACES.length ? SPACES.map(eligible).reduce((a, b) => a.filter((u) => b.includes(u)))
+    .sort((a, b) => measureOf(SPACES[0], b).n_sequences - measureOf(SPACES[0], a).n_sequences) : [];
+  let user = USERS[0], space = SPACES[0];
+  $("#ctl-user").innerHTML = USERS.map((u) => `<option value="${u}">P${u} · ${measureOf(SPACES[0], u).n_sequences} levels</option>`).join("");
+  $("#ctl-user").addEventListener("change", (e) => selectUser(Number(e.target.value)));
+  function selectUser(u) { user = u; $("#ctl-user").value = String(u); drawExplorer(); drawStrips(); }
+
+  const timeColor = (t) => { // light blue -> UH blue -> black, readable on both grounds
+    const stops = [cssVar("--accent-soft"), cssVar("--accent"), cssVar("--ink")];
+    return t < 0.5 ? mix(stops[0], stops[1], t * 2) : mix(stops[1], stops[2], (t - 0.5) * 2);
+  };
+  function drawRamp() { $("#ramp").style.background = `linear-gradient(90deg, ${timeColor(0)}, ${timeColor(0.5)}, ${timeColor(1)})`; }
+
+  function drawNavMap() {
+    const canvas = $("#nav-map"); const { ctx, w, h } = setupCanvas(canvas);
+    const s = SP[space], P = proj(BOUNDS[space], w, h), ser = s.series[String(user)] || [];
+    ctx.fillStyle = cssVar("--ground"); ctx.fillRect(0, 0, w, h);
+    // participant KDE (same scalar bandwidth as the Python analysis)
+    const bw = s.parameters.kde_bandwidth, G = 90, img = ctx.createImageData(G, G), b = BOUNDS[space];
+    const dens = new Float32Array(G * G); let max = 0;
+    for (let gy = 0; gy < G; gy++) for (let gx = 0; gx < G; gx++) {
+      const X = b.x0 + ((gx + 0.5) / G) * b.span, Y = b.y0 + ((G - gy - 0.5) / G) * b.span; let d = 0;
+      for (const p of ser) { const dx = X - p[0], dy = Y - p[1]; d += Math.exp(-(dx * dx + dy * dy) / (2 * bw * bw)); }
+      dens[gy * G + gx] = d; if (d > max) max = d;
+    }
+    const ac = hexToRgb(cssVar("--accent"));
+    for (let i = 0; i < G * G; i++) { const t = max ? dens[i] / max : 0; img.data[i * 4] = ac[0]; img.data[i * 4 + 1] = ac[1]; img.data[i * 4 + 2] = ac[2]; img.data[i * 4 + 3] = t < 0.04 ? 0 : Math.round(150 * Math.pow(t, 0.8)); }
+    const off = document.createElement("canvas"); off.width = G; off.height = G; off.getContext("2d").putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = true; ctx.drawImage(off, 0, 0, w, h);
+    ctx.fillStyle = cssVar("--mark"); ctx.globalAlpha = 0.35;
+    for (const p of s.points) ctx.fillRect(P.px(p[0]) - 1, P.py(p[1]) - 1, 2, 2);
+    ctx.globalAlpha = 1;
+    const n = ser.length;
+    for (let i = 1; i < n; i++) { ctx.strokeStyle = timeColor((i - 1) / Math.max(1, n - 2)); ctx.lineWidth = 1.2; ctx.globalAlpha = 0.8; ctx.beginPath(); ctx.moveTo(P.px(ser[i - 1][0]), P.py(ser[i - 1][1])); ctx.lineTo(P.px(ser[i][0]), P.py(ser[i][1])); ctx.stroke(); }
+    ctx.globalAlpha = 1;
+    ser.forEach((p, i) => { ctx.fillStyle = timeColor(i / Math.max(1, n - 1)); ctx.fillRect(P.px(p[0]) - 2.5, P.py(p[1]) - 2.5, 5, 5); });
+    if (n) {
+      const ink = cssVar("--ink"), g = cssVar("--ground");
+      const [sx, sy] = [P.px(ser[0][0]), P.py(ser[0][1])], [ex, ey] = [P.px(ser[n - 1][0]), P.py(ser[n - 1][1])];
+      ctx.lineWidth = 2; ctx.strokeStyle = ink; ctx.fillStyle = g; ctx.fillRect(sx - 6, sy - 6, 12, 12); ctx.strokeRect(sx - 6, sy - 6, 12, 12);
+      ctx.beginPath(); ctx.moveTo(ex - 6, ey - 6); ctx.lineTo(ex + 6, ey + 6); ctx.moveTo(ex + 6, ey - 6); ctx.lineTo(ex - 6, ey + 6); ctx.lineWidth = 3; ctx.stroke();
+      ctx.font = "600 11px 'Open Sans', Arial, sans-serif"; ctx.fillStyle = ink; ctx.textBaseline = "bottom";
+      ctx.fillText("first", sx + 9, sy - 4); ctx.fillText("last", ex + 9, ey - 4);
+    }
+  }
+
+  function drawNovelty() {
+    const host = $("#novelty-chart"); host.innerHTML = "";
+    const ser = SP[space].series[String(user)] || []; const n = ser.length;
+    const W = 460, H = 150, m = { l: 34, r: 8, t: 8, b: 24 };
+    const vals = ser.flatMap((p) => [p[3], p[4]]).filter((v) => v != null);
+    const lo = Math.min(-2, ...vals), hi = Math.max(2, ...vals);
+    const x = (i) => m.l + (i / Math.max(1, n - 1)) * (W - m.l - m.r), y = (v) => m.t + ((hi - v) / (hi - lo)) * (H - m.t - m.b);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Step and population novelty per level" });
+    const rule = cssVar("--rule");
+    [-2, 0, 2].forEach((t) => { svgEl("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: rule, "stroke-width": t === 0 ? 1 : 0.5 }, svg); svgEl("text", { x: m.l - 6, y: y(t) + 4, "text-anchor": "end" }, svg).textContent = t; });
+    svgEl("text", { x: m.l, y: H - 4 }, svg).textContent = "level 1";
+    svgEl("text", { x: W - m.r, y: H - 4, "text-anchor": "end" }, svg).textContent = `level ${n}`;
+    const line = (idx, color, wdt) => {
+      let d = ""; ser.forEach((p, i) => { if (p[idx] == null) return; d += `${d && ser[i - 1] && ser[i - 1][idx] != null ? "L" : "M"}${x(i).toFixed(1)},${y(p[idx]).toFixed(1)}`; });
+      svgEl("path", { d, fill: "none", stroke: color, "stroke-width": wdt }, svg);
+    };
+    line(4, cssVar("--mark"), 1.2); line(3, cssVar("--accent"), 1.8);
+    host.appendChild(svg);
+  }
+
+  function drawTimeline() {
+    const host = $("#cluster-timeline"); host.innerHTML = "";
+    const ser = SP[space].series[String(user)] || []; const n = ser.length;
+    const order = []; ser.forEach((p) => { if (!order.includes(p[2])) order.push(p[2]); });
+    const rowH = 12, W = 460, m = { l: 34, r: 8, t: 4, b: 18 }, H = m.t + m.b + order.length * rowH;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Cluster visited at each level" });
+    const x = (i) => m.l + (i / Math.max(1, n - 1)) * (W - m.l - m.r - 6);
+    order.forEach((c, r) => { svgEl("text", { x: m.l - 6, y: m.t + r * rowH + 9, "text-anchor": "end" }, svg).textContent = c === -1 ? "none" : c; svgEl("line", { x1: m.l, x2: W - m.r, y1: m.t + r * rowH + 6, y2: m.t + r * rowH + 6, stroke: cssVar("--rule"), "stroke-width": 0.5 }, svg); });
+    const cw = Math.max(2, Math.min(8, (W - m.l - m.r) / Math.max(1, n) - 1));
+    ser.forEach((p, i) => { const r = svgEl("rect", { x: x(i), y: m.t + order.indexOf(p[2]) * rowH + 1, width: cw, height: rowH - 2, fill: p[2] === -1 ? cssVar("--mark") : timeColor(i / Math.max(1, n - 1)) }, svg); svgEl("title", {}, r).textContent = `level ${i + 1}: ${p[2] === -1 ? "unclustered" : "cluster " + p[2]}`; });
+    svgEl("text", { x: m.l, y: H - 4 }, svg).textContent = "level 1";
+    svgEl("text", { x: W - m.r, y: H - 4, "text-anchor": "end" }, svg).textContent = `level ${n}`;
+    host.appendChild(svg);
+  }
+
+  function drawRp() {
+    const canvas = $("#rp"); const ser = SP[space].series[String(user)] || []; const n = ser.length; const par = SP[space].parameters; const eps = par.rqa_epsilon;
+    canvas.width = Math.max(1, n); canvas.height = Math.max(1, n); const ctx = canvas.getContext("2d");
+    ctx.fillStyle = cssVar("--ground"); ctx.fillRect(0, 0, n, n); ctx.fillStyle = cssVar("--ink");
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const dx = ser[i][0] - ser[j][0], dy = ser[i][1] - ser[j][1]; if (dx * dx + dy * dy <= eps * eps) ctx.fillRect(j, n - 1 - i, 1, 1); }
+    $("#rp-cap").textContent = `Levels ${n} × ${n}. A dark cell means the two levels landed within ε = ${fmt(eps, 2)} of each other (${Math.round((par.rqa_radius_fraction || 0.1) * 100)}% of the space's extent). Vertical runs are laminar stretches: staying put across consecutive levels.`;
+  }
+
+  function drawReadout() {
+    const me = measureOf(space, user); const pool = eligible(space).map((u) => measureOf(space, u));
+    const pct = (k) => { const v = me[k]; const arr = pool.map((r) => r[k]).filter((x) => x != null); return v == null || !arr.length ? null : Math.round((arr.filter((x) => x < v).length + 0.5 * arr.filter((x) => x === v).length) / arr.length * 100); };
+    let html = `<dt>Levels played</dt><dd>${me.n_sequences}</dd>`;
+    for (const [fam, keys] of FAMILIES) {
+      html += `<span class="fam">${fam}</span>`;
+      for (const k of keys) { const p = pct(k); html += `<dt>${MEASURE_NAMES[k]}</dt><dd>${fmt(me[k], 2)} <span class="muted">${p == null ? "" : "· p" + p}</span></dd>`; }
+    }
+    $("#readout").innerHTML = html + `<span class="fam muted" style="text-transform:none;letter-spacing:0;font-weight:400">p = percentile among the ${pool.length} participants</span>`;
+  }
+
+  function drawExplorer() { if (!space || user == null) return; drawNavMap(); drawNovelty(); drawTimeline(); drawRp(); drawReadout(); }
+
+  // ------------------------------------------------------------------ RQ2 strips
+  function spearman(a, b) {
+    const idx = a.map((_, i) => i).filter((i) => a[i] != null && b[i] != null);
+    const rank = (v) => { const s = idx.map((i) => [v[i], i]).sort((p, q) => p[0] - q[0]); const r = new Map(); for (let i = 0; i < s.length;) { let j = i; while (j + 1 < s.length && s[j + 1][0] === s[i][0]) j++; for (let k = i; k <= j; k++) r.set(s[k][1], (i + j) / 2); i = j + 1; } return idx.map((i) => r.get(i)); };
+    const ra = rank(a), rb = rank(b), ma = mean(ra), mb = mean(rb);
+    let num = 0, da = 0, db = 0; for (let i = 0; i < ra.length; i++) { num += (ra[i] - ma) * (rb[i] - mb); da += (ra[i] - ma) ** 2; db += (rb[i] - mb) ** 2; }
+    return da && db ? num / Math.sqrt(da * db) : null;
+  }
+  // Agreement between the first two spaces: do the measures describe players or the encoder?
+  const RHO = {};
+  if (SPACES.length >= 2) for (const [, keys] of FAMILIES) for (const k of keys) RHO[k] = spearman(USERS.map((u) => measureOf(SPACES[0], u)[k]), USERS.map((u) => measureOf(SPACES[1], u)[k]));
+  $("#strips-note").textContent = `Each dot is one participant with at least ${MIN_SEQ} levels; the selected participant is in blue and you can click a dot to select it.` +
+    (SPACES.length >= 2 ? ` ρ is the Spearman rank correlation between the measure computed on the ${shortName(SPACES[0])} space and on the ${shortName(SPACES[1])} space, across the same participants.` : "");
+  function drawStrips() {
+    const host = $("#strips"); host.innerHTML = "";
+    if (!space) return;
+    const pool = USERS.map((u) => [u, measureOf(space, u)]);
+    for (const [fam, keys] of FAMILIES) {
+      const head = document.createElement("div"); head.className = "strip-row"; head.innerHTML = `<span class="fam-label">${fam} · ${esc(shortName(space))} space</span>`; host.appendChild(head);
+      for (const k of keys) {
+        const row = document.createElement("div"); row.className = "strip-row";
+        const vals = pool.map(([u, r]) => [u, r[k]]).filter((p) => p[1] != null);
+        const lo = Math.min(...vals.map((p) => p[1])), hi = Math.max(...vals.map((p) => p[1]));
+        const svg = svgEl("svg", { viewBox: "0 0 400 22", preserveAspectRatio: "none", role: "img", "aria-label": MEASURE_NAMES[k] });
+        const x = (v) => 6 + ((v - lo) / ((hi - lo) || 1)) * 388;
+        svgEl("line", { x1: 0, x2: 400, y1: 11, y2: 11, stroke: cssVar("--rule"), "stroke-width": 1 }, svg);
+        vals.forEach(([u, v], i) => { if (u === user) return; const c = svgEl("rect", { x: x(v) - 2, y: 11 - 2 - ((i * 7) % 5) + 1, width: 4, height: 4, fill: cssVar("--mark"), "fill-opacity": 0.75, style: "cursor:pointer" }, svg); c.addEventListener("click", () => selectUser(u)); svgEl("title", {}, c).textContent = `P${u}: ${fmt(v, 3)}`; });
+        const mine = vals.find((p) => p[0] === user);
+        if (mine) svgEl("rect", { x: x(mine[1]) - 1.5, y: 1, width: 3, height: 20, fill: cssVar("--accent") }, svg);
+        const label = document.createElement("span"); label.textContent = MEASURE_NAMES[k];
+        const rho = document.createElement("span"); rho.className = "rho"; rho.textContent = SPACES.length >= 2 ? `ρ ${fmt(RHO[k], 2)}` : "";
+        row.append(label, svg, rho); host.appendChild(row);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ RQ2 correlations
+  let cSpace2 = SPACES[0];
+  function corrMap(k) { const m = new Map(); for (const [a, b, r, p, n, tested, pb] of SP[k].correlations) { m.set(`${a}|${b}`, { r, p, n, tested, pb }); m.set(`${b}|${a}`, { r, p, n, tested, pb }); } return m; }
+  function drawHeat() {
+    const host = $("#heat"); host.innerHTML = ""; if (!cSpace2) return; const cm = corrMap(cSpace2);
+    const ext = Object.keys(EXTERNAL), cw = 74, ch = 26, lw = 200, th = 40;
+    const W = lw + ext.length * cw + 4, H = th + CORR_MEASURES.length * ch + 4;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Correlations between participant measures and performance or traits" });
+    const g = cssVar("--ground"), pos = cssVar("--accent"), neg = cssVar("--ink-muted"), ink = cssVar("--ink");
+    ext.forEach((e, j) => { svgEl("text", { x: lw + j * cw + cw / 2, y: th - 8, "text-anchor": "middle", class: "lab" }, svg).textContent = EXTERNAL[e]; });
+    CORR_MEASURES.forEach((mk, i) => {
+      svgEl("text", { x: lw - 10, y: th + i * ch + ch / 2 + 4, "text-anchor": "end", class: "lab" }, svg).textContent = MEASURE_NAMES[mk];
+      ext.forEach((e, j) => {
+        const c = cm.get(`${mk}|${e}`) || {}; const r = c.r;
+        const fill = r == null ? cssVar("--ground-alt") : mix(g, r >= 0 ? pos : neg, Math.min(1, Math.abs(r) / 0.5) * 0.9);
+        const rect = svgEl("rect", { x: lw + j * cw + 1, y: th + i * ch + 1, width: cw - 2, height: ch - 2, fill }, svg);
+        const sig = c.pb != null && c.pb < 0.05, nom = c.p != null && c.p < 0.05;
+        if (sig) svgEl("rect", { x: lw + j * cw + 2, y: th + i * ch + 2, width: cw - 4, height: ch - 4, fill: "none", stroke: ink, "stroke-width": 2 }, svg);
+        const textFill = fill.startsWith("rgb") ? (lum(fill) < 0.45 ? "#ffffff" : "#323232") : ink;
+        const txt = svgEl("text", { x: lw + j * cw + cw / 2, y: th + i * ch + ch / 2 + 4, "text-anchor": "middle", style: `fill:${textFill};font-weight:${sig ? 700 : 400};font-style:${nom && !sig ? "italic" : "normal"}` }, svg);
+        txt.textContent = r == null ? "–" : (r >= 0 ? "" : "−") + Math.abs(r).toFixed(2).replace(/^0/, "") + (sig ? "*" : "");
+        svgEl("title", {}, rect).textContent = `${MEASURE_NAMES[mk]} × ${EXTERNAL[e]}: r = ${fmt(r, 3)}, p = ${c.p == null ? "–" : c.p.toExponential(1)}, Bonferroni p = ${c.pb == null ? "–" : c.pb.toFixed(3)}, n = ${c.n ?? "–"}`;
+      });
+    });
+    host.appendChild(svg);
+    $("#heat-note").textContent = `Pearson r across participants with at least ${MIN_SEQ} levels. Blue is positive, grey negative. Outlined bold cells (*) survive Bonferroni correction over the ${CORR_MEASURES.length * ext.length} measure × variable tests; italic cells have uncorrected p < .05 only. Hover a cell for r, p and n.`;
+  }
+
+  if (SPACES.length) {
+    segmented("#ctl-space", SPACES.map((k) => [k, shortName(k)]), space, (v) => { space = v; drawExplorer(); drawStrips(); });
+    segmented("#ctl-cspace2", SPACES.map((k) => [k, shortName(k)]), cSpace2, (v) => { cSpace2 = v; drawHeat(); });
+    onTheme(() => { drawRamp(); drawExplorer(); });
+    onTheme(drawStrips);
+    onTheme(drawHeat);
+  } else {
+    $("#rq2").hidden = true;
+  }
+
+  // ------------------------------------------------------------------ provenance
+  function drawProvenance() {
+    const seqName = (c) => (c.sequence_type === ATTACK ? "Attack" : c.sequence_type.replace(/_/g, " "));
+    $("#prov-table").innerHTML = `<thead><tr><th>Space</th><th>Sweep run</th><th>Configuration</th><th class="num">Sequences</th><th class="num">Clusters (sweep / rebuilt)</th><th class="num">Max |Δ| adj. hit</th><th>Check</th></tr></thead><tbody>${Object.entries(S).map(([k, e]) => {
+      const name = `${seqName(e.config)} · ${shortName(k)}`; const r = e.reproduction;
+      if (!r) return `<tr><td>${esc(name)}</td><td class="mono">${esc(e.run_dir || "")}</td><td>${e.kind === "untrained" ? "Untrained weights, same data, seed and UMAP" : esc(e.label || "")}</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td><span class="status ok">${e.kind === "untrained" ? "control" : "–"}</span></td></tr>`;
+      const d = r.max_abs_diff_neigh_hit_adj;
+      const [cls, word] = d < 0.001 ? ["ok", "identical"] : d < 0.02 ? ["ok", "close"] : ["warn", "drifted"];
+      return `<tr><td>${esc(name)}</td><td class="mono">${esc(e.run_dir)}</td><td class="mono">${esc(e.label)}</td><td class="num">${r.n_samples.toLocaleString("en")}</td><td class="num">${r.n_clusters_sweep} / ${r.n_clusters_rebuilt}</td><td class="num">${fmt(d, 3)}</td><td><span class="status ${cls}">${word}</span></td></tr>`;
+    }).join("")}</tbody>`;
+  }
+
+  // ------------------------------------------------------------------ boot
+  drawRq1Table(); drawRq1Lines(); onTheme(drawRq1Lines);
+  if (cSpace) { fillClusterSelect(); drawClusterMap(); }
+  if (SPACES.length) { drawRamp(); drawExplorer(); drawStrips(); drawHeat(); }
+  drawProvenance();
+})();
+</script>
