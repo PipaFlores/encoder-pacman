@@ -116,6 +116,7 @@ class PatternAnalysis:
             test_initialized_model: bool = False,
             sort_distances: bool = True,
             speed_correction: bool = False,
+            resample_stride: int = 1,
             random_seed: int | None = None,
             verbose: bool = False,
             max_samples: int | None = False,
@@ -176,7 +177,10 @@ class PatternAnalysis:
             sort_distance (bool): If using Astar distances as features, sort them in ascending order.
             speed_correction (bool): Resample the model input so every step covers the same
                 distance at every level, removing Pac-Man's per-level speed-up (see
-                PacmanDataReader.speed_correction_positions). raw_sequence_data keeps every frame.
+                PacmanDataReader.resampling_positions). raw_sequence_data keeps every frame.
+            resample_stride (int): Keep one step in `resample_stride` to shorten the model input
+                by that factor (with speed_correction, a step is that many frames of movement at
+                full speed). Values are read at each step, not averaged. 1 keeps every step.
             random_seed (int | None): Random seed for reproducibility.
             max_samples (int | None): Max number of samples to be used, for fast debugging purposes
             verbose (bool): If True, enables verbose (INFO) logging, for this class and for the
@@ -228,6 +232,7 @@ class PatternAnalysis:
         self.test_initialized_model = test_initialized_model
         self.sort_distances = sort_distances
         self.speed_correction = speed_correction
+        self.resample_stride = resample_stride
         self.max_samples = max_samples
         self.elementwise_masking = elementwise_masking
 
@@ -620,6 +625,7 @@ class PatternAnalysis:
                     normalization=self.normalization,
                     max_samples=self.max_samples,
                     speed_correction=self.speed_correction,
+                    resample_stride=self.resample_stride,
                 )
                 self._save_cache(cache_path, fingerprint, (
                     self.raw_sequence_data, self.processed_sequence_data, gif_names,
@@ -707,6 +713,9 @@ class PatternAnalysis:
             "read_games_only": self.reader.read_games_only,
             "source_data": self._source_data_fingerprint(),
         }
+        # only when it changes the data, so entries cached before the option existed stay valid
+        if self.resample_stride != 1:
+            config["resample_stride"] = self.resample_stride
         fingerprint_json = json.dumps(config, sort_keys=True, default=str)
         return hashlib.md5(fingerprint_json.encode()).hexdigest()[:16]
 
@@ -763,7 +772,8 @@ class PatternAnalysis:
         default, so a sweep over it does not have every point overwrite the same file while
         checkpoints trained at the default keep their existing names. `speed_correction` is
         appended the same way, only when on: it changes what the model is trained on (and the
-        sequence length), so corrected and uncorrected models must not share a file.
+        sequence length), so corrected and uncorrected models must not share a file. A
+        `resample_stride` other than 1 is appended as `_stride<n>` for the same reason.
         """
         if test_dataset:
             return "test_data"
@@ -775,6 +785,9 @@ class PatternAnalysis:
 
         if self.speed_correction:
             stem += "_speedcorr"
+
+        if self.resample_stride != 1:
+            stem += f"_stride{self.resample_stride}"
 
         return stem
 
@@ -936,6 +949,7 @@ class PatternAnalysis:
                         "elementwise_masking": False,
                         "sort_distances": self.sort_distances,
                         "speed_correction": self.speed_correction,
+                        "resample_stride": self.resample_stride,
                         "filter_by_pill": self.filter_by_pill,
                         "rebase_score": self.rebase_score,
                         # Model architecture
@@ -2243,6 +2257,7 @@ class PatternAnalysis:
             "elementwise_masking": self.elementwise_masking,
             "sort_distances": self.sort_distances,
             "speed_correction": self.speed_correction,
+            "resample_stride": self.resample_stride,
             "filter_by_pill": self.filter_by_pill,
             "rebase_score": self.rebase_score,
             "test_initialized_model": self.test_initialized_model,

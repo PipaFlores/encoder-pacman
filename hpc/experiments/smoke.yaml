@@ -1,7 +1,7 @@
 # Fast end-to-end check of the whole path: expansion -> training -> reduction ->
 # clustering -> validation -> results. Two epochs on a handful of samples, so it verifies
 # plumbing rather than producing anything meaningful. Covers one torch embedder, the
-# no-embedder branch, and the no-validation branch.
+# no-embedder branch, the no-validation branch, and resampling (speed correction + stride).
 #
 #   python run_experiment.py --config experiments/smoke.yaml --dry-run
 #   python run_experiment.py --config experiments/smoke.yaml --continue-on-error
@@ -42,3 +42,5 @@ grid:
 include:
   #The branch that used to crash on the last statement of an otherwise finished run.
   - {embedder: MLP, validation_method: none, max_samples: 30}
+  # Resampling: speed correction plus compression by 2 (shorter sequences, _stride2 label).
+  - {embedder: MLP, speed_correction: true, resample_stride: 2, max_samples: 30}

@@ -99,10 +99,11 @@ class PacmanDataReader:
     ]
     }
 
-    # Speed correction (make_data(speed_correction=True)): how each sequence type's window is
-    # defined. Time windows anchored at the level's start or end are cut to the distance a
-    # level-1 Pac-Man covers in them, so their length stops depending on level; event-defined
-    # windows (None) keep their full length, since cutting them would change what they contain.
+    # Resampling (make_data(speed_correction=..., resample_stride=...)): how each sequence type's
+    # window is defined. Time windows are anchored at the level's start or end: steps are counted
+    # from that end, and with speed correction they are cut to the distance a level-1 Pac-Man
+    # covers in the window, so their length stops depending on level. Event-defined windows
+    # (None) keep their full length, since cutting them would change what they contain.
     SPEED_CORRECTION_ANCHORS: ClassVar[dict[str, str | None]] = {
         "first_5_seconds": "start",
         "first_50_steps": "start",
@@ -113,7 +114,7 @@ class PacmanDataReader:
         "pacman_attack": None,
     }
     SLOWEST_PACMAN_SPEED = 0.80
-    # Continuous columns, smoothed and linearly interpolated by speed correction; all others take
+    # Continuous columns, smoothed and linearly interpolated by resampling; all others take
     # the nearest frame. Neither ever blends across a teleport: a position only between frames
     # where that actor moved at most MAX_FRAME_MOVE (measured on its 2D move, both axes at once),
     # a ghost distance only where both Pac-Man and that ghost did and both values are finite.
@@ -384,6 +385,7 @@ class PacmanDataReader:
         normalization: str | None = None,
         max_samples : int | None = None,
         speed_correction: bool = False,
+        resample_stride: int = 1,
     ):
         """
         Assemble processed game data sequences, returning normalized and padded feature arrays.
@@ -402,8 +404,12 @@ class PacmanDataReader:
             max_samples (int): Max number of samples to be returnes. For fast debugging purposes
             speed_correction (bool): Resample the processed sequences so every step covers the same
                 distance at every level, removing the per-level speed-up of Pac-Man (see
-                `speed_correction_positions` and `_correct_level_speed`). Only X_padded is resampled; raw_sequences keep every
+                `resampling_positions` and `_resample_sequences`). Only X_padded is resampled; raw_sequences keep every
                 frame, since behavlets, GIFs and trajectories are computed from them.
+            resample_stride (int): Keep one step in `resample_stride`, to shorten sequences by that
+                factor. With speed_correction a step is `resample_stride` frames of movement at full
+                speed, otherwise `resample_stride` recorded frames. Values are read at each step, not
+                averaged over it, so positions stay on the maze. 1 keeps every step.
 
         Returns:
             If return_raw_sequences is True:
@@ -469,9 +475,13 @@ class PacmanDataReader:
         elif normalization is None:
             normalized_sequences = raw_sequences
 
-        if speed_correction:
-            normalized_sequences = self._correct_level_speed(
-                raw_sequences, normalized_sequences, sequence_type=seq_type
+        if speed_correction or resample_stride != 1:
+            normalized_sequences = self._resample_sequences(
+                raw_sequences,
+                normalized_sequences,
+                sequence_type=seq_type,
+                speed_correction=speed_correction,
+                stride=resample_stride,
             )
 
         if "available_pellets_states" not in features:
@@ -582,18 +592,22 @@ class PacmanDataReader:
         return 0.90
 
     @staticmethod
-    def speed_correction_positions(
+    def resampling_positions(
         n_frames: int,
         speed: float,
         anchor: str | None = None,
         slowest_speed: float = SLOWEST_PACMAN_SPEED,
+        stride: int = 1,
     ) -> np.ndarray:
         """
-        Fractional row positions to sample so every step covers the same distance at every level.
+        Fractional row positions to sample, one per step.
 
-        One step is one frame of movement at full speed (1.0), so a sequence recorded at `speed`
-        is sampled every `1 / speed` frames: every frame at level 5+, every 1.11 frames at levels
-        2-4, every 1.25 frames at level 1. Slower levels only lose steps; nothing is extrapolated.
+        A step is `stride` frames of movement at full speed (1.0), so a sequence recorded at
+        `speed` is sampled every `stride / speed` frames. With stride 1: every frame at level 5+,
+        every 1.11 frames at levels 2-4, every 1.25 frames at level 1, so every step covers the
+        same distance at every level. Without speed correction pass `speed=1` (and
+        `slowest_speed=1`), and the sequence is simply sampled every `stride` frames. Steps are
+        only ever dropped; nothing is extrapolated.
 
         With an `anchor` ("start" or "end"), the steps are counted from that end of the window
         and cut to as many as a sequence of the same length at `slowest_speed` would have. The
@@ -602,22 +616,29 @@ class PacmanDataReader:
         """
         if n_frames == 0:
             return np.arange(0, dtype=float)
-        n_steps = int(np.floor((n_frames - 1) * speed)) + 1
-        offsets = np.arange(n_steps) / speed
+        n_steps = int(np.floor((n_frames - 1) * speed / stride)) + 1
+        offsets = np.arange(n_steps) * stride / speed
         positions = (n_frames - 1) - offsets[::-1] if anchor == "end" else offsets
         if anchor is not None:
-            cap = int(np.floor((n_frames - 1) * slowest_speed)) + 1
+            cap = int(np.floor((n_frames - 1) * slowest_speed / stride)) + 1
             positions = positions[-cap:] if anchor == "end" else positions[:cap]
         return positions
 
-    def _correct_level_speed(
+    def _resample_sequences(
         self,
         raw_sequences: list[pd.DataFrame],
         sequences: list[pd.DataFrame],
         sequence_type: str,
+        speed_correction: bool = True,
+        stride: int = 1,
     ) -> list[pd.DataFrame]:
         """
-        Resample `sequences` at `speed_correction_positions`, at each sequence's level.
+        Resample `sequences` at `resampling_positions`: one step per `stride` frames of movement
+        at full speed, at each sequence's level (speed correction), or one step per `stride`
+        recorded frames when `speed_correction` is False.
+
+        Values are read at each step, never averaged over it: averaging the positions a step
+        spans cuts across corners, and at stride 8 puts some points inside walls.
 
         Columns in SPEED_CORRECTION_INTERPOLATED are first smoothed with a centred [1, 2, 1] / 4
         filter, then interpolated linearly between the two frames around each position; every
@@ -637,12 +658,15 @@ class PacmanDataReader:
         interpolating normalized values gives the same result as normalizing interpolated ones.
         Every sequence must lie within a single level, which all slicing methods guarantee.
         """
+        if isinstance(stride, bool) or not isinstance(stride, (int, np.integer)) or stride < 1:
+            raise ValueError(f"resample_stride must be a whole number of at least 1, got {stride!r}")
         if sequence_type not in self.SPEED_CORRECTION_ANCHORS:
             raise ValueError(
-                f"Speed correction has no window anchor for sequence type {sequence_type}; "
+                f"Resampling has no window anchor for sequence type {sequence_type}; "
                 "add it to SPEED_CORRECTION_ANCHORS"
             )
         anchor = self.SPEED_CORRECTION_ANCHORS[sequence_type]
+        slowest_speed = self.SLOWEST_PACMAN_SPEED if speed_correction else 1.0
 
         corrected = []
         sequences_per_speed = {}
@@ -650,16 +674,18 @@ class PacmanDataReader:
             if raw.empty:
                 corrected.append(sequence)
                 continue
-            level_ids = raw["level_id"].unique()
-            if len(level_ids) != 1:
-                raise ValueError(
-                    f"Speed correction needs single-level sequences, got level_ids {level_ids}"
-                )
-            level = int(self.level_df.loc[level_ids[0], "level"])
-            speed = self.pacman_speed(level)
+            if speed_correction:
+                level_ids = raw["level_id"].unique()
+                if len(level_ids) != 1:
+                    raise ValueError(
+                        f"Speed correction needs single-level sequences, got level_ids {level_ids}"
+                    )
+                speed = self.pacman_speed(int(self.level_df.loc[level_ids[0], "level"]))
+            else:
+                speed = 1.0
             sequences_per_speed[speed] = sequences_per_speed.get(speed, 0) + 1
 
-            t = self.speed_correction_positions(len(sequence), speed, anchor)
+            t = self.resampling_positions(len(sequence), speed, anchor, slowest_speed, stride)
             nearest = np.floor(t + 0.5).astype(int)
             lo = np.floor(t).astype(int)
             hi = np.minimum(lo + 1, len(sequence) - 1)
@@ -712,19 +738,25 @@ class PacmanDataReader:
                     )
             corrected.append(resampled)
 
-        per_speed = ", ".join(
-            f"{count} at {speed:.0%} speed" for speed, count in sorted(sequences_per_speed.items())
-        )
-        window = (
-            "event-defined window, full length kept"
-            if anchor is None
-            else f"time window cut to the level-1 length, counted from the {anchor}"
-        )
+        n_resampled = sum(sequences_per_speed.values())
+        frames = "frame" if stride == 1 else f"{stride} frames"
+        if speed_correction:
+            per_speed = ", ".join(
+                f"{count} at {speed:.0%} speed" for speed, count in sorted(sequences_per_speed.items())
+            )
+            step = f"one step per {frames} of movement at full speed ({per_speed})"
+        else:
+            step = f"one step per {frames} as recorded (no speed correction)"
+        if anchor is None:
+            window = "event-defined window, full length kept"
+        elif speed_correction:
+            window = f"time window cut to the level-1 length, counted from the {anchor}"
+        else:
+            window = f"time window counted from the {anchor}"
         before = np.mean([len(seq) for seq in sequences]) if sequences else 0.0
         after = np.mean([len(seq) for seq in corrected]) if corrected else 0.0
         logger.info(
-            f"Speed correction ({sequence_type}): resampled {sum(sequences_per_speed.values())} "
-            f"sequences to one full-speed frame of movement per step ({per_speed}); {window}; "
+            f"Resampling ({sequence_type}): {n_resampled} sequences to {step}; {window}; "
             f"mean length {before:.1f} frames -> {after:.1f} steps"
         )
         return corrected

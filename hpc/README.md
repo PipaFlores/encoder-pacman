@@ -65,6 +65,9 @@ defaults:                              # applied to every configuration
 grid:                                  # cartesian product, in the key order written here
   latent_space: [32, 64, 128]
   sequence_type: [pacman_attack, last_5_seconds]
+  # model:                             # or a bundle axis: each entry sets several keys
+  #   - {embedder: LSTM, latent_space: 256}    # together, so an embedder keeps its own
+  #   - {embedder: MLP,  latent_space: 64}     # latent size (can't also grid latent_space)
 
 include:                               # explicit configurations, outside the product
   - {embedder: ResNet, latent_space: 128}
@@ -77,7 +80,13 @@ exclude:                               # drop configurations matching these (par
 configurations are exactly those entries — `defaults` is a base for them, not a
 configuration of its own.
 
-**Every key under `defaults`, `grid` and `include` is a field of `RunConfig`**
+A grid axis can also be a list of **bundles**: mappings that set several keys together, such
+as an embedder with the latent size that suits it. The axis name (`model` above) is only a
+label; the bundle's keys are what reach each configuration, and the axis is crossed with the
+others like any list. An axis is either all bundles or all plain values, and no two axes may
+set the same key. [`resample_stride.yaml`](experiments/resample_stride.yaml) uses one.
+
+**Every key under `defaults`, `include` and `grid` (inside bundles too) is a field of `RunConfig`**
 ([experiment.py](experiment.py)), which is also the list of `train_model.py` flags with
 underscores. A typo fails at expansion time, naming the offender, rather than three hours
 into a job. Booleans are written in the positive (`rebase_score: false`), even where the CLI
@@ -92,10 +101,11 @@ spells them as negations.
 | `context` | `20` | | `reducer_components` | `2` |
 | `filter_by_pill` | `null` | | `umap_neighbors` | `15` |
 | `rebase_score` | `true` | | `umap_min_dist` | `0.1` |
-| `feature_set` | `Pacman` | | `umap_metric` | `euclidean` |
-| `normalization` | `null` | | `clusterer` | `hdbscan` |
-| `sort_ghost_distances` | `false` | | `min_cluster_size` | `20` |
-| `speed_correction` | `false` | | `test_initialized_model` | `false` |
+| `feature_set` | `Pacman` | | `umap_metric` | `cosine` |
+| `normalization` | `global` | | `clusterer` | `hdbscan` |
+| `sort_ghost_distances` | `true` | | `min_cluster_size` | `20` |
+| `speed_correction` | `true` | | `test_initialized_model` | `false` |
+| `resample_stride` | `1` | | | |
 | `embedder` | `LSTM` | | `min_samples` | `null` |
 | `latent_space` | `256` | | `cluster_selection_epsilon` | `0.0` |
 | `n_epochs` | `500` | | `kmeans_k` | `6` |
@@ -119,6 +129,7 @@ spells them as negations.
 | [`embedder_sweep.yaml`](experiments/embedder_sweep.yaml) | Every embedder at a matched latent size, for comparing architectures. |
 | [`latent_sweep_transformer.yaml`](experiments/latent_sweep_transformer.yaml) | Latent dimension × sequence type for the transformer (replaces `array_train.sh`). |
 | [`initialized_model_control.yaml`](experiments/initialized_model_control.yaml) | Every embedder trained and untrained (`test_initialized_model`), plus the no-embedder baseline. The gap between a label and its `_init` twin in `results.csv` is what training adds over the architecture. |
+| [`resample_stride.yaml`](experiments/resample_stride.yaml) | Compression by a fixed factor (`resample_stride` 1, 2, 4) on speed-corrected sequences, each embedder at its own latent size (a bundle axis — set the latent sizes to your optimal values). |
 | [`kld_sweep.yaml`](experiments/kld_sweep.yaml) | KL weight × VAE/TimeVAE at a fixed latent size. The ladder is scaled to `seq_len × n_features`, so it is specific to that file's slicing and feature set. |
 | [`transformer.yaml`](experiments/transformer.yaml) / [`lstm.yaml`](experiments/lstm.yaml) / [`umap_baseline.yaml`](experiments/umap_baseline.yaml) | The former single-architecture scripts. |
 

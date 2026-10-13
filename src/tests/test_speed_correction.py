@@ -6,13 +6,13 @@ import pytest
 
 from src.datahandlers.pacman_data_reader import PacmanDataReader
 
-positions = PacmanDataReader.speed_correction_positions
+positions = PacmanDataReader.resampling_positions
 SPEEDS = [0.80, 0.90, 1.00]  # level 1, levels 2-4, levels 5-20
 
 
 def _reader_stub(levels: dict[int, int]):
     """
-    The attributes _correct_level_speed reads, without loading the dataset: PacmanDataReader
+    The attributes _resample_sequences reads, without loading the dataset: PacmanDataReader
     is a singleton, so a bare instance here would replace the real one for other tests.
     """
     return SimpleNamespace(
@@ -21,8 +21,9 @@ def _reader_stub(levels: dict[int, int]):
         SPEED_CORRECTION_INTERPOLATED=PacmanDataReader.SPEED_CORRECTION_INTERPOLATED,
         SPEED_CORRECTION_ACTORS=PacmanDataReader.SPEED_CORRECTION_ACTORS,
         MAX_FRAME_MOVE=PacmanDataReader.MAX_FRAME_MOVE,
+        SLOWEST_PACMAN_SPEED=PacmanDataReader.SLOWEST_PACMAN_SPEED,
         pacman_speed=PacmanDataReader.pacman_speed,
-        speed_correction_positions=PacmanDataReader.speed_correction_positions,
+        resampling_positions=PacmanDataReader.resampling_positions,
     )
 
 
@@ -97,7 +98,7 @@ def test_every_level_moves_the_same_distance_per_step():
     ]
     stub = _reader_stub({1: 1, 2: 2, 5: 5})
 
-    corrected = PacmanDataReader._correct_level_speed(stub, raw, raw, "first_5_seconds")
+    corrected = PacmanDataReader._resample_sequences(stub, raw, raw, "first_5_seconds")
 
     for sequence in corrected:
         assert len(sequence) == 80
@@ -125,7 +126,7 @@ def test_physics_step_alternation_leaves_no_level_signature():
             )
         )
 
-    corrected = PacmanDataReader._correct_level_speed(
+    corrected = PacmanDataReader._resample_sequences(
         _reader_stub({1: 1, 2: 2, 5: 5}), raw, raw, "first_5_seconds"
     )
 
@@ -143,7 +144,7 @@ def test_tunnel_wrap_is_not_interpolated():
     x = TUNNEL_X
     raw = [pd.DataFrame({"level_id": 1, "Pacman_X": x, "Pacman_Y": -0.5})]
 
-    corrected = PacmanDataReader._correct_level_speed(
+    corrected = PacmanDataReader._resample_sequences(
         _reader_stub({1: 1}), raw, raw, "whole_level"
     )
 
@@ -165,7 +166,7 @@ def test_infinite_distances_are_not_interpolated():
         )
     ]
 
-    corrected = PacmanDataReader._correct_level_speed(
+    corrected = PacmanDataReader._resample_sequences(
         _reader_stub({1: 1}), raw, raw, "whole_level"
     )
 
@@ -181,7 +182,7 @@ def test_other_columns_take_the_nearest_frame():
         _moving_sequence(1, 100, 0.38, ghost1_state=states, score=np.arange(100) * 10)
     ]
 
-    corrected = PacmanDataReader._correct_level_speed(
+    corrected = PacmanDataReader._resample_sequences(
         _reader_stub({1: 1}), raw, raw, "first_5_seconds"
     )
 
@@ -200,7 +201,7 @@ def test_respawn_is_never_blended_one_axis_at_a_time():
     y = np.r_[12.5 - 0.38 * np.arange(n_before), np.full(n_after, -9.5)]
     raw = [pd.DataFrame({"level_id": 1, "Pacman_X": x, "Pacman_Y": y})]
 
-    corrected = PacmanDataReader._correct_level_speed(
+    corrected = PacmanDataReader._resample_sequences(
         _reader_stub({1: 1}), raw, raw, "whole_level"
     )
 
@@ -216,7 +217,7 @@ def test_interpolation_is_decided_on_raw_values():
     raw = [pd.DataFrame({"level_id": 1, "Pacman_X": TUNNEL_X, "Pacman_Y": -0.5})]
     normalized = [raw[0].assign(Pacman_X=TUNNEL_X / 100)]
 
-    corrected = PacmanDataReader._correct_level_speed(
+    corrected = PacmanDataReader._resample_sequences(
         _reader_stub({1: 1}), raw, normalized, "whole_level"
     )
 
@@ -227,10 +228,104 @@ def test_rejects_multi_level_sequences_and_unknown_types():
     stub = _reader_stub({1: 1, 2: 2})
     mixed = [pd.concat([_moving_sequence(1, 10, 0.38), _moving_sequence(2, 10, 0.43)])]
     with pytest.raises(ValueError, match="single-level"):
-        PacmanDataReader._correct_level_speed(stub, mixed, mixed, "whole_level")
+        PacmanDataReader._resample_sequences(stub, mixed, mixed, "whole_level")
 
     single = [_moving_sequence(1, 10, 0.38)]
     with pytest.raises(ValueError, match="no window anchor"):
-        PacmanDataReader._correct_level_speed(
+        PacmanDataReader._resample_sequences(
             stub, single, single, "not_a_sequence_type"
+        )
+
+
+# ---- resample_stride: compression by a fixed factor --------------------------------------
+
+
+def test_stride_spaces_steps_by_that_many_full_speed_frames():
+    t = positions(100, 0.80, anchor="start", stride=2)
+    assert len(t) == 40
+    np.testing.assert_allclose(np.diff(t), 2.5)
+
+
+@pytest.mark.parametrize("stride", [2, 3, 4, 8])
+@pytest.mark.parametrize("n_frames", [37, 100, 200])
+@pytest.mark.parametrize("anchor", ["start", "end"])
+def test_anchored_length_with_stride_does_not_depend_on_level(stride, n_frames, anchor):
+    lengths = {
+        len(positions(n_frames, speed, anchor=anchor, stride=stride))
+        for speed in SPEEDS
+    }
+    assert len(lengths) == 1
+
+
+@pytest.mark.parametrize("stride", [2, 3, 4])
+def test_end_anchor_keeps_the_last_frame_with_stride(stride):
+    for speed in SPEEDS:
+        assert positions(100, speed, anchor="end", stride=stride)[-1] == 99
+
+
+@pytest.mark.parametrize("stride", [2, 4])
+def test_every_level_moves_the_same_distance_per_strided_step(stride):
+    speeds = {1: 0.80, 2: 0.90, 5: 1.00}
+    raw = [
+        _moving_sequence(level_id, 100, 0.47 * speed)
+        for level_id, speed in speeds.items()
+    ]
+
+    resampled = PacmanDataReader._resample_sequences(
+        _reader_stub({1: 1, 2: 2, 5: 5}), raw, raw, "first_5_seconds", stride=stride
+    )
+
+    for sequence in resampled:
+        assert len(sequence) == len(positions(100, 0.80, anchor="start", stride=stride))
+        np.testing.assert_allclose(np.diff(sequence["Pacman_X"]), 0.47 * stride)
+
+
+def test_stride_without_speed_correction_keeps_every_nth_frame():
+    # levels no longer matter: both sequences keep frames 0, 2, 4, ... as recorded
+    raw = [_moving_sequence(1, 100, 0.38), _moving_sequence(2, 100, 0.43)]
+
+    resampled = PacmanDataReader._resample_sequences(
+        _reader_stub({1: 1, 2: 2}),
+        raw,
+        raw,
+        "whole_level",
+        speed_correction=False,
+        stride=2,
+    )
+
+    for before, after in zip(raw, resampled, strict=True):
+        assert len(after) == 50
+        np.testing.assert_allclose(
+            after["Pacman_X"], before["Pacman_X"].to_numpy()[::2]
+        )
+
+
+def test_strided_positions_stay_on_the_corridors():
+    """
+    Values are read at each step, not averaged over it: averaging the positions a step spans
+    would cut across the corner, by more the larger the stride.
+    """
+    step = 0.38
+    along = np.arange(0, 4.0, step)
+    x = np.r_[
+        -3.5 + along, np.full(len(along), 0.5)
+    ]  # right along y = -9.5, then up x = 0.5
+    y = np.r_[np.full(len(along), -9.5), -9.5 + step + along]
+    raw = [pd.DataFrame({"level_id": 1, "Pacman_X": x, "Pacman_Y": y})]
+
+    for stride in [2, 4, 8]:
+        resampled = PacmanDataReader._resample_sequences(
+            _reader_stub({1: 1}), raw, raw, "whole_level", stride=stride
+        )
+        xy = resampled[0][["Pacman_X", "Pacman_Y"]].to_numpy()
+        off_centreline = np.min(np.abs(xy - np.floor(xy) - 0.5), axis=1)
+        assert off_centreline.max() <= 0.25, stride
+
+
+@pytest.mark.parametrize("stride", [0, -1, 1.5, True])
+def test_rejects_strides_that_are_not_whole_numbers_of_at_least_one(stride):
+    raw = [_moving_sequence(1, 10, 0.38)]
+    with pytest.raises(ValueError, match="resample_stride"):
+        PacmanDataReader._resample_sequences(
+            _reader_stub({1: 1}), raw, raw, "whole_level", stride=stride
         )

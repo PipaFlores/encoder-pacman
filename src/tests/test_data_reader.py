@@ -158,7 +158,7 @@ class TestPacmanDataReader:
         every level (the distance a level-1 Pac-Man covers in 100 frames), while raw_sequences
         keep every frame for behavlets, GIFs and trajectories.
         """
-        raw_sequences, processed, _, features, _, _ = reader.make_data(
+        raw_sequences, processed, _, _, _, _ = reader.make_data(
             feature_set="Pacman",
             sequence_type="first_5_seconds",
             max_samples=50,
@@ -170,6 +170,22 @@ class TestPacmanDataReader:
         assert processed.shape[1] == 80
         valid_steps = (processed[full_length] != -999.0).any(axis=-1).sum(axis=1)
         assert (valid_steps == 80).all()
+
+    def test_make_data_resample_stride(self, reader):
+        """A stride of 2 halves the corrected first_5_seconds window: 80 steps become 40."""
+        raw_sequences, processed, _, _, _, _ = reader.make_data(
+            feature_set="Pacman",
+            sequence_type="first_5_seconds",
+            max_samples=50,
+            speed_correction=True,
+            resample_stride=2,
+        )
+
+        full_length = [i for i, seq in enumerate(raw_sequences) if len(seq) == 100]
+        assert full_length
+        assert processed.shape[1] == 40
+        valid_steps = (processed[full_length] != -999.0).any(axis=-1).sum(axis=1)
+        assert (valid_steps == 40).all()
 
     def test_gif_names_cover_exactly_each_final_sequence(self, reader):
         """

@@ -92,19 +92,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--normalization",
         type=str,
-        default="none",
+        default="global",
         choices=["global", "sequence", "sample", "none", "None"],
         help="Normalization strategy to apply before training.",
     )
+    # On by default: --no-sort-ghost-distances turns it off, and the old --sort-ghost-distances
+    # spelling (used by the train_*.sh scripts) is still accepted.
     parser.add_argument(
         "--sort-ghost-distances",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help="Sort ghost distance channels per frame when using Ghost_Distances.",
     )
     parser.add_argument(
         "--speed-correction",
-        action="store_true",
-        help="Resample sequences so every step covers the same distance at every level.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Resample sequences so every step covers the same distance at every level "
+        "(on by default; --no-speed-correction turns it off).",
+    )
+    parser.add_argument(
+        "--resample-stride",
+        type=int,
+        default=1,
+        help="Keep one step in N to shorten sequences by that factor (1 keeps every step).",
     )
 
     # Embedding -----------------------------------------------------------------
@@ -212,7 +223,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--umap-metric",
         type=str,
-        default="euclidean",
+        default="cosine",
         help="UMAP metric (only if reducer=umap).",
     )
 
@@ -310,17 +321,18 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main():
-    args = parse_args()
-
+def config_from_args(args: argparse.Namespace) -> RunConfig:
     # argparse spells two booleans as negations for a better command line; RunConfig keeps
     # them positive. Every other destination name matches a RunConfig field one-for-one,
     # and from_dict() raises on any that does not.
     values = vars(args).copy()
     values["rebase_score"] = not values.pop("no_rebase_score")
     values["use_best"] = not values.pop("use_last_model")
+    return RunConfig.from_dict(values)
 
-    config = RunConfig.from_dict(values)
+
+def main():
+    config = config_from_args(parse_args())
     result = run_one(config)
 
     if result.status != "ok":

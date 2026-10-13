@@ -103,3 +103,168 @@ def test_initialized_model_grid_has_one_no_embedder_run():
 def test_unknown_configuration_key_is_named():
     with pytest.raises(ValueError, match="kl_weight"):
         RunConfig.from_dict({"kl_weight": 0.002})
+
+
+def test_resample_stride_is_a_configuration_key():
+    config = RunConfig.from_dict({"embedder": "MLP", "resample_stride": 2})
+
+    assert config.resample_stride == 2
+    assert config.config_hash() != RunConfig(embedder="MLP").config_hash()
+
+
+def test_resample_stride_distinguishes_labels_and_leaves_default_ones_alone():
+    """A stride sweep must not label all of its points identically; stride 1 keeps the old label."""
+    plain = RunConfig(embedder="MLP", latent_space=128)
+
+    assert "stride" not in plain.label()
+    assert RunConfig(embedder="MLP", latent_space=128, resample_stride=4).label() == plain.label() + "_stride4"
+
+
+def test_default_resample_stride_leaves_the_config_hash_unchanged():
+    """Run directories are named by hash: configurations from before the key existed keep theirs."""
+    import hashlib
+    import json
+
+    from hpc.experiment import _HASH_EXCLUDE
+
+    config = RunConfig(embedder="MLP")
+    payload = {
+        k: v for k, v in sorted(config.to_dict().items())
+        if k not in _HASH_EXCLUDE and k != "resample_stride"
+    }
+    before_the_key = hashlib.sha1(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:8]
+
+    assert config.config_hash() == before_the_key
+
+
+def test_resampling_keys_reach_pattern_analysis(monkeypatch):
+    """The failure this module exists for: a key in RunConfig that never reaches the pipeline
+    makes every point of a sweep the same run. PatternAnalysis is swapped for a recorder, so
+    nothing is loaded."""
+    import sys
+    import types
+
+    from hpc.experiment import build_analysis
+
+    received = {}
+    recorder = types.ModuleType("src.analysis")
+    recorder.PatternAnalysis = lambda **kwargs: received.update(kwargs)
+    monkeypatch.setitem(sys.modules, "src.analysis", recorder)
+
+    build_analysis(RunConfig.from_dict(
+        {"embedder": "MLP", "reducer": "none", "speed_correction": True, "resample_stride": 4}
+    ))
+
+    assert received["speed_correction"] is True
+    assert received["resample_stride"] == 4
+
+
+def test_train_model_flag_matches_the_configuration_key(monkeypatch):
+    import sys
+
+    monkeypatch.syspath_prepend("hpc")
+    import train_model
+
+    monkeypatch.setattr(sys, "argv", ["train_model.py", "--resample-stride", "2"])
+    assert train_model.parse_args().resample_stride == 2
+
+    monkeypatch.setattr(sys, "argv", ["train_model.py"])
+    assert train_model.parse_args().resample_stride == RunConfig().resample_stride == 1
+
+
+def test_train_model_defaults_match_run_config(monkeypatch):
+    """train_model.py with no flags must run the same configuration as an experiment file that
+    sets nothing: both read RunConfig, so a flag default that drifts from it silently splits the
+    two paths (speed correction, normalization, ghost-distance sorting and the UMAP metric once
+    did)."""
+    import sys
+
+    monkeypatch.syspath_prepend("hpc")
+    import train_model
+
+    monkeypatch.setattr(sys, "argv", ["train_model.py"])
+    from_cli = train_model.config_from_args(train_model.parse_args()).to_dict()
+
+    assert from_cli == train_model.RunConfig().to_dict()
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected"),
+    [
+        ([], (True, True)),
+        (["--no-speed-correction"], (False, True)),
+        (["--speed-correction"], (True, True)),
+        (["--no-sort-ghost-distances"], (True, False)),
+        (["--sort-ghost-distances"], (True, True)),  # the spelling the train_*.sh scripts use
+    ],
+)
+def test_on_by_default_flags_accept_both_spellings(monkeypatch, flags, expected):
+    import sys
+
+    monkeypatch.syspath_prepend("hpc")
+    import train_model
+
+    monkeypatch.setattr(sys, "argv", ["train_model.py", *flags])
+    config = train_model.config_from_args(train_model.parse_args())
+
+    assert (config.speed_correction, config.sort_ghost_distances) == expected
+
+
+def test_runs_without_speed_correction_get_their_own_label():
+    """A speed_correction: [true, false] sweep must not give both points the same label (the
+    results.csv label column and the wandb run name). The suffix marks the exception, so runs
+    at the default keep their labels."""
+    corrected = RunConfig(embedder="LSTM", latent_space=128)
+    uncorrected = RunConfig(embedder="LSTM", latent_space=128, speed_correction=False)
+
+    assert "speedcorr" not in corrected.label()
+    assert uncorrected.label() == corrected.label() + "_nospeedcorr"
+
+
+def test_grid_bundles_pair_each_embedder_with_its_own_latent_size():
+    """A bundle axis sets several keys together, so each embedder keeps its own latent size
+    while every other axis is still crossed with it."""
+    configs = expand({
+        "grid": {
+            "model": [
+                {"embedder": "LSTM", "latent_space": 256},
+                {"embedder": "MLP", "latent_space": 64},
+                {"embedder": "none"},
+            ],
+            "resample_stride": [1, 2],
+        },
+    })
+
+    assert [(c.embedder, c.latent_space, c.resample_stride) for c in configs] == [
+        ("LSTM", 256, 1), ("LSTM", 256, 2),
+        ("MLP", 64, 1), ("MLP", 64, 2),
+        (None, RunConfig().latent_space, 1), (None, RunConfig().latent_space, 2),
+    ]
+
+
+def test_grid_bundles_combine_with_defaults_and_exclude():
+    configs = expand({
+        "defaults": {"latent_space": 32, "n_epochs": 5},
+        "grid": {"model": [{"embedder": "LSTM", "latent_space": 256}, {"embedder": "MLP"}]},
+        "exclude": [{"embedder": "MLP"}],
+    })
+
+    assert [(c.embedder, c.latent_space, c.n_epochs) for c in configs] == [("LSTM", 256, 5)]
+
+
+def test_grid_axis_cannot_mix_bundles_and_plain_values():
+    with pytest.raises(ValueError, match="mixes bundles"):
+        expand({"grid": {"model": [{"embedder": "LSTM"}, "MLP"]}})
+
+
+def test_grid_cannot_set_a_key_on_two_axes():
+    with pytest.raises(ValueError, match="'latent_space' on more than one axis"):
+        expand({"grid": {
+            "model": [{"embedder": "LSTM", "latent_space": 256}],
+            "latent_space": [64],
+        }})
+
+
+def test_grid_bundle_keys_are_checked_like_any_other():
+    with pytest.raises(ValueError, match="latent_size"):
+        expand({"grid": {"model": [{"embedder": "LSTM", "latent_size": 256}]}})

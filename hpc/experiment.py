@@ -101,6 +101,7 @@ class RunConfig:
     normalization: Optional[str] = "global"
     sort_ghost_distances: bool = True
     speed_correction: bool = True
+    resample_stride: int = 1
 
     # Embedding
     embedder: Optional[str] = "LSTM"
@@ -186,6 +187,10 @@ class RunConfig:
     def config_hash(self) -> str:
         """Short stable digest of the experimental condition (see _HASH_EXCLUDE)."""
         payload = {k: v for k, v in sorted(self.to_dict().items()) if k not in _HASH_EXCLUDE}
+        # at its default (no compression) resample_stride changes nothing, so leave it out and
+        # keep the hashes of configurations from before the key existed
+        if payload.get("resample_stride") == 1:
+            del payload["resample_stride"]
         return hashlib.sha1(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:8]
 
     def label(self) -> str:
@@ -197,12 +202,21 @@ class RunConfig:
         `kld_weight` is appended under the same rule as the checkpoint stem: VAE family
         only, and only when it differs from the default, so existing labels are unchanged.
         `_init` marks the untrained control, which would otherwise share its trained
-        counterpart's label.
+        counterpart's label. `_stride<n>` marks a resample_stride other than 1, also as in
+        the checkpoint stem. `_nospeedcorr` marks a run with speed correction turned off; it
+        marks the exception rather than the default (unlike the checkpoint stem's
+        `_speedcorr`), so labels of default runs stay as they were.
         """
         label = f"{self.sequence_type}_{self.feature_set}_{self.embedder or 'NoEmbedder'}_h{self.latent_space}"
 
         if self.embedder in ("VAE", "TimeVAE") and self.kld_weight != DEFAULT_KLD_WEIGHT:
             label += f"_kld{self.kld_weight:g}"
+
+        if not self.speed_correction:
+            label += "_nospeedcorr"
+
+        if self.resample_stride != 1:
+            label += f"_stride{self.resample_stride}"
 
         if self.test_initialized_model:
             label += "_init"
@@ -281,6 +295,11 @@ def expand(spec: dict[str, Any]) -> list[RunConfig]:
     followed by any `include` entries. It is deterministic, which is what lets an array
     task trust `--index`: editing the experiment file renumbers the indices, so a running
     array should be left alone until it finishes.
+
+    A grid axis is either a list of values for the key it is named after, or a list of
+    bundles - mappings that set several keys together, such as an embedder with its own
+    latent size. A bundle axis's name is only a label; the keys inside the bundles are what
+    reach the configuration. No two axes may set the same key.
     """
     known = {"name", "description", "slurm", "module", "defaults", "grid", "include", "exclude"}
     unknown = sorted(set(spec) - known)
@@ -297,12 +316,27 @@ def expand(spec: dict[str, Any]) -> list[RunConfig]:
     for key, values in grid.items():
         if not isinstance(values, list) or not values:
             raise ValueError(f"grid entry '{key}' must be a non-empty list, got {values!r}")
+        bundles = [isinstance(value, dict) for value in values]
+        if any(bundles) and not all(bundles):
+            raise ValueError(
+                f"grid entry '{key}' mixes bundles ({{key: value, ...}}) with plain values; "
+                "an axis is one or the other"
+            )
+
+    def combine(axis_values: tuple) -> dict[str, Any]:
+        combo: dict[str, Any] = {}
+        for axis, value in zip(grid_keys, axis_values):
+            for key, val in (value.items() if isinstance(value, dict) else [(axis, value)]):
+                if key in combo:
+                    raise ValueError(f"grid sets '{key}' on more than one axis")
+                combo[key] = val
+        return combo
 
     includes = list(spec.get("include") or [])
     grid_keys = list(grid)
     combos: Iterable[dict[str, Any]]
     if grid_keys:
-        combos = [dict(zip(grid_keys, vals)) for vals in itertools.product(*(grid[k] for k in grid_keys))]
+        combos = [combine(vals) for vals in itertools.product(*(grid[k] for k in grid_keys))]
     elif includes:
         # An include-only experiment lists its configurations explicitly, so `defaults`
         # is a base for them rather than a configuration in its own right.
@@ -416,6 +450,7 @@ def build_analysis(config: RunConfig) -> "PatternAnalysis":
         dropout=config.dropout,
         sort_distances=config.sort_ghost_distances,
         speed_correction=config.speed_correction,
+        resample_stride=config.resample_stride,
         random_seed=config.seed,
         verbose=config.verbose,
         wandb_logging=not config.disable_wandb,
