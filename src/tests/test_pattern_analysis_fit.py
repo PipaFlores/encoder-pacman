@@ -41,9 +41,11 @@ torch = pytest.importorskip("torch")
 
 from hdbscan import HDBSCAN  # noqa: E402
 from sklearn.decomposition import PCA  # noqa: E402
+from umap import UMAP  # noqa: E402
 
 from src.analysis.pattern_analysis import PatternAnalysis  # noqa: E402
 from src.datahandlers import PacmanDataReader  # noqa: E402
+from src.utils import MASKED_METRICS  # noqa: E402
 
 MAX_SAMPLES = 30
 MAX_EPOCHS = 2
@@ -205,14 +207,19 @@ def test_fit_with_initialized_model(reader, cache_folder, tmp_path, monkeypatch,
     assert not (tmp_path / "hpc" / "trained_models").exists()
 
 
-def test_fit_without_deep_embedder(reader, cache_folder, tmp_path):
-    """embedder=None skips training entirely: the reducer embeds the flattened raw
-    sequences straight down to 2 dimensions, and those are clustered as-is."""
-    pa = make_pattern_analysis(reader, cache_folder, tmp_path, embedder=None)
+@pytest.mark.parametrize("embedder", [None, "UMAP", "Masked UMAP"])
+def test_fit_without_deep_embedder(reader, cache_folder, tmp_path, embedder):
+    """No deep embedder skips training entirely: the reducer embeds the flattened raw
+    sequences straight down to 2 dimensions, and those are clustered as-is. "UMAP" names
+    that explicitly; "Masked UMAP" does the same with the padding-aware metric."""
+    pa = make_pattern_analysis(reader, cache_folder, tmp_path, embedder=embedder)
 
     pa.fit()
 
     assert pa.embedder is None
+    assert pa.embedder_type == embedder
+    assert (pa.reducer.metric in MASKED_METRICS.values()) == (embedder == "Masked UMAP")
+    assert not (tmp_path / "hpc" / "trained_models").exists()
     assert len(pa.raw_sequence_data) == MAX_SAMPLES
 
     # The reducer is the embedder here, so it already outputs REDUCED_DIM and the
@@ -222,6 +229,22 @@ def test_fit_without_deep_embedder(reader, cache_folder, tmp_path):
     assert pa.reduced_embeddings is pa.embeddings
 
     assert pa.labels.shape == (MAX_SAMPLES,)
+
+
+def test_masked_umap_keeps_the_reducer_settings(reader, cache_folder, tmp_path):
+    """"Masked UMAP" swaps only the metric for its padding-aware version; the UMAP
+    embedders refuse a reducer that is not UMAP (embedder=None is the way to use one)."""
+    configured = UMAP(n_neighbors=7, min_dist=0.3, metric="euclidean", random_state=3)
+    pa = make_pattern_analysis(reader, cache_folder, tmp_path, embedder="Masked UMAP", reducer=configured)
+
+    assert pa.reducer.metric is MASKED_METRICS["euclidean"]
+    assert (pa.reducer.n_neighbors, pa.reducer.min_dist, pa.reducer.random_state) == (7, 0.3, 3)
+
+    with pytest.raises(ValueError, match="padding-aware"):
+        make_pattern_analysis(reader, cache_folder, tmp_path, embedder="Masked UMAP", reducer=UMAP(metric="manhattan"))
+    for embedder in ("UMAP", "Masked UMAP"):
+        with pytest.raises(ValueError, match="embedder=None"):
+            make_pattern_analysis(reader, cache_folder, tmp_path, embedder=embedder, reducer=PCA(n_components=REDUCED_DIM))
 
 
 def test_fit_with_pca_baseline(reader, cache_folder, tmp_path):

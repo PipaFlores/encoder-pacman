@@ -71,6 +71,8 @@ _HASH_EXCLUDE = frozenset(
 # Mirrors PatternAnalysis.DEFAULT_KLD_WEIGHT, duplicated rather than imported because this
 # module must stay importable without torch/src for --dry-run and --count.
 DEFAULT_KLD_WEIGHT = 0.00025
+# Mirrors PatternAnalysis.RAW_EMBEDDERS (same reason): embedder names that are not models.
+RAW_EMBEDDERS = ("UMAP", "Masked UMAP")
 
 
 @dataclass
@@ -159,7 +161,7 @@ class RunConfig:
         # Without a deep embedder there are no weights to leave untrained. Normalizing the
         # flag lets expand() drop the duplicate no-embedder run that gridding
         # `test_initialized_model: [false, true]` against `embedder: [..., none]` produces.
-        if self.embedder is None:
+        if self.embedder is None or self.embedder in RAW_EMBEDDERS:
             self.test_initialized_model = False
 
         # HDBSCAN's own default for min_samples is None, and the CLI spells that -1.
@@ -207,7 +209,8 @@ class RunConfig:
         marks the exception rather than the default (unlike the checkpoint stem's
         `_speedcorr`), so labels of default runs stay as they were.
         """
-        label = f"{self.sequence_type}_{self.feature_set}_{self.embedder or 'NoEmbedder'}_h{self.latent_space}"
+        embedder = (self.embedder or "NoEmbedder").replace(" ", "")  # "Masked UMAP" -> "MaskedUMAP"
+        label = f"{self.sequence_type}_{self.feature_set}_{embedder}_h{self.latent_space}"
 
         if self.embedder in ("VAE", "TimeVAE") and self.kld_weight != DEFAULT_KLD_WEIGHT:
             label += f"_kld{self.kld_weight:g}"

@@ -118,6 +118,12 @@ spells them as negations.
 | `seed` | `null` | | `verbose` | `false` |
 | `ignore_cache` | `false` | | `data_folder` / `hpc_folder` / `cache_folder` | repo-relative |
 
+`embedder` is a deep model (`LSTM`, `MLP`, `Transformer`, `VAE`, `TimeVAE`) or one of the
+baselines that embed the flattened sequences without a model: `UMAP`, `Masked UMAP` (the
+same UMAP with a padding-aware `umap_metric`, `euclidean` or `cosine`, so padded steps never
+enter a distance and sequence length stops dominating the map), or `null` (whatever
+`reducer` is set, e.g. PCA). `latent_space` and the training keys do not apply to these.
+
 </details>
 
 ### Available experiments

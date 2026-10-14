@@ -14,7 +14,7 @@ import torch.utils.data.dataloader
 
 ### Data Handling
 from src.datahandlers import PacmanDataReader
-from src.utils import replace_inf_with_feature_max, setup_logger
+from src.utils import MASKED_METRICS, replace_inf_with_feature_max, setup_logger
 
 ### Embedding 
 ### trying lazy import first to avoid hpc environment issues. 
@@ -68,6 +68,11 @@ logger = setup_logger(__name__)
 # Mirrors VAE_Trainer's own default (src/models/VAE.py). Named here so the checkpoint
 # stem can tell "the value every run so far used" from "a value someone is sweeping".
 DEFAULT_KLD_WEIGHT = 0.00025
+
+# Embedder names that are not models: UMAP embeds the flattened processed sequences itself,
+# as with embedder=None, and "Masked UMAP" does so with a padding-aware metric (see
+# src/utils/masked_distance.py) so sequence length stops dominating the distances.
+RAW_EMBEDDERS = ("UMAP", "Masked UMAP")
 
 
 class PatternAnalysis:
@@ -137,7 +142,11 @@ class PatternAnalysis:
             gifs_folder (str, optional): Where the per-sequence GIFs for the augmented interactive
                 plot live. Defaults to `<hpc_folder>/gifs`. They are rendered by
                 hpc/render_gifs.py, never by this pipeline.
-            embedder (str | None): Type of embedder to use "LSTM", "DRNN", "DCNN", "ResNet" or None to skip embedding.
+            embedder (str | None): Deep embedder to train: "LSTM", "MLP", "Transformer", "VAE" or
+                "TimeVAE". Or no model, where the reducer embeds the flattened processed sequences
+                directly: "UMAP" (needs a UMAP reducer), "Masked UMAP" (the same UMAP, but with its
+                metric replaced by the padding-aware equivalent, so padded steps never count
+                towards a distance), or None (any reducer, e.g. PCA, as is).
             reducer (UMAP | PCA | None): Dimensionality reduction method. If None, defaults to UMAP.
             clusterer (HDBSCAN | KMeans): Clustering algorithm to use.
             similarity_measure (str): Similarity metric for affinity matrix calculation (euclidean or cosine). Not the one
@@ -226,7 +235,7 @@ class PatternAnalysis:
         self.latent_dimension = latent_dimension
         self.validation_data_split = validation_data_split
         self.use_best = use_best
-        if test_initialized_model and embedder is None:
+        if test_initialized_model and (embedder is None or embedder in RAW_EMBEDDERS):
             logger.warning("test_initialized_model=True has no effect without a deep embedder, ignoring it")
             test_initialized_model = False
         self.test_initialized_model = test_initialized_model
@@ -257,8 +266,14 @@ class PatternAnalysis:
         self.features_columns = self._get_feature_columns(feature_set)
         # Embedder initialized after make_data, as some models look for data's size/length
         self.embedder_type = embedder
-        self.embedder = embedder
+        # A raw embedder is no model, so self.embedder stays None like embedder=None: every
+        # deep-embedder branch keys on it. embedder_type keeps the name.
+        self.embedder = None if embedder in RAW_EMBEDDERS else embedder
         self.reducer = reducer if reducer is not None else UMAP(n_neighbors=15, n_components=2, metric="cosine", random_state=random_seed)
+        if embedder in RAW_EMBEDDERS and not isinstance(self.reducer, UMAP):
+            raise ValueError(f"embedder={embedder!r} embeds with UMAP, but the reducer is {self.reducer.__class__.__name__}; use embedder=None to embed with it instead")
+        if embedder == "Masked UMAP":
+            self.reducer = self._masked_umap(self.reducer)
         self.clusterer = clusterer if clusterer is not None else HDBSCAN(min_cluster_size=20, min_samples=None)
         self.similarity_measure = similarity_measure
 
@@ -294,6 +309,26 @@ class PatternAnalysis:
         self.wandbrun = None
         self.wandb_logging_comment = wandb_logging_comment
 
+
+    @staticmethod
+    def _masked_umap(reducer: UMAP) -> UMAP:
+        """The same UMAP with its metric swapped for the padding-aware equivalent (see
+        src/utils/masked_distance.py), every other hyperparameter kept."""
+        metric = reducer.metric
+        if metric in MASKED_METRICS.values():
+            return reducer
+        if metric not in MASKED_METRICS:
+            raise ValueError(f"Masked UMAP has no padding-aware version of metric {metric!r}; supported: {sorted(MASKED_METRICS)}")
+        return UMAP(**{**reducer.get_params(), "metric": MASKED_METRICS[metric]})
+
+    def _embedder_name(self) -> str:
+        """What embeds the data, for run names and plot titles: the model's class name,
+        the raw embedder's name without spaces, or "NoEmbedder"."""
+        if self.embedder is not None:
+            return self.embedder.__class__.__name__
+        if self.embedder_type in RAW_EMBEDDERS:
+            return self.embedder_type.replace(" ", "")
+        return "NoEmbedder"
 
     def _sequences_have_padding(self, embedder: str) -> bool:
         """
@@ -915,7 +950,9 @@ class PatternAnalysis:
     def embed(self, padded_data: np.ndarray) -> np.ndarray:
         """
         Generate embeddings from the input data.
-        If no embedder is set, `self.reducer` embeds the flattened raw data directly.
+        If no embedder is set (None, "UMAP" or "Masked UMAP"), `self.reducer` embeds the
+        flattened raw data directly; for "Masked UMAP" it already carries the padding-aware
+        metric (see __init__), so padded steps are skipped rather than compared as -999.
 
         Args:
             padded_data: Input data of same-length sequences (padded)
@@ -953,7 +990,7 @@ class PatternAnalysis:
                         "filter_by_pill": self.filter_by_pill,
                         "rebase_score": self.rebase_score,
                         # Model architecture
-                        "embedder_type": self.reducer.__class__.__name__, ## reducer as embedder
+                        "embedder_type": self.reducer.__class__.__name__ if self.embedder_type is None else self._embedder_name(), ## reducer as embedder
                         "reducer": self.reducer.__class__.__name__,
                         "comment": self.wandb_logging_comment
                     }
@@ -964,11 +1001,12 @@ class PatternAnalysis:
                         # self.embedder is None here, so name the reducer doing the
                         # embedding rather than tagging every baseline run "NoneType".
                         tags=[self.sequence_type, self.reducer.__class__.__name__]
+                        + ([self._embedder_name()] if self.embedder_type in RAW_EMBEDDERS else [])
                     )
             else:
                 self.wandbrun = None
 
-            logger.info("Embedding with self.reducer (e.g., UMAP) from flat raw data to 2 dimensions..")
+            logger.info(f"Embedding with {self._embedder_name() if self.embedder_type in RAW_EMBEDDERS else self.reducer.__class__.__name__} from flat raw data to {getattr(self.reducer, 'n_components', 2)} dimensions..")
             X = replace_inf_with_feature_max(padded_data, padding_value=-999.0)
             X_flat = X.reshape(len(X), -1)
 
@@ -1550,7 +1588,7 @@ class PatternAnalysis:
             show_plot = False
         
         self.affinity_matrix = self._calculate_affinity_matrix()
-        suptitle = f"Embeddings Affinity Matrix Overview - {self.similarity_measure} distance in {self.embedder.__class__.__name__}_{self.reducer.__class__.__name__} latent space"
+        suptitle = f"Embeddings Affinity Matrix Overview - {self.similarity_measure} distance in {self._embedder_name()}_{self.reducer.__class__.__name__} latent space"
 
         self.clustervisualizer.plot_affinity_matrix(self.affinity_matrix,
                                               measure_type=self.similarity_measure,
@@ -1900,7 +1938,7 @@ class PatternAnalysis:
             fig.suptitle(
                 f"{self.sequence_type}_"
                 f"f{len(self.features_columns)}_"
-                f"{self.embedder.__class__.__name__}_"
+                f"{self._embedder_name()}_"
                 f"{self.reducer.__class__.__name__}_"
                 f"{self.clusterer.__class__.__name__}"
                 f"{title_suffix}"
@@ -2232,7 +2270,7 @@ class PatternAnalysis:
         if override:
             return override
 
-        embedder_name = self.embedder.__class__.__name__ if self.embedder is not None else "NoEmbedder"
+        embedder_name = self._embedder_name()
         stamp = datetime.datetime.now().strftime("%m%d_%H%M")
         name = f"{stamp}_{self.sequence_type}_{self.feature_set}_{embedder_name}_h{self.latent_dimension}"
         return name + "_init" if self.test_initialized_model else name

@@ -123,10 +123,11 @@ def parse_args() -> argparse.Namespace:
         "--embedder",
         type=str,
         default="LSTM",
-        choices=["LSTM", "MLP", "Transformer", "VAE", "TimeVAE", "none", "None"],
+        choices=["LSTM", "MLP", "Transformer", "VAE", "TimeVAE", "UMAP", "Masked UMAP", "none", "None"],
         help=(
-            "Deep embedder to use: LSTM, MLP, Transformer, VAE or TimeVAE. 'none' skips "
-            "embedding and uses the reducer instead (e.g., UMAP)."
+            "Deep embedder to use: LSTM, MLP, Transformer, VAE or TimeVAE. 'UMAP' embeds the "
+            "flattened sequences with UMAP instead, 'Masked UMAP' (quote it) does so with a "
+            "padding-aware metric, and 'none' embeds with whatever reducer is set."
         ),
     )
     parser.add_argument(

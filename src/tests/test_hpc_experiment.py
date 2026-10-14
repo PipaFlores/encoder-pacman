@@ -100,6 +100,21 @@ def test_initialized_model_grid_has_one_no_embedder_run():
     ]
 
 
+def test_umap_embedders_are_configurations_without_weights():
+    """"UMAP" and "Masked UMAP" are no-model baselines like `none`: no untrained control
+    for them, distinct hashes, and a label without the space."""
+    configs = expand({
+        "defaults": {"latent_space": 128},
+        "grid": {"embedder": ["UMAP", "Masked UMAP"], "test_initialized_model": [False, True]},
+    })
+
+    assert [(c.embedder, c.test_initialized_model) for c in configs] == [
+        ("UMAP", False), ("Masked UMAP", False),
+    ]
+    assert configs[0].config_hash() != configs[1].config_hash()
+    assert "_MaskedUMAP_" in configs[1].label()
+
+
 def test_unknown_configuration_key_is_named():
     with pytest.raises(ValueError, match="kl_weight"):
         RunConfig.from_dict({"kl_weight": 0.002})
