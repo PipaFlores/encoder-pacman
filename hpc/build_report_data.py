@@ -21,7 +21,8 @@ Outputs (under <run>/report/):
     manifest.json                         selections, reproduction checks, KDE/RQA parameters
     rq1/validation_long.csv               every sweep run x validation set (the comparison table)
     rq1/rebuilt_<key>_validation.csv      the same measures for each local rebuild
-    rq1/untrained_control.csv             all sets: trained vs untrained LSTM vs UMAP-only (local)
+    rq1/attack_rebuilds.csv               all attack rebuilds (trained, untrained, no encoder) together
+    rq1/probes/<key>_{hits,ridge}.csv     full-dimension vs 2-D probes of each attack space (report_probes.py)
     latent/<key>_sequences.csv            per-sequence latent coordinates, cluster, metadata
     figures/<key>_*.png                   latent space and validation panels
     clusters/<key>/cluster_NN.png         per-cluster overview (velocity grid, heatmap, samples)
@@ -48,7 +49,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from experiment import HPC_DIR, REPO_ROOT, RunConfig, build_analysis
+from experiment import HPC_DIR, RAW_EMBEDDERS, REPO_ROOT, RunConfig, build_analysis
+from report_probes import probe_space
 
 from src.analysis.latent_analysis import (
     Recurrence_Quantification_Analysis,
@@ -90,13 +92,45 @@ SELECTIONS = {
         "embedder": "LSTM",
         "latent_space": 512,
     },
+    "pa_mlp": {
+        "sequence_type": "pacman_attack",
+        "feature_set": "Experimental2",
+        "embedder": "MLP",
+        "latent_space": 512,
+    },
+    "pa_vae": {
+        "sequence_type": "pacman_attack",
+        "feature_set": "Experimental2",
+        "embedder": "VAE",
+        "latent_space": 512,
+    },
+    "pa_transformer": {
+        "sequence_type": "pacman_attack",
+        "feature_set": "Experimental2",
+        "embedder": "Transformer",
+        "latent_space": 512,
+    },
     "pa_umap": {
         "sequence_type": "pacman_attack",
         "feature_set": "Experimental2",
         "embedder": None,
     },
 }
-UNTRAINED_KEY = "pa_lstm_untrained"
+# Local-only spaces: a sweep configuration rebuilt with overrides, so they have no sweep
+# counterpart. Untrained controls embed with the encoder's initial weights (whatever the
+# trained space adds over its control is what training bought); "Masked UMAP" is the
+# no-encoder baseline with the padding-aware metric (src/utils/masked_distance.py).
+VARIANTS = {
+    **{
+        f"{key}_untrained": (key, {"test_initialized_model": True})
+        for key in ("pa_lstm", "pa_mlp", "pa_vae", "pa_transformer")
+    },
+    "pa_masked_umap": ("pa_umap", {"embedder": "Masked UMAP"}),
+}
+ATTACK = "pacman_attack"
+# What the probes predict and score: the focus Behavlets, plus sequence length to show
+# whether a space carries the length leak.
+PROBE_TARGETS = [*FOCUS_BEHAVLETS, "sequence_length"]
 # Participant (RQ2) analyses and cluster heatmaps run on these; validation panels on the rest.
 RQ2_KEYS = ("f5s_lstm", "f5s_umap")
 
@@ -278,12 +312,47 @@ def save(fig, path: Path, dpi: int = 110) -> None:
 
 def space_title(config: RunConfig) -> str:
     """Figure title naming the latent space, e.g. 'pacman_attack | Experimental2 | LSTM h512'."""
-    embedder = (
-        f"{config.embedder} h{config.latent_space}" if config.embedder else "UMAP-only"
-    )
+    if config.embedder is None:
+        embedder = "UMAP-only"
+    elif config.embedder in RAW_EMBEDDERS:
+        embedder = config.embedder
+    else:
+        embedder = f"{config.embedder} h{config.latent_space}"
     if config.test_initialized_model:
         embedder += " (untrained)"
     return f"{config.sequence_type} | {config.feature_set} | {embedder}"
+
+
+def space_kind(config: RunConfig) -> str:
+    """ "trained", "untrained" (initial weights) or "baseline" (no encoder)."""
+    if config.test_initialized_model:
+        return "untrained"
+    if config.embedder is None or config.embedder in RAW_EMBEDDERS:
+        return "baseline"
+    return "trained"
+
+
+def write_probes(analysis, config: RunConfig, key: str, out: Path) -> None:
+    """Neighbourhood-hit and ridge probes of one attack space (see report_probes.py)."""
+    if config.embedder == "Masked UMAP":
+        kind = "masked_umap"
+    elif config.embedder is None or config.embedder in RAW_EMBEDDERS:
+        kind = "plain_umap"
+    else:
+        kind = "latent"
+    log(f"    probes ({kind})")
+    hits, ridges = probe_space(analysis, config.umap_metric, kind, PROBE_TARGETS)
+    probe_dir = out / "rq1" / "probes"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+    hits.to_csv(probe_dir / f"{key}_hits.csv", index=False)
+    ridges.to_csv(probe_dir / f"{key}_ridge.csv", index=False)
+    if kind == "latent":
+        # Kept so later probes can run without rebuilding the space (row order as in
+        # latent/<key>_sequences.csv when that exists).
+        np.save(
+            out / "latent" / f"{key}_embeddings.npy",
+            np.asarray(analysis.embeddings, dtype=np.float32),
+        )
 
 
 def plot_focus_panels(analysis, title: str):
@@ -536,7 +605,7 @@ def main() -> int:
     parser.add_argument(
         "--only",
         nargs="+",
-        choices=[*SELECTIONS, UNTRAINED_KEY],
+        choices=[*SELECTIONS, *VARIANTS],
         help="Rebuild only these spaces and keep everything else already in <run>/report/.",
     )
     parser.add_argument(
@@ -545,7 +614,7 @@ def main() -> int:
         help="Also build the report page from the result (hpc/build_report_site.py).",
     )
     args = parser.parse_args()
-    keys = args.only or [*SELECTIONS, UNTRAINED_KEY]
+    keys = args.only or [*SELECTIONS, *VARIANTS]
 
     # Figures are only ever saved here, so plt.show() inside the pipeline must not block.
     # Switched here rather than at import so the notebooks can import these helpers.
@@ -620,39 +689,76 @@ def main() -> int:
                 plot_focus_panels(analysis, title),
                 out / "figures" / f"{key}_focus_behavlets.png",
             )
+        if config.sequence_type == ATTACK:
+            write_probes(analysis, config, key, out)
 
         entry["seconds"] = round(time.perf_counter() - started, 1)
         manifest["selections"][key] = entry
         del analysis
         plt.close("all")
 
-    if UNTRAINED_KEY in keys:
-        # The untrained control: the same LSTM, same data and seed, embedding with its
-        # initial weights. Whatever the trained model adds over this is what training
-        # bought. It is set against the local rebuilds rather than the sweep's numbers,
-        # so all three rows come from the same machine.
-        run_dir = find_run(run_root, **SELECTIONS["pa_lstm"])
-        log(f"{UNTRAINED_KEY}: embedding with the untrained LSTM")
-        config = local_config(run_dir, test_initialized_model=True)
-        control = rebuild(config)
+    for key, (base_key, overrides) in VARIANTS.items():
+        if key not in keys:
+            continue
+        run_dir = find_run(run_root, **SELECTIONS[base_key])
+        config = local_config(run_dir, **overrides)
+        title = space_title(config)
+        log(f"{key}: rebuilding {run_dir.name} with {overrides}")
+        analysis = rebuild(config)
         save(
-            plot_focus_panels(control, space_title(config)),
-            out / "figures" / f"{UNTRAINED_KEY}_focus_behavlets.png",
+            plot_focus_panels(analysis, title),
+            out / "figures" / f"{key}_focus_behavlets.png",
         )
-        measures = {
-            "trained": pd.read_csv(out / "rq1" / "rebuilt_pa_lstm_validation.csv"),
-            "untrained": control.validation_measures,
-            "umap_only": pd.read_csv(out / "rq1" / "rebuilt_pa_umap_validation.csv"),
-        }
-        pd.concat(
-            [frame.assign(model=name) for name, frame in measures.items()],
-            ignore_index=True,
-        ).to_csv(out / "rq1" / "untrained_control.csv", index=False)
-        manifest["selections"][UNTRAINED_KEY] = {
+        if space_kind(config) == "baseline":
+            # No sweep run to copy the full validation grid from, so draw it here.
+            save(
+                analysis.plot_latent_space_overview(
+                    validation_set="all",
+                    black_background=True,
+                    colormap="viridis",
+                    dotsize=0.2,
+                    pretty_val_title=True,
+                    custom_title=title,
+                ),
+                out / "figures" / f"{key}_validation_grid.png",
+                dpi=80,
+            )
+        analysis.validation_measures.to_csv(
+            out / "rq1" / f"rebuilt_{key}_validation.csv", index=False
+        )
+        write_probes(analysis, config, key, out)
+        manifest["selections"][key] = {
             "run_dir": run_dir.name,
-            "test_initialized_model": True,
+            "label": config.label(),
+            "overrides": overrides,
+            "test_initialized_model": bool(config.test_initialized_model),
         }
-        del control
+        del analysis
+        plt.close("all")
+
+    # Every rebuilt attack space in one table, so trained, untrained and no-encoder spaces
+    # are compared on numbers from the same machine.
+    attack_rebuilds = []
+    for key, entry in manifest["selections"].items():
+        path = out / "rq1" / f"rebuilt_{key}_validation.csv"
+        base_key, overrides = VARIANTS.get(key, (key, {}))
+        if not path.exists() or base_key not in SELECTIONS:
+            continue
+        config = local_config(
+            run_root / entry["run_dir"], **overrides
+        )  # the space as rebuilt
+        if config.sequence_type == ATTACK:
+            attack_rebuilds.append(
+                pd.read_csv(path).assign(
+                    key=key,
+                    embedder=config.embedder or "UMAP-only",
+                    kind=space_kind(config),
+                )
+            )
+    if attack_rebuilds:
+        pd.concat(attack_rebuilds, ignore_index=True).to_csv(
+            out / "rq1" / "attack_rebuilds.csv", index=False
+        )
 
     rebuilt_rq2 = [key for key in RQ2_KEYS if key in keys]
     if rebuilt_rq2:

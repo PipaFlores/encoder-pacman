@@ -7,6 +7,7 @@ artifact: <https://claude.ai/artifact/63z6qJTnMA39pP9eteHmAM>.
 | File | What it is | Changes when |
 |---|---|---|
 | `hpc/build_report_data.py` | Rebuilds the chosen spaces from their sweep checkpoints (never retrains) and writes numbers and figures to `<run>/report/` | which configurations to show (`SELECTIONS`, `FOCUS_BEHAVLETS`) |
+| `hpc/report_probes.py` | Neighbourhood-hit and ridge probes on either side of UMAP: encoder latents and the raw input at full dimension, against the 2-D maps | which distances or targets to probe |
 | `hpc/build_report_site.py` | Turns `<run>/report/` into `<run>/report/site/report.html` plus `site/fig/` | rarely |
 | `template.html` | Layout and interaction. Models, latent sizes, feature sets and spaces are read from the data | the page's design or a new kind of chart |
 | `narrative.html` | The interpretation: findings, section texts, methods, caveats | **every rebuild from new results** |
@@ -36,8 +37,11 @@ Run everything from the repository root with the `pacman_encoder` environment ac
   charts, controls), the rebuilt spaces listed in `manifest.json` (view buttons, cluster maps,
   participant explorer, provenance table), and the run id.
 - **Needs an edit:** which configurations are rebuilt (`SELECTIONS` in
-  `build_report_data.py`), the focus Behavlets (`FOCUS_BEHAVLETS`), the participant-measure
+  `build_report_data.py`), the spaces built only locally from them (`VARIANTS`: untrained
+  controls, Masked UMAP), the focus Behavlets (`FOCUS_BEHAVLETS`), the participant-measure
   lists in `template.html`, and every sentence in `narrative.html`.
+- **Local variants and probes have no sweep counterpart.** Their numbers come from this
+  machine's rebuilds, and the page says so wherever they appear.
 - **Several seeds per configuration:** `find_run()` expects exactly one run per selection, so add
   `seed` to the matching selection's criteria first.
 - **New data (participants, sessions):** the checkpoints and the sweep's scores still describe

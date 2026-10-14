@@ -33,6 +33,24 @@ HPC_DIR = Path(__file__).resolve().parent
 SITE_SOURCES = HPC_DIR / "report_site"
 ATTACK = "pacman_attack"
 KIND_ORDER = {"trained": 0, "untrained": 1, "baseline": 2}
+RAW_EMBEDDERS = ("UMAP", "Masked UMAP")  # mirrors PatternAnalysis.RAW_EMBEDDERS
+MODEL_ORDER = ["LSTM", "MLP", "VAE", "Transformer", "TimeVAE"]
+
+
+def _space_order(selections: dict):
+    """Sort key: trained spaces, then untrained controls, then no-encoder baselines, each
+    in the usual model order."""
+
+    def key(name: str):
+        entry = selections[name]
+        embedder = entry["config"]["embedder"] or ""
+        rank = (
+            MODEL_ORDER.index(embedder) if embedder in MODEL_ORDER else len(MODEL_ORDER)
+        )
+        return KIND_ORDER[entry["kind"]], rank, embedder, name
+
+    return key
+
 
 SLOT = re.compile(r"<!-- slot:([\w-]+) -->")
 SECTION = re.compile(r'<section data-slot="([\w-]+)">(.*?)</section>', re.DOTALL)
@@ -81,15 +99,29 @@ def _selections(run_root: Path, manifest: dict) -> dict:
     """The manifest's rebuilt spaces, each with its configuration and what kind of space it is."""
     selections = {}
     for key, entry in manifest["selections"].items():
-        config = json.loads(
-            (run_root / entry["run_dir"] / "config.json").read_text(encoding="utf-8")
+        # Local variants are a sweep run's configuration with overrides applied.
+        config = {
+            **json.loads(
+                (run_root / entry["run_dir"] / "config.json").read_text(
+                    encoding="utf-8"
+                )
+            ),
+            **entry.get("overrides", {}),
+        }
+        untrained = bool(
+            entry.get("test_initialized_model") or config.get("test_initialized_model")
         )
-        untrained = bool(entry.get("test_initialized_model"))
+        if untrained:
+            kind = "untrained"
+        elif config["embedder"] is None or config["embedder"] in RAW_EMBEDDERS:
+            kind = "baseline"
+        else:
+            kind = "trained"
         selections[key] = {
             **entry,
-            "kind": "untrained"
-            if untrained
-            else ("baseline" if config["embedder"] is None else "trained"),
+            "kind": kind,
+            # Rebuilt here only, so its numbers come from this machine, not the sweep.
+            "local": untrained or bool(entry.get("overrides")),
             "config": {
                 "sequence_type": config["sequence_type"],
                 "feature_set": config["feature_set"],
@@ -100,17 +132,20 @@ def _selections(run_root: Path, manifest: dict) -> dict:
     return selections
 
 
-def _control(selections: dict) -> dict | None:
-    for key, entry in selections.items():
-        if entry["kind"] == "untrained":
-            return {
-                "key": key,
-                **{
-                    k: entry["config"][k]
-                    for k in ("embedder", "feature_set", "latent_space")
-                },
-            }
-    return None
+def _local_spaces(selections: dict) -> list[dict]:
+    """Spaces with no sweep counterpart (untrained controls, Masked UMAP), in report order."""
+    return [
+        {
+            "key": key,
+            "kind": selections[key]["kind"],
+            **{
+                k: selections[key]["config"][k]
+                for k in ("embedder", "feature_set", "latent_space")
+            },
+        }
+        for key in sorted(selections, key=_space_order(selections))
+        if selections[key]["local"]
+    ]
 
 
 # --------------------------------------------------------------------------------------
@@ -147,9 +182,8 @@ def _web_figures(report: Path, site: Path, selections: dict) -> dict:
         if key_dir.name in selections:
             clusters[key_dir.name] = ids
 
-    # Trained spaces first, then the untrained control, then the no-encoder baseline.
     figures = report / "figures"
-    ordered = sorted(selections, key=lambda k: KIND_ORDER[selections[k]["kind"]])
+    ordered = sorted(selections, key=_space_order(selections))
     return {
         "focus": [
             k for k in ordered if (figures / f"{k}_focus_behavlets.png").exists()
@@ -186,20 +220,45 @@ def _rq1(report: Path) -> dict:
         "ARI",
     ]
 
-    control_rows = []
-    control_path = report / "rq1" / "untrained_control.csv"
-    if control_path.exists():
-        control = pd.read_csv(control_path)
-        control["set"] = control["validation_set"].str.replace(
+    # Every local rebuild of an attack space. The page uses them for spaces the sweep never
+    # ran (untrained controls, Masked UMAP), beside the sweep's own numbers for the rest.
+    local_rows = []
+    rebuilds_path = report / "rq1" / "attack_rebuilds.csv"
+    if rebuilds_path.exists():
+        rebuilds = pd.read_csv(rebuilds_path)
+        rebuilds["set"] = rebuilds["validation_set"].str.replace(
             "_value", "", regex=False
         )
-        control_rows = _records(
-            control, ["model", "set", "neigh_hit_adj", "neigh_hit", "NMI", "ARI"]
+        local_rows = _records(
+            rebuilds, ["key", "set", "neigh_hit_adj", "neigh_hit", "NMI", "ARI"]
+        )
+
+    # Probes on either side of UMAP (report_probes.py), one file pair per space.
+    hits, ridges = [], []
+    for path in sorted((report / "rq1" / "probes").glob("*_hits.csv")):
+        hits.append(pd.read_csv(path).assign(key=path.name.removesuffix("_hits.csv")))
+    for path in sorted((report / "rq1" / "probes").glob("*_ridge.csv")):
+        ridges.append(
+            pd.read_csv(path).assign(key=path.name.removesuffix("_ridge.csv"))
+        )
+    probes = {"hits": [], "ridge": []}
+    if hits:
+        frame = pd.concat(hits, ignore_index=True)
+        frame["set"] = frame["validation_set"].str.replace("_value", "", regex=False)
+        probes["hits"] = _records(
+            frame, ["key", "representation", "space", "metric", "set", "neigh_hit_adj"]
+        )
+    if ridges:
+        frame = pd.concat(ridges, ignore_index=True)
+        frame["set"] = frame["validation_set"].str.replace("_value", "", regex=False)
+        probes["ridge"] = _records(
+            frame, ["key", "representation", "space", "set", "ridge_r2"]
         )
     return {
         "columns": columns,
         "rows": _records(long, columns),
-        "control": control_rows,
+        "local": local_rows,
+        "probes": probes,
     }
 
 
@@ -284,7 +343,7 @@ def build_site(run_root: Path) -> Path:
         "focus": [name.replace("_value", "") for name in manifest["focus_behavlets"]],
         "feature_sets": _feature_counts(run_root),
         "selections": selections,
-        "control": _control(selections),
+        "local_spaces": _local_spaces(selections),
         "figures": _web_figures(report, site, selections),
         "rq1": _rq1(report),
         "rq2": _rq2(report, selections),
