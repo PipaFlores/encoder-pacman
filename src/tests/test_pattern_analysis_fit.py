@@ -381,3 +381,29 @@ def test_fit_with_behavlets_validation(reader, cache_folder, tmp_path):
     assert set(pa.validation_measures.columns) == {
         "validation_set", "ARI", "AMI", "NMI", "neigh_hit", "neigh_hit_chance", "neigh_hit_adj"
     }
+
+    # Linear probes run on demand, not in fit(), on any of the three representations.
+    # min_samples is lowered to this test's sample size (the default skips anything under 50).
+    assert pa.probe_measures is None
+    n_steps, n_features = pa.processed_sequence_data.shape[1:]
+    for space, dims in [("latent", LATENT_DIM), ("reduced", REDUCED_DIM), ("raw", n_steps * n_features)]:
+        probes = pa.calculate_probe_measures(space, targets=["sequence_length", "score_change"], min_samples=10)
+        assert list(probes["validation_set"]) == ["sequence_length", "score_change"]
+        assert (probes["space"] == space).all() and (probes["dims"] == dims).all()
+        assert (probes["ridge_r2"] <= 1).all()
+        assert pa.probe_measures is probes
+
+    # The hit-vs-k profile is on demand too. At k = 5 on the reduced space it is the same
+    # neighbourhood hit calculate_validation_measures() reports; k above n - 1 is dropped.
+    assert pa.neighborhood_hit_profile is None
+    profile = pa.calculate_neighborhood_hit_profile("reduced", ks=(5, 10, 20, MAX_SAMPLES))
+    assert set(profile["k"]) == {5, 10, 20}
+    at_5 = profile[profile["k"] == 5].set_index("validation_set")
+    measures = pa.validation_measures.set_index("validation_set")
+    shared = measures.index.intersection(at_5.index)
+    assert len(shared) > 0
+    np.testing.assert_allclose(at_5.loc[shared, "neigh_hit_adj"], measures.loc[shared, "neigh_hit_adj"], equal_nan=True)
+    assert pa.neighborhood_hit_profile is profile
+
+    latent_profile = pa.calculate_neighborhood_hit_profile("latent", ks=(5, 20), metric="cosine")
+    assert (latent_profile["space"] == "latent").all() and (latent_profile["metric"] == "cosine").all()

@@ -299,6 +299,10 @@ class PatternAnalysis:
         # Stays None unless a validation method actually produced measures in fit() - callers
         # (e.g. hpc/train_model.py) check it rather than assuming fit() set it.
         self.validation_measures = None
+        # Set only by calculate_probe_measures() and calculate_neighborhood_hit_profile(),
+        # which fit() does not call.
+        self.probe_measures = None
+        self.neighborhood_hit_profile = None
         self.metadata = None
         self.results = {}
 
@@ -1504,6 +1508,171 @@ class PatternAnalysis:
                 })
             validation_measures = pd.DataFrame(validation_measures_rows)
             return validation_measures
+
+    def calculate_probe_measures(
+            self,
+            space: str = "latent",
+            targets: list[str] | None = None,
+            n_folds: int = 5,
+            min_samples: int = 50,
+            ) -> pd.DataFrame:
+        """
+        Linear probes of one representation: out-of-fold ridge R² from the space to the
+        continuous value of each validation encoding (see src.utils.utils.ridge_probe_r2).
+
+        Complements calculate_validation_measures(), which scores the clusters and the 2-D
+        map against binned labels: this asks whether a full-dimensional space carries each
+        quantity linearly. Not run by fit(); call it afterwards. The result is also kept on
+        self.probe_measures.
+
+        Each target is fitted on the sequences the neighborhood hit queries for that set:
+        finite values, and not -1 in validation_labels (e.g. only attacks with a ghost kill
+        for Aggression3_value).
+
+        Args:
+            space (str): Which representation to probe:
+                - "latent": the encoder's embeddings. Needs a deep embedder - without one,
+                  self.embeddings is already the reducer's output.
+                - "reduced": the reduced embeddings the pipeline clusters (near-zero R² on a
+                  2-D UMAP map by construction).
+                - "raw": the flattened processed sequences, each padded with its last valid
+                  step rather than -999 (which would give away the sequence length).
+            targets (list[str], optional): Validation encodings to probe, default all.
+            n_folds (int): Cross-validation folds.
+            min_samples (int): Targets with fewer usable sequences are skipped.
+
+        Returns:
+            pd.DataFrame: One row per probed target, columns 'validation_set', 'ridge_r2',
+                'n' (sequences fitted), 'space' and 'dims' (width of the probed space).
+        """
+        from src.utils.utils import hold_last_step_padding, ridge_probe_r2
+
+        if self.validation_encodings is None:
+            raise ValueError("No validation encodings: run fit() with a validation_method first")
+
+        if space == "latent":
+            if self.embedder is None:
+                raise ValueError(
+                    "space='latent' needs a deep embedder; without one the embeddings are the "
+                    "reducer's output. Use space='reduced' or space='raw'."
+                )
+            X = np.asarray(self.embeddings)
+        elif space == "reduced":
+            X = np.asarray(self.reduced_embeddings)
+        elif space == "raw":
+            padding_value = -999.0
+            data = replace_inf_with_feature_max(self.processed_sequence_data, padding_value=padding_value)
+            X = hold_last_step_padding(data, padding_value=padding_value).reshape(len(data), -1)
+        else:
+            raise ValueError(f"space must be 'latent', 'reduced' or 'raw', got {space!r}")
+
+        if targets is None:
+            targets = list(self.validation_encodings.columns)
+
+        seed = self.random_seed if self.random_seed is not None else 42
+        rows = []
+        for target in targets:
+            if target not in self.validation_encodings:
+                logger.warning(f"Skipping probe target '{target}': not in validation_encodings")
+                continue
+            y = pd.to_numeric(self.validation_encodings[target], errors="coerce").to_numpy(float)
+            keep = np.isfinite(y)
+            if self.validation_labels is not None and target in self.validation_labels:
+                keep &= self.validation_labels[target].to_numpy() != -1
+            if keep.sum() < min_samples or np.std(y[keep]) == 0:
+                logger.info(f"Skipping probe target '{target}': {int(keep.sum())} usable sequences or no variance")
+                continue
+            rows.append({
+                "validation_set": target,
+                "ridge_r2": ridge_probe_r2(X[keep], y[keep], n_folds=n_folds, random_state=seed),
+                "n": int(keep.sum()),
+                "space": space,
+                "dims": X.shape[1],
+            })
+
+        self.probe_measures = pd.DataFrame(
+            rows, columns=["validation_set", "ridge_r2", "n", "space", "dims"]
+        )
+        return self.probe_measures
+
+    def calculate_neighborhood_hit_profile(
+            self,
+            space: str = "reduced",
+            ks: tuple[int, ...] = (5, 10, 20, 50, 100, 200, 500, 1000),
+            metric: str = "euclidean",
+            validation_sets: list[str] | None = None,
+            ) -> pd.DataFrame:
+        """
+        Chance-adjusted neighborhood hit of every validation label set at several neighborhood
+        sizes k (see src.utils.utils.neighborhood_hit_profile): how far each label's structure
+        reaches, from each sequence's closest neighbors toward the whole space.
+
+        One neighbor search at max(ks) serves every k and every label set, so the cost is about
+        that of a single neighborhood hit. At k = 5 with the Euclidean metric on the reduced
+        space it reproduces the neigh_hit columns of calculate_validation_measures(). Not run by
+        fit(); call it afterwards. The result is also kept on self.neighborhood_hit_profile.
+
+        Args:
+            space (str): Where to find the neighbors:
+                - "reduced": the reduced embeddings the pipeline clusters (the 2-D map).
+                - "latent": the encoder's embeddings. Needs a deep embedder - without one,
+                  self.embeddings is already the reducer's output.
+                The raw input is not offered: plain distances on the padded sequences are
+                dominated by sequence length (it needs the padding-aware metric of
+                src/utils/masked_distance.py).
+            ks (tuple[int, ...]): Neighborhood sizes. Values above n_samples - 1 are dropped
+                with a warning.
+            metric (str): Distance metric for the neighbor search.
+            validation_sets (list[str], optional): Label sets to profile, default all.
+
+        Returns:
+            pd.DataFrame: One row per (validation set, k), columns 'validation_set', 'k',
+                'neigh_hit', 'neigh_hit_chance', 'neigh_hit_adj', 'space', 'metric'.
+        """
+        from src.utils.utils import nearest_neighbor_indices, neighborhood_hit_profile
+
+        if self.validation_labels is None:
+            raise ValueError("No validation labels: run fit() with a validation_method first")
+
+        if space == "latent":
+            if self.embedder is None:
+                raise ValueError(
+                    "space='latent' needs a deep embedder; without one the embeddings are the "
+                    "reducer's output. Use space='reduced'."
+                )
+            X = np.asarray(self.embeddings)
+        elif space == "reduced":
+            X = np.asarray(self.reduced_embeddings)
+        else:
+            raise ValueError(f"space must be 'reduced' or 'latent', got {space!r}")
+
+        n_samples = X.shape[0]
+        usable = sorted(k for k in set(ks) if 1 <= k < n_samples)
+        if len(usable) < len(set(ks)):
+            logger.warning(f"Dropping neighborhood sizes outside 1..{n_samples - 1}: {sorted(set(ks) - set(usable))}")
+        if not usable:
+            raise ValueError(f"No neighborhood size between 1 and {n_samples - 1} in ks={ks}")
+
+        indices = nearest_neighbor_indices(X, max(usable), metric=metric)
+
+        if validation_sets is None:
+            validation_sets = list(self.validation_labels.columns)
+        frames = []
+        for column in validation_sets:
+            if column not in self.validation_labels:
+                logger.warning(f"Skipping validation set '{column}': not in validation_labels")
+                continue
+            labels = self.validation_labels[column].to_numpy()
+            # Same skip as calculate_validation_measures: a set with no signal at all
+            if pd.isnull(labels).all():
+                continue
+            frame = neighborhood_hit_profile(indices, labels, usable)
+            frames.append(frame.assign(validation_set=column))
+
+        columns = ["validation_set", "k", "neigh_hit", "neigh_hit_chance", "neigh_hit_adj", "space", "metric"]
+        profile = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=columns[:5])
+        self.neighborhood_hit_profile = profile.assign(space=space, metric=metric)[columns]
+        return self.neighborhood_hit_profile
 
     def summarize(self):
         """

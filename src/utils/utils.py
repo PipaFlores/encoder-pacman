@@ -371,6 +371,175 @@ def adjusted_neighborhood_hit(X_embedded,
     return chance_adjusted_neighborhood_hit(hit, chance)
 
 
+def nearest_neighbor_indices(X_embedded, n_neighbors: int, metric: str = "euclidean") -> np.ndarray:
+    """
+    Each point's n_neighbors nearest other points, nearest first, shape (n_samples, n_neighbors).
+
+    Drops the first column of the search as the point itself, the same convention as
+    neighborhood_hit(), so hits computed from these indices match it exactly.
+
+    Args:
+        X_embedded: Array of shape (n_samples, n_dims).
+        n_neighbors: Number of neighbors per point, at most n_samples - 1.
+        metric: Distance metric used by ``NearestNeighbors``.
+    """
+    X_embedded = np.asarray(X_embedded)
+    if not 1 <= n_neighbors < X_embedded.shape[0]:
+        raise ValueError(f"n_neighbors must be between 1 and {X_embedded.shape[0] - 1}, got {n_neighbors}")
+    nn = NearestNeighbors(n_neighbors=n_neighbors + 1, metric=metric).fit(X_embedded)
+    return nn.kneighbors(X_embedded, return_distance=False)[:, 1:]
+
+
+def neighborhood_hit_profile(neighbor_indices: np.ndarray,
+                             labels,
+                             ks,
+                             no_null_instances: bool = True) -> pd.DataFrame:
+    """
+    Neighborhood hit at several neighborhood sizes k, from one neighbor search.
+
+    The hit at k = 5 measures purely local agreement; raising k widens the neighborhood until,
+    at k = n - 1, it holds every other point and the adjusted hit is 0 by definition. The
+    shape of the curve shows how far a label's structure reaches: a flat stretch ending in a
+    drop marks the size of a group, a steady decline a gradient, an immediate fall structure
+    that is only local. This follows the multi-scale evaluation of embeddings, where quality
+    is reported as a function of neighborhood size (Lee & Verleysen, 2009; Lee et al., 2015),
+    here with the labels' agreement instead of neighborhood preservation.
+
+    Neighbors come sorted by distance, so the k nearest are a prefix of the k_max nearest:
+    one search at max(ks) (nearest_neighbor_indices) serves every k, and a running count
+    along each row gives every hit at once. The chance level does not depend on k
+    (neighborhood_hit_chance), so the adjusted values are comparable along the curve.
+
+    References:
+        Lee, J. A., & Verleysen, M. (2009). Quality assessment of dimensionality reduction:
+            Rank-based criteria. Neurocomputing, 72(7-9), 1431-1443.
+        Lee, J. A., Peluffo-Ordóñez, D. H., & Verleysen, M. (2015). Multi-scale similarities
+            in stochastic neighbour embedding: Reducing dimensionality while preserving both
+            local and global structure. Neurocomputing, 169, 246-261.
+
+    Args:
+        neighbor_indices: Array of shape (n_samples, k_max) from nearest_neighbor_indices(),
+            with k_max >= max(ks).
+        labels: Array of shape (n_samples,) with class labels.
+        ks: Neighborhood sizes to report, each between 1 and k_max.
+        no_null_instances: If True, samples labeled -1 are not queried (they still count as
+            neighbors), as in neighborhood_hit().
+
+    Returns:
+        pd.DataFrame: One row per k, columns 'k', 'neigh_hit', 'neigh_hit_chance',
+            'neigh_hit_adj'. Hits are NaN when no sample is queried.
+    """
+    labels = np.asarray(labels)
+    ks = np.asarray(sorted(set(int(k) for k in ks)))
+    if ks.min() < 1 or ks.max() > neighbor_indices.shape[1]:
+        raise ValueError(f"ks must lie between 1 and {neighbor_indices.shape[1]} (the neighbors searched)")
+
+    query = labels != -1 if no_null_instances else np.ones(labels.shape[0], dtype=bool)
+    chance = neighborhood_hit_chance(labels, no_null_instances=no_null_instances)
+    if query.any():
+        same = labels[neighbor_indices[query, :ks.max()]] == labels[query, None]
+        counts = same.cumsum(axis=1, dtype=np.int32)[:, ks - 1]
+        hits = counts.mean(axis=0) / ks
+    else:
+        hits = np.full(len(ks), np.nan)
+
+    return pd.DataFrame({
+        "k": ks,
+        "neigh_hit": hits,
+        "neigh_hit_chance": chance,
+        "neigh_hit_adj": [chance_adjusted_neighborhood_hit(h, chance) for h in hits],
+    })
+
+
+def hold_last_step_padding(data: np.ndarray, padding_value: float = -999.0) -> np.ndarray:
+    """
+    Fill each sequence's padded steps with its last valid step.
+
+    For models that need a real value in every column, such as a linear probe on the
+    flattened sequences: left at the sentinel, the padded columns hand them the sequence
+    length for free. A step is valid when any of its features differs from padding_value.
+
+    Args:
+        data: Padded array of shape [n_samples, seq_len, n_features].
+        padding_value: Padding sentinel.
+
+    Returns:
+        np.ndarray: A copy with the padding replaced. Sequences with no valid step keep
+            their padding.
+    """
+    filled = data.copy()
+    lengths = (data != padding_value).any(axis=-1).sum(axis=1)
+    for i, length in enumerate(lengths):
+        if 0 < length < data.shape[1]:
+            filled[i, length:] = data[i, length - 1]
+    return filled
+
+
+def ridge_probe_r2(X: np.ndarray,
+                   y: np.ndarray,
+                   n_folds: int = 5,
+                   alphas: np.ndarray | None = None,
+                   random_state: int = 42,
+                   constant_spread: float = 1e-3,
+                   clip: float | None = 10.0) -> float:
+    """
+    Linear probe: out-of-fold R² of a standardised ridge regression from X to y.
+
+    Asks whether a space carries a quantity along a direction, which the neighborhood hit
+    (local agreement of binned labels) does not: a label can sit in tight but scattered
+    islands (high hit, low R²) or vary smoothly along an axis that neighborhoods ignore
+    (low hit, high R²). The regularization strength is picked by RidgeCV inside each
+    training fold, and every prediction comes from a model that never saw that sample.
+
+    On a 2-D UMAP map it is near zero by construction (a non-linear map holds no global
+    linear gradient), so it is mainly a probe of full-dimensional spaces: a latent, or the
+    flattened input (see hold_last_step_padding for its padding).
+
+    Columns whose spread is below constant_spread x the median column's are dropped first:
+    standardised, their numerically constant values become huge z-scores on held-out
+    samples, which no ridge penalty fixes. The drop uses no labels, so nothing leaks.
+
+    Args:
+        X: Array of shape (n_samples, n_dims).
+        y: Continuous target of shape (n_samples,), finite.
+        n_folds: Cross-validation folds.
+        alphas: Candidate ridge penalties, default 10^-2 ... 10^6.
+        random_state: Seed for the fold split.
+        constant_spread: Relative spread below which a column counts as constant.
+        clip: Bound on each standardised feature (None for no bound). A column that is nearly
+            constant in a training fold but not in the held-out one (a rare value) gives a
+            held-out sample a z-score in the hundreds, and with it a prediction far outside
+            the target's range: one such sample can take R² from 0.9 to below 0. Clipping at
+            ±10 leaves ordinary values untouched and caps that.
+
+    Returns:
+        float: 1 - SS_res / SS_tot over the out-of-fold predictions. 1 is a perfect linear
+            read-out, 0 no better than predicting the mean, negative worse than that.
+    """
+    from sklearn.linear_model import RidgeCV
+    from sklearn.model_selection import KFold, cross_val_predict
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import FunctionTransformer, StandardScaler
+
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if alphas is None:
+        alphas = np.logspace(-2, 6, 17)
+
+    spread = X.std(axis=0)
+    X = X[:, spread >= constant_spread * np.median(spread)]
+
+    steps = [StandardScaler()]
+    if clip is not None:
+        steps.append(FunctionTransformer(np.clip, kw_args={"a_min": -clip, "a_max": clip}))
+    model = make_pipeline(*steps, RidgeCV(alphas=alphas))
+    folds = KFold(n_splits=n_folds, shuffle=True, random_state=random_state)
+    predicted = cross_val_predict(model, X, y, cv=folds)
+    residual = np.sum((y - predicted) ** 2)
+    total = np.sum((y - y.mean()) ** 2)
+    return float(1 - residual / total)
+
+
 def make_synth_data(n_per_category: int | tuple[int] = (1000, 1000),
               n_noise: int = 1000,
               seed = 42):
