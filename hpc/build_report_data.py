@@ -22,7 +22,7 @@ Outputs (under <run>/report/):
     rq1/validation_long.csv               every sweep run x validation set (the comparison table)
     rq1/rebuilt_<key>_validation.csv      the same measures for each local rebuild
     rq1/attack_rebuilds.csv               all attack rebuilds (trained, untrained, no encoder) together
-    rq1/probes/<key>_{hits,ridge}.csv     full-dimension vs 2-D probes of each attack space (report_probes.py)
+    rq1/probes/<key>_{hits,ridge,profile}.csv  full-dimension vs reduced probes of each attack space (report_probes.py)
     latent/<key>_sequences.csv            per-sequence latent coordinates, cluster, metadata
     figures/<key>_*.png                   latent space and validation panels
     clusters/<key>/cluster_NN.png         per-cluster overview (velocity grid, heatmap, samples)
@@ -116,16 +116,73 @@ SELECTIONS = {
         "embedder": None,
     },
 }
+ENCODER_KEYS = ("pa_lstm", "pa_mlp", "pa_vae", "pa_transformer")
+# The sweep's latent sizes. The matched-dimension comparison sets each encoder's unreduced
+# latent against the raw input reduced to the same width.
+LATENT_SIZES = (32, 64, 128, 256, 512)
+# The same encoders at the sweep's other latent sizes. Rebuilt only for the full-dimension
+# probes of their latents, so they get no figures.
+SIZE_SELECTIONS = {
+    f"{key}_h{size}": {**SELECTIONS[key], "latent_space": size}
+    for key in ENCODER_KEYS
+    for size in LATENT_SIZES
+    if size != SELECTIONS[key]["latent_space"]
+}
+# The no-encoder baselines, as overrides of the sweep's UMAP-only configuration: plain UMAP,
+# UMAP with the padding-aware metric (src/utils/masked_distance.py), PCA and a seeded
+# Gaussian random projection, the last two with no UMAP anywhere.
+RAW_BASELINES = {
+    "pa_umap": {},
+    "pa_masked_umap": {"embedder": "Masked UMAP"},
+    "pa_pca": {"reducer": "pca"},
+    "pa_random_projection": {"reducer": "random_projection"},
+}
+# Reduced widths besides the sweep's 2-D: 5-D for every reducer after the h512 encoders and
+# for the raw input, and each latent size for the raw input alone.
+REDUCED_DIMS = (5,)
+# Latent sizes besides h512 that also get untrained controls (probe-only, like their trained
+# counterparts in SIZE_SELECTIONS).
+UNTRAINED_SIZES = (64, 128)
 # Local-only spaces: a sweep configuration rebuilt with overrides, so they have no sweep
 # counterpart. Untrained controls embed with the encoder's initial weights (whatever the
-# trained space adds over its control is what training bought); "Masked UMAP" is the
-# no-encoder baseline with the padding-aware metric (src/utils/masked_distance.py).
+# trained space adds over its control is what training bought). The rest change only how
+# a space is reduced: `_pca` swaps UMAP for PCA, `_d<n>` reduces to n dimensions.
 VARIANTS = {
     **{
         f"{key}_untrained": (key, {"test_initialized_model": True})
-        for key in ("pa_lstm", "pa_mlp", "pa_vae", "pa_transformer")
+        for key in ENCODER_KEYS
     },
-    "pa_masked_umap": ("pa_umap", {"embedder": "Masked UMAP"}),
+    **{
+        f"{key}_h{size}_untrained": (f"{key}_h{size}", {"test_initialized_model": True})
+        for key in ENCODER_KEYS
+        for size in UNTRAINED_SIZES
+    },
+    **{key: ("pa_umap", over) for key, over in RAW_BASELINES.items() if over},
+    **{f"{key}_pca": (key, {"reducer": "pca"}) for key in ENCODER_KEYS},
+    **{
+        f"{key}_{reducer}_d{dims}": (
+            key,
+            {"reducer": reducer, "reducer_components": dims},
+        )
+        for key in ENCODER_KEYS
+        for reducer in ("umap", "pca")
+        for dims in REDUCED_DIMS
+    },
+    **{
+        f"{key}_d{dims}": ("pa_umap", {**over, "reducer_components": dims})
+        for key, over in RAW_BASELINES.items()
+        for dims in (*REDUCED_DIMS, *LATENT_SIZES)
+    },
+}
+# Overrides that change only the reduction: such a variant shares its full-dimensional
+# representation with its base space, so its full-dimension probes are not repeated.
+REDUCTION_ONLY = {"reducer", "reducer_components"}
+# How the report names each reducer (RunConfig.reducer; None falls back to UMAP).
+REDUCER_NAMES = {
+    None: "UMAP",
+    "umap": "UMAP",
+    "pca": "PCA",
+    "random_projection": "Random projection",
 }
 ATTACK = "pacman_attack"
 # What the probes predict and score: the focus Behavlets, plus sequence length to show
@@ -216,6 +273,8 @@ def validation_long(run_root: Path) -> pd.DataFrame:
         measures.insert(
             4, "latent_space", config["latent_space"] if config["embedder"] else np.nan
         )
+        measures.insert(5, "reducer", config.get("reducer") or "umap")
+        measures.insert(6, "reducer_components", config.get("reducer_components", 2))
         frames.append(measures)
     return pd.concat(frames, ignore_index=True)
 
@@ -310,16 +369,22 @@ def save(fig, path: Path, dpi: int = 110) -> None:
     plt.close(fig)
 
 
+def reducer_name(config: RunConfig) -> str:
+    return REDUCER_NAMES.get(config.reducer and config.reducer.lower(), config.reducer)
+
+
 def space_title(config: RunConfig) -> str:
-    """Figure title naming the latent space, e.g. 'pacman_attack | Experimental2 | LSTM h512'."""
+    """Figure title naming the space and how it reached 2-D, e.g.
+    'pacman_attack | Experimental2 | LSTM h512 - UMAP' or '... | Raw input - PCA'."""
     if config.embedder is None:
-        embedder = "UMAP-only"
+        embedder = f"Raw input - {reducer_name(config)}"
     elif config.embedder in RAW_EMBEDDERS:
-        embedder = config.embedder
+        embedder = f"Raw input - {config.embedder}"
     else:
         embedder = f"{config.embedder} h{config.latent_space}"
-    if config.test_initialized_model:
-        embedder += " (untrained)"
+        if config.test_initialized_model:
+            embedder += " (untrained)"
+        embedder += f" - {reducer_name(config)}"
     return f"{config.sequence_type} | {config.feature_set} | {embedder}"
 
 
@@ -332,21 +397,30 @@ def space_kind(config: RunConfig) -> str:
     return "trained"
 
 
-def write_probes(analysis, config: RunConfig, key: str, out: Path) -> None:
-    """Neighbourhood-hit and ridge probes of one attack space (see report_probes.py)."""
+def write_probes(
+    analysis, config: RunConfig, key: str, out: Path, full: bool = True
+) -> None:
+    """Neighbourhood-hit and ridge probes of one attack space (see report_probes.py).
+
+    `full` also probes the representation the space was reduced from; the no-encoder
+    baselines share one raw input, so only plain UMAP's configuration probes it.
+    """
     if config.embedder == "Masked UMAP":
-        kind = "masked_umap"
+        kind = "raw_masked"
     elif config.embedder is None or config.embedder in RAW_EMBEDDERS:
-        kind = "plain_umap"
+        kind = "raw_padded"
     else:
         kind = "latent"
-    log(f"    probes ({kind})")
-    hits, ridges = probe_space(analysis, config.umap_metric, kind, PROBE_TARGETS)
+    log(f"    probes ({kind}{', full' if full else ''})")
+    hits, ridges, profiles = probe_space(
+        analysis, config.umap_metric, kind, PROBE_TARGETS, full=full
+    )
     probe_dir = out / "rq1" / "probes"
     probe_dir.mkdir(parents=True, exist_ok=True)
     hits.to_csv(probe_dir / f"{key}_hits.csv", index=False)
     ridges.to_csv(probe_dir / f"{key}_ridge.csv", index=False)
-    if kind == "latent":
+    profiles.to_csv(probe_dir / f"{key}_profile.csv", index=False)
+    if full and kind == "latent":
         # Kept so later probes can run without rebuilding the space (row order as in
         # latent/<key>_sequences.csv when that exists).
         np.save(
@@ -605,7 +679,7 @@ def main() -> int:
     parser.add_argument(
         "--only",
         nargs="+",
-        choices=[*SELECTIONS, *VARIANTS],
+        choices=[*SELECTIONS, *SIZE_SELECTIONS, *VARIANTS],
         help="Rebuild only these spaces and keep everything else already in <run>/report/.",
     )
     parser.add_argument(
@@ -614,7 +688,7 @@ def main() -> int:
         help="Also build the report page from the result (hpc/build_report_site.py).",
     )
     args = parser.parse_args()
-    keys = args.only or [*SELECTIONS, *VARIANTS]
+    keys = args.only or [*SELECTIONS, *SIZE_SELECTIONS, *VARIANTS]
 
     # Figures are only ever saved here, so plt.show() inside the pipeline must not block.
     # Switched here rather than at import so the notebooks can import these helpers.
@@ -639,9 +713,10 @@ def main() -> int:
     log("Collecting the sweep's validation measures")
     validation_long(run_root).to_csv(out / "rq1" / "validation_long.csv", index=False)
 
-    for key, criteria in SELECTIONS.items():
+    for key, criteria in {**SELECTIONS, **SIZE_SELECTIONS}.items():
         if key not in keys:
             continue
+        probe_only = key in SIZE_SELECTIONS
         run_dir = find_run(run_root, **criteria)
         config = local_config(run_dir)
         log(f"{key}: rebuilding {run_dir.name} ({config.label()})")
@@ -663,6 +738,12 @@ def main() -> int:
         analysis.validation_measures.to_csv(
             out / "rq1" / f"rebuilt_{key}_validation.csv", index=False
         )
+        if probe_only:
+            write_probes(analysis, config, key, out)
+            entry["probe_only"] = True
+            manifest["selections"][key] = entry
+            del analysis
+            continue
         shutil.copy(
             run_dir / "latent_space_overview.png",
             out / "figures" / f"{key}_validation_grid.png",
@@ -700,16 +781,26 @@ def main() -> int:
     for key, (base_key, overrides) in VARIANTS.items():
         if key not in keys:
             continue
-        run_dir = find_run(run_root, **SELECTIONS[base_key])
+        run_dir = find_run(run_root, **{**SELECTIONS, **SIZE_SELECTIONS}[base_key])
         config = local_config(run_dir, **overrides)
         title = space_title(config)
+        # Variants of a probe-only space are probe-only too: no figures.
+        probe_only = base_key in SIZE_SELECTIONS
         log(f"{key}: rebuilding {run_dir.name} with {overrides}")
-        analysis = rebuild(config)
-        save(
-            plot_focus_panels(analysis, title),
-            out / "figures" / f"{key}_focus_behavlets.png",
-        )
-        if space_kind(config) == "baseline":
+        try:
+            analysis = rebuild(config)
+        except ValueError as error:
+            # e.g. PCA asked for more components than the flattened input has columns
+            log(f"    skipped: {error}")
+            manifest["selections"].pop(key, None)
+            continue
+        two_d = config.reducer_components == 2 and not probe_only
+        if two_d:
+            save(
+                plot_focus_panels(analysis, title),
+                out / "figures" / f"{key}_focus_behavlets.png",
+            )
+        if two_d and space_kind(config) == "baseline":
             # No sweep run to copy the full validation grid from, so draw it here.
             save(
                 analysis.plot_latent_space_overview(
@@ -726,12 +817,20 @@ def main() -> int:
         analysis.validation_measures.to_csv(
             out / "rq1" / f"rebuilt_{key}_validation.csv", index=False
         )
-        write_probes(analysis, config, key, out)
+        write_probes(
+            analysis,
+            config,
+            key,
+            out,
+            full=not set(overrides) <= REDUCTION_ONLY,
+        )
         manifest["selections"][key] = {
             "run_dir": run_dir.name,
             "label": config.label(),
+            "base": base_key,
             "overrides": overrides,
             "test_initialized_model": bool(config.test_initialized_model),
+            **({"probe_only": True} if probe_only else {}),
         }
         del analysis
         plt.close("all")
@@ -742,7 +841,7 @@ def main() -> int:
     for key, entry in manifest["selections"].items():
         path = out / "rq1" / f"rebuilt_{key}_validation.csv"
         base_key, overrides = VARIANTS.get(key, (key, {}))
-        if not path.exists() or base_key not in SELECTIONS:
+        if not path.exists() or base_key not in {**SELECTIONS, **SIZE_SELECTIONS}:
             continue
         config = local_config(
             run_root / entry["run_dir"], **overrides
@@ -752,6 +851,8 @@ def main() -> int:
                 pd.read_csv(path).assign(
                     key=key,
                     embedder=config.embedder or "UMAP-only",
+                    reducer=config.reducer or "umap",
+                    reducer_components=config.reducer_components,
                     kind=space_kind(config),
                 )
             )

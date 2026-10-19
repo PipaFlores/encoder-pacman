@@ -39,15 +39,25 @@ MODEL_ORDER = ["LSTM", "MLP", "VAE", "Transformer", "TimeVAE"]
 
 def _space_order(selections: dict):
     """Sort key: trained spaces, then untrained controls, then no-encoder baselines, each
-    in the usual model order."""
+    in the usual model order; within each, UMAP before other reducers, then by width."""
 
     def key(name: str):
         entry = selections[name]
-        embedder = entry["config"]["embedder"] or ""
+        config = entry["config"]
+        embedder = config["embedder"] or ""
         rank = (
             MODEL_ORDER.index(embedder) if embedder in MODEL_ORDER else len(MODEL_ORDER)
         )
-        return KIND_ORDER[entry["kind"]], rank, embedder, name
+        without_umap = config["reducer"] != "umap"
+        return (
+            KIND_ORDER[entry["kind"]],
+            rank,
+            config["latent_space"],
+            without_umap,
+            config["reducer_components"],
+            embedder,
+            name,
+        )
 
     return key
 
@@ -127,21 +137,29 @@ def _selections(run_root: Path, manifest: dict) -> dict:
                 "feature_set": config["feature_set"],
                 "embedder": config["embedder"],
                 "latent_space": config["latent_space"],
+                "reducer": config.get("reducer") or "umap",
+                "reducer_components": int(config.get("reducer_components") or 2),
             },
         }
     return selections
 
 
 def _local_spaces(selections: dict) -> list[dict]:
-    """Spaces with no sweep counterpart (untrained controls, Masked UMAP), in report order."""
+    """Spaces with no sweep counterpart (untrained controls, the no-encoder baselines
+    besides UMAP only, every reduction other than the sweep's UMAP to 2-D), in report order."""
+    fields = (
+        "embedder",
+        "feature_set",
+        "latent_space",
+        "reducer",
+        "reducer_components",
+    )
     return [
         {
             "key": key,
             "kind": selections[key]["kind"],
-            **{
-                k: selections[key]["config"][k]
-                for k in ("embedder", "feature_set", "latent_space")
-            },
+            "base": selections[key].get("base"),
+            **{k: selections[key]["config"][k] for k in fields},
         }
         for key in sorted(selections, key=_space_order(selections))
         if selections[key]["local"]
@@ -208,11 +226,19 @@ def _rq1(report: Path) -> dict:
     long = pd.read_csv(report / "rq1" / "validation_long.csv")
     long["set"] = long["validation_set"].str.replace("_value", "", regex=False)
     long["latent_space"] = long["latent_space"].fillna(0).astype(int)  # 0 = no encoder
+    # Collected before these columns existed: the sweeps then all ran UMAP to 2-D.
+    for column, default in (("reducer", "umap"), ("reducer_components", 2)):
+        if column not in long:
+            long[column] = default
+        long[column] = long[column].fillna(default)
+    long["reducer_components"] = long["reducer_components"].astype(int)
     columns = [
         "sequence_type",
         "feature_set",
         "embedder",
         "latent_space",
+        "reducer",
+        "reducer_components",
         "set",
         "neigh_hit_adj",
         "neigh_hit",
@@ -221,7 +247,8 @@ def _rq1(report: Path) -> dict:
     ]
 
     # Every local rebuild of an attack space. The page uses them for spaces the sweep never
-    # ran (untrained controls, Masked UMAP), beside the sweep's own numbers for the rest.
+    # ran (untrained controls, Masked UMAP, PCA, random projection), beside the sweep's own
+    # numbers for the rest.
     local_rows = []
     rebuilds_path = report / "rq1" / "attack_rebuilds.csv"
     if rebuilds_path.exists():
@@ -241,7 +268,18 @@ def _rq1(report: Path) -> dict:
         ridges.append(
             pd.read_csv(path).assign(key=path.name.removesuffix("_ridge.csv"))
         )
-    probes = {"hits": [], "ridge": []}
+    profiles = [
+        pd.read_csv(path).assign(key=path.name.removesuffix("_profile.csv"))
+        for path in sorted((report / "rq1" / "probes").glob("*_profile.csv"))
+    ]
+    probes = {"hits": [], "ridge": [], "profile": []}
+    if profiles:
+        frame = pd.concat(profiles, ignore_index=True)
+        frame["set"] = frame["validation_set"].str.replace("_value", "", regex=False)
+        probes["profile"] = _records(
+            frame,
+            ["key", "representation", "space", "metric", "set", "k", "neigh_hit_adj"],
+        )
     if hits:
         frame = pd.concat(hits, ignore_index=True)
         frame["set"] = frame["validation_set"].str.replace("_value", "", regex=False)

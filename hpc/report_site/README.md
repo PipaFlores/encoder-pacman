@@ -7,7 +7,7 @@ artifact: <https://claude.ai/artifact/63z6qJTnMA39pP9eteHmAM>.
 | File | What it is | Changes when |
 |---|---|---|
 | `hpc/build_report_data.py` | Rebuilds the chosen spaces from their sweep checkpoints (never retrains) and writes numbers and figures to `<run>/report/` | which configurations to show (`SELECTIONS`, `FOCUS_BEHAVLETS`) |
-| `hpc/report_probes.py` | Neighbourhood-hit and ridge probes on either side of UMAP: encoder latents and the raw input at full dimension, against the 2-D maps | which distances or targets to probe |
+| `hpc/report_probes.py` | Neighbourhood-hit probes, hit profiles over neighbourhood size (`PatternAnalysis.calculate_neighborhood_hit_profile`), ridge probes (`calculate_probe_measures`) and a length-only ridge reference on either side of the reduction: encoder latents and the raw input at full dimension, against the 2-D maps (UMAP, or PCA / random projection for the linear baselines) | which distances or targets to probe |
 | `hpc/build_report_site.py` | Turns `<run>/report/` into `<run>/report/site/report.html` plus `site/fig/` | rarely |
 | `template.html` | Layout and interaction. Models, latent sizes, feature sets and spaces are read from the data | the page's design or a new kind of chart |
 | `narrative.html` | The interpretation: findings, section texts, methods, caveats | **every rebuild from new results** |
@@ -38,7 +38,7 @@ Run everything from the repository root with the `pacman_encoder` environment ac
   participant explorer, provenance table), and the run id.
 - **Needs an edit:** which configurations are rebuilt (`SELECTIONS` in
   `build_report_data.py`), the spaces built only locally from them (`VARIANTS`: untrained
-  controls, Masked UMAP), the focus Behavlets (`FOCUS_BEHAVLETS`), the participant-measure
+  controls, the no-encoder baselines, other reducers and widths, and the encoders at other latent sizes in `SIZE_SELECTIONS`), the focus Behavlets (`FOCUS_BEHAVLETS`), the participant-measure
   lists in `template.html`, and every sentence in `narrative.html`.
 - **Local variants and probes have no sweep counterpart.** Their numbers come from this
   machine's rebuilds, and the page says so wherever they appear.
