@@ -285,6 +285,21 @@ def test_fit_with_pca_baseline(reader, cache_folder, tmp_path):
     assert variance[0] >= variance[1]
 
 
+def test_baseline_beyond_two_components_reduces_once(reader, cache_folder, tmp_path):
+    """Without a deep embedder the reducer embeds the raw data; with more than two
+    components its output must not be sent through the reducer a second time."""
+    pa = make_pattern_analysis(
+        reader, cache_folder, tmp_path, embedder=None, reducer=PCA(n_components=5),
+    )
+
+    pa.fit()
+
+    assert pa.embeddings.shape == (MAX_SAMPLES, 5)
+    assert pa.reduced_embeddings is pa.embeddings
+    n_timesteps, n_features = pa.processed_sequence_data.shape[1:]
+    assert pa.reducer.components_.shape == (5, n_timesteps * n_features)
+
+
 def test_pca_baseline_is_deterministic(reader, cache_folder, tmp_path):
     """Two runs of the linear baseline give the same embedding.
 

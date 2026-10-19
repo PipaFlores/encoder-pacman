@@ -584,8 +584,10 @@ class PatternAnalysis:
         # Step 2b: Generate embeddings
         self.embeddings = self.embed(self.processed_sequence_data)
 
-        # Step 2c: Reduce dimensions if embeddings are high-dimensional
-        if self.embeddings.shape[1] > 2:
+        # Step 2c: Reduce dimensions if embeddings are high-dimensional. Without an encoder
+        # the reducer already embedded the raw data in embed(), so with more than two
+        # components it must not run a second time on its own output.
+        if self.embedder is not None and self.embeddings.shape[1] > 2:
             logger.info("Reducing dimensionality...")
             self.reduced_embeddings = self.reducer.fit_transform(self.embeddings)
         else:
