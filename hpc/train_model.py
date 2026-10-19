@@ -200,7 +200,7 @@ def parse_args() -> argparse.Namespace:
         "--reducer",
         type=str,
         default="umap",
-        choices=["umap", "pca", "none"],
+        choices=["umap", "pca", "random_projection", "none"],
         help="Dimensionality reducer applied to embeddings.",
     )
     parser.add_argument(

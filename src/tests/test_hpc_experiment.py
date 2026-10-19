@@ -35,6 +35,19 @@ def test_umap_reducer_is_built_from_config():
     assert reducer.min_dist == 0.3
 
 
+def test_random_projection_reducer_is_built_from_config():
+    """`reducer: random_projection` gives a seeded Gaussian random projection."""
+    from sklearn.random_projection import GaussianRandomProjection
+
+    reducer = build_reducer(
+        RunConfig(reducer="random_projection", reducer_components=2, seed=7)
+    )
+
+    assert isinstance(reducer, GaussianRandomProjection)
+    assert reducer.n_components == 2
+    assert reducer.random_state == 7
+
+
 def test_reducer_none_skips_reduction():
     """__post_init__ turns the YAML/CLI spelling "none" into an actual None."""
     assert build_reducer(RunConfig(reducer="none")) is None
@@ -133,6 +146,20 @@ def test_resample_stride_distinguishes_labels_and_leaves_default_ones_alone():
 
     assert "stride" not in plain.label()
     assert RunConfig(embedder="MLP", latent_space=128, resample_stride=4).label() == plain.label() + "_stride4"
+
+
+def test_reducer_distinguishes_labels_and_leaves_umap_ones_alone():
+    """A reducer sweep must not label all of its points identically; UMAP (the default) and
+    no reducer keep the old label."""
+    plain = RunConfig(embedder="MLP", latent_space=128)
+
+    assert RunConfig(embedder="MLP", latent_space=128, reducer="UMAP").label() == plain.label()
+    assert RunConfig(embedder="MLP", latent_space=128, reducer="none").label() == plain.label()
+    assert RunConfig(embedder="MLP", latent_space=128, reducer="pca").label() == plain.label() + "_pca"
+    assert (
+        RunConfig(embedder=None, reducer="random_projection").label()
+        == RunConfig(embedder=None).label() + "_random_projection"
+    )
 
 
 def test_default_resample_stride_leaves_the_config_hash_unchanged():

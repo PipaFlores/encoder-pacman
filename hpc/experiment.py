@@ -224,6 +224,9 @@ class RunConfig:
         if self.test_initialized_model:
             label += "_init"
 
+        if self.reducer is not None and self.reducer.lower() != "umap":
+            label += f"_{self.reducer.lower()}"
+
         return label
 
 
@@ -402,6 +405,14 @@ def build_reducer(config: RunConfig):
         from sklearn.decomposition import PCA
 
         return PCA(n_components=config.reducer_components, random_state=config.seed)
+    if name == "random_projection":
+        # A seeded Gaussian random projection: linear and data-independent, the floor any
+        # learned or neighbourhood-based reduction should beat.
+        from sklearn.random_projection import GaussianRandomProjection
+
+        return GaussianRandomProjection(
+            n_components=config.reducer_components, random_state=config.seed
+        )
     raise ValueError(f"Reducer {config.reducer} is not supported.")
 
 
