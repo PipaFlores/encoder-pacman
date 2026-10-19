@@ -109,6 +109,7 @@ figcaption { font-size: var(--step--1); color: var(--ink-muted); max-width: var(
 .plate img { display: block; width: 100%; height: auto; }
 .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
 .chart text { fill: var(--ink-muted); font-family: var(--font-ui); font-size: 12px; }
+.chart .legend svg { display: inline-block; width: 30px; height: 10px; vertical-align: middle; overflow: visible; }
 .lines { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; max-width: 760px; }
 @media (min-width: 1180px) { .lines { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: none; } }
 .two-col { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
@@ -162,6 +163,9 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
     <a href="#rq1-compare">Attack sequences vs Behavlets</a>
     <a href="#rq1-views">Attack latent spaces</a>
     <a href="#rq1-probes">Where the structure comes from</a>
+    <a href="#rq1-matched">Unreduced, at matched width</a>
+    <a href="#rq1-profile">How far the structure reaches</a>
+    <a href="#rq1-ridge">Is the information there at all?</a>
     <a href="#rq1-clusters">Spatial clusters</a>
     <a class="toc-rq" href="#rq2">RQ2 Participant dynamics</a>
     <a href="#rq2-explorer">Participant explorer</a>
@@ -185,6 +189,7 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
         <span class="eyebrow">Research question 1</span>
         <h2 id="rq1-title">Do unsupervised latent spaces capture behavioural constructs?</h2>
         <p>Every model below was trained without labels, reduced to two dimensions with UMAP, and only then compared with Behavlets: hand-coded measures of what the player did in each sequence. The comparison metric is the chance-adjusted neighbourhood hit, the share of a sequence's five nearest latent neighbours that carry the same Behavlet level, with 0 meaning chance. It reads the continuous layout directly and does not depend on HDBSCAN finding discrete clusters, which these spaces mostly do not form.</p>
+        <p>Three questions, three measures. <strong>Local structure:</strong> are a sequence's nearest neighbours alike? The neighbourhood hit at five neighbours, in every section up to the profile. <strong>Global structure:</strong> does that extend to large groups? The same hit as the neighbourhood grows to a thousand sequences, and NMI against HDBSCAN's clusters. Neither sees a label, so together they test whether an unsupervised space makes the constructs salient. <strong>Is the information there at all?</strong> A ridge regression from the space to each Behavlet's value. It is fitted on the labels, so it says what any representation retains, not what it discovered, and it is kept apart in the last section.</p>
       </div>
 
       <div class="block" id="rq1-compare">
@@ -193,6 +198,7 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
         <div class="controls">
           <label class="ctl">Feature set <span class="seg" id="ctl-fs"></span></label>
           <label class="ctl" for="ctl-h">Latent size <select id="ctl-h"></select></label>
+          <label class="ctl">Reduced to <span class="seg" id="ctl-dims"></span></label>
           <label class="ctl">Metric
             <span class="seg" id="ctl-metric">
               <button type="button" data-v="neigh_hit_adj" aria-pressed="true">Neighbourhood hit (adj.)</button>
@@ -225,6 +231,7 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
         <div class="controls">
           <label class="ctl" for="ctl-probe-set">Validation set <select id="ctl-probe-set"></select></label>
           <label class="ctl">Full-dimension distance <span class="seg" id="ctl-probe-metric"></span></label>
+          <label class="ctl">Reduced to <span class="seg" id="ctl-probe-dims"></span></label>
         </div>
         <figure class="chart">
           <div id="probe-chart"></div>
@@ -232,6 +239,51 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
         </figure>
         <div class="table-wrap"><table id="probe-table"></table></div>
         <p class="small muted" id="probe-note"></p>
+      </div>
+
+      <div class="block" id="rq1-matched">
+        <h3>Unreduced latents against the raw input at the same width</h3>
+        <div class="prose"><!-- slot:rq1-matched --></div>
+        <div class="controls">
+          <label class="ctl" for="ctl-matched-set">Validation set <select id="ctl-matched-set"></select></label>
+          <label class="ctl"><input type="checkbox" id="matched-untrained"> Untrained controls</label>
+        </div>
+        <figure class="chart">
+          <div id="matched-chart"></div>
+          <figcaption id="matched-cap"></figcaption>
+        </figure>
+      </div>
+
+      <div class="block" id="rq1-profile">
+        <h3>How far the structure reaches</h3>
+        <div class="prose"><!-- slot:rq1-profile --></div>
+        <div class="controls">
+          <label class="ctl" for="ctl-profile-set">Validation set <select id="ctl-profile-set"></select></label>
+          <label class="ctl">Space <span class="seg" id="ctl-profile-view"></span></label>
+          <label class="ctl"><input type="checkbox" id="pf-untrained"> Untrained controls</label>
+          <label class="ctl"><input type="checkbox" id="pf-pca"> Encoders with PCA</label>
+          <label class="ctl"><input type="checkbox" id="pf-raw" checked> Raw input</label>
+        </div>
+        <figure class="chart">
+          <div id="profile-chart"></div>
+          <div class="legend" id="profile-legend"></div>
+          <figcaption id="profile-cap"></figcaption>
+        </figure>
+      </div>
+
+      <div class="block" id="rq1-ridge">
+        <h3>Is the information there at all?</h3>
+        <div class="prose"><!-- slot:rq1-ridge --></div>
+        <div class="controls">
+          <label class="ctl" for="ctl-ridge-set">Validation set <select id="ctl-ridge-set"></select></label>
+          <label class="ctl"><input type="checkbox" id="ridge-untrained" checked> Untrained controls</label>
+        </div>
+        <figure class="chart">
+          <div id="ridge-chart"></div>
+          <figcaption id="ridge-cap"></figcaption>
+        </figure>
+        <div class="table-wrap"><table id="ridge-table"></table></div>
+        <p class="small muted" id="ridge-note"></p>
       </div>
 
       <div class="block" id="rq1-clusters">
@@ -414,21 +466,40 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
 
   // ------------------------------------------------------------------ selections
   const S = D.selections;
+  const ATTACK = "pacman_attack";
+  const REDUCER = { umap: "UMAP", pca: "PCA", random_projection: "Random projection" };
+  const reducerName = (r) => REDUCER[r || "umap"] || r;
+  // What reduces a space: Masked UMAP is UMAP with the padding-aware metric.
+  const mapperOf = (c) => (c.embedder === "Masked UMAP" ? "Masked UMAP" : reducerName(c.reducer));
+  const usesUmap = (c) => (c.reducer || "umap") === "umap";
+  const dimsOf = (c) => c.reducer_components || 2;
+  const isAttack = (k) => S[k].config.sequence_type === ATTACK;
+  // A variant that changes only the reduction shares its base space's full latent.
+  const reductionOnly = (k) => !!S[k].overrides && Object.keys(S[k].overrides).every((o) => o === "reducer" || o === "reducer_components");
   const shortName = (k) => {
     const s = S[k]; if (!s) return k; const c = s.config;
-    if (s.kind === "baseline") return c.embedder === "Masked UMAP" ? "Masked UMAP" : "UMAP only";
+    if (s.kind === "baseline") return c.embedder === "Masked UMAP" ? "Masked UMAP" : usesUmap(c) ? "UMAP only" : `${reducerName(c.reducer)} only`;
     return `${c.embedder} h${c.latent_space}${s.kind === "untrained" ? " (untrained)" : ""}`;
+  };
+  // Configuration: what embeds the sequences, then what reduces them and to how many
+  // dimensions, e.g. "LSTM h512 – UMAP (2-D)", "Raw input – PCA (5-D, no UMAP)".
+  const configLabel = (source, mapper, umap, dims) => `${source} – ${mapper} (${dims}-D${umap ? "" : ", no UMAP"})`;
+  const unreducedLabel = (source, dims) => `${source} – no reduction${dims ? ` (${dims}-D)` : ""}`;
+  const configName = (k) => {
+    const s = S[k]; if (!s) return k; const c = s.config;
+    return configLabel(s.kind === "baseline" ? "Raw input" : shortName(k), mapperOf(c), usesUmap(c), dimsOf(c));
   };
   const nOf = (k) => (S[k] && S[k].reproduction ? S[k].reproduction.n_samples : null);
 
   // ------------------------------------------------------------------ RQ1 data
-  const ATTACK = "pacman_attack";
   const cols = D.rq1.columns;
   const R1 = new Map();
   const attackRows = [];
   for (const row of D.rq1.rows) {
     const r = Object.fromEntries(cols.map((c, i) => [c, row[i]]));
-    R1.set(`${r.sequence_type}|${r.feature_set}|${r.embedder}|${r.latent_space}|${r.set}`, r);
+    r.reducer = r.reducer || "umap";
+    r.reducer_components = r.reducer_components || 2;
+    R1.set(`${r.sequence_type}|${r.feature_set}|${r.embedder}|${r.latent_space}|${r.reducer}|${r.reducer_components}|${r.set}`, r);
     if (r.sequence_type === ATTACK) attackRows.push(r);
   }
   const PREFERRED = ["LSTM", "MLP", "VAE", "Transformer", "TimeVAE"];
@@ -436,22 +507,50 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
     .sort((a, b) => ((PREFERRED.indexOf(a) + 1 || 99) - (PREFERRED.indexOf(b) + 1 || 99)) || a.localeCompare(b));
   const SIZES = [...new Set(attackRows.map((r) => r.latent_space).filter((h) => h > 0))].sort((a, b) => a - b);
   const FEATURE_SETS = Object.keys(D.feature_sets);
-  // Untrained controls: {key, embedder, feature_set, latent_space} each, rebuilt locally.
-  // Spaces only this machine built: {key, kind, embedder, feature_set, latent_space} each.
+  // Spaces only this machine built, in report order:
+  // {key, kind, base, embedder, feature_set, latent_space, reducer, reducer_components} each.
   const LOCAL = D.local_spaces || [];
   const CONTROLS = LOCAL.filter((c) => c.kind === "untrained");
+  // Trained encoders under another reduction than the sweep's UMAP to 2-D.
+  const LOCAL_TRAINED = LOCAL.filter((c) => c.kind === "trained");
+  // No-encoder baselines, UMAP-based first, then by width.
   const LOCAL_BASELINES = LOCAL.filter((c) => c.kind === "baseline");
-  const controlFor = (emb) => CONTROLS.find((c) => c.embedder === emb) || null;
+  const BASELINES_2D = LOCAL_BASELINES.filter((b) => b.reducer_components === 2);
+  // An encoder's untrained control at one latent size (reduced as the sweep reduced it).
+  const controlFor = (emb, h) => CONTROLS.find((c) => c.embedder === emb && c.latent_space === h && c.reducer_components === 2) || null;
   const KEY_MODEL = MODELS.includes("LSTM") ? "LSTM" : MODELS[0];
-  const DEFAULT_CTRL = controlFor(KEY_MODEL) || CONTROLS[0] || null;
+  const DEFAULT_CTRL = CONTROLS.filter((c) => c.embedder === KEY_MODEL).sort((a, b) => b.latent_space - a.latent_space)[0] || CONTROLS[0] || null;
   const ctrl = new Map(D.rq1.local.map((r) => [`${r[0]}|${r[1]}`, { neigh_hit_adj: r[2], neigh_hit: r[3], NMI: r[4], ARI: r[5] }]));
   const getLocal = (key, set, metric) => (ctrl.get(`${key}|${set}`) || {})[metric] ?? null;
-  const get1 = (fs, emb, h, set, metric) => {
-    const r = R1.get(`${ATTACK}|${fs}|${emb}|${emb === "UMAP-only" ? 0 : h}|${set}`);
+  const get1 = (fs, emb, h, set, metric, reducer = "umap", dims = 2) => {
+    const r = R1.get(`${ATTACK}|${fs}|${emb}|${emb === "UMAP-only" ? 0 : h}|${reducer}|${dims}|${set}`);
     return r ? r[metric] : null;
+  };
+  // Reductions the sweep itself ran per (feature set, embedder, size), UMAP first.
+  const sweepReductions = (fs, emb, h) => {
+    const seen = new Map();
+    for (const r of attackRows) {
+      if (r.feature_set === fs && r.embedder === emb && r.latent_space === (emb === "UMAP-only" ? 0 : h)) seen.set(`${r.reducer}|${r.reducer_components}`, { reducer: r.reducer, dims: r.reducer_components });
+    }
+    return [...seen.values()].sort((a, b) => (a.reducer !== "umap") - (b.reducer !== "umap") || a.reducer.localeCompare(b.reducer) || a.dims - b.dims);
   };
   const focusMean = (fs, emb, h, metric = "neigh_hit_adj") => mean(D.focus.map((s) => get1(fs, emb, h, s, metric)));
   const nFocus = D.focus.length;
+  const setName = (sel) => (sel === "focus" ? `the mean of the ${nFocus} focus Behavlets` : sel === "sequence_length" ? "sequence length" : behName(sel));
+
+  // Probes on either side of the reduction (report_probes.py): neighbourhood hit and ridge R²
+  // in the full representation a space was reduced from, and in the reduced space itself.
+  const PROBES = D.rq1.probes || { hits: [], ridge: [] };
+  const PH = new Map(), PR = new Map();
+  for (const [key, rep, space, metric, set, adj] of PROBES.hits) PH.set(`${key}|${rep}|${space}|${metric}|${set}`, adj);
+  for (const [key, rep, space, set, r2] of PROBES.ridge) PR.set(`${key}|${rep}|${space}|${set}`, r2);
+  const probeSets = (sel) => (sel === "focus" ? D.focus : [sel]);
+  const hitOf = (cell, space, metric, sel) => (cell ? mean(probeSets(sel).map((s) => PH.get(`${cell[0]}|${cell[1]}|${space}|${metric}|${s}`) ?? null)) : null);
+  const r2Of = (cell, space, sel) => (cell ? mean(probeSets(sel).map((s) => PR.get(`${cell[0]}|${cell[1]}|${space}|${s}`) ?? null)) : null);
+  // The sweep's own UMAP-only space carries the raw input's full-dimension probes.
+  const plainKey = Object.keys(S).find((k) => isAttack(k) && S[k].kind === "baseline" && !S[k].overrides) || null;
+  // An encoder's sweep configuration, whose probes hold its full latent.
+  const latentKey = (fs, emb, h) => Object.keys(S).find((k) => isAttack(k) && S[k].kind === "trained" && !S[k].overrides && S[k].config.feature_set === fs && S[k].config.embedder === emb && S[k].config.latent_space === h) || null;
 
   const fsLabel = (fs) => `${fs}${D.feature_sets[fs] ? ` (${D.feature_sets[fs]})` : ""}`;
   const getFs = segmented("#ctl-fs", FEATURE_SETS.map((fs) => [fs, fsLabel(fs)]), DEFAULT_CTRL ? DEFAULT_CTRL.feature_set : FEATURE_SETS[0], () => drawRq1Table());
@@ -459,38 +558,84 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
   const defaultH = DEFAULT_CTRL && SIZES.includes(DEFAULT_CTRL.latent_space) ? DEFAULT_CTRL.latent_space : SIZES[SIZES.length - 1];
   $("#ctl-h").innerHTML = SIZES.map((h) => `<option ${h === defaultH ? "selected" : ""}>${h}</option>`).join("");
   $("#ctl-h").addEventListener("change", () => drawRq1Table());
+  // Reduced widths the encoders were scored at, plus no reduction at all where probes exist.
+  const TABLE_DIMS = [...new Set([2, ...LOCAL.filter((c) => c.kind !== "baseline").map((c) => c.reducer_components)])].sort((a, b) => a - b);
+  let tableDims = "2";
+  segmented("#ctl-dims", [...TABLE_DIMS.map((d) => [String(d), `${d}-D`]), ...(PROBES.hits.length ? [["none", "No reduction"]] : [])], tableDims, (v) => { tableDims = v; drawRq1Table(); });
 
   function drawRq1Table() {
     const fs = getFs(), metric = getMetric(), h = Number($("#ctl-h").value);
-    const rows = MODELS.map((m) => ({ name: `${m} h${h}`, key: m === KEY_MODEL, vals: D.focus.map((s) => get1(fs, m, h, s, metric)), all: mean(ALL_BEH.map((s) => get1(fs, m, h, s, metric))) }));
-    let controlsShown = 0;
-    for (const m of MODELS) {
-      const c = controlFor(m);
-      if (!c || c.feature_set !== fs || c.latent_space !== h) continue;
-      const val = (s) => (ctrl.get(`${c.key}|${s}`) || {})[metric] ?? null;
-      rows.push({ name: `${m} h${h}, untrained`, base: true, vals: D.focus.map(val), all: mean(ALL_BEH.map(val)) });
-      controlsShown++;
-    }
-    rows.push({ name: "UMAP only (no encoder)", base: true, vals: D.focus.map((s) => get1(fs, "UMAP-only", 0, s, metric)), all: mean(ALL_BEH.map((s) => get1(fs, "UMAP-only", 0, s, metric))) });
-    for (const b of LOCAL_BASELINES) {
-      if (b.feature_set !== fs) continue;
-      rows.push({ name: `${shortName(b.key)} (no encoder)`, base: true, vals: D.focus.map((s) => getLocal(b.key, s, metric)), all: mean(ALL_BEH.map((s) => getLocal(b.key, s, metric))) });
-      controlsShown++;
+    const row = (name, val, extra = {}) => ({ name, vals: D.focus.map(val), all: mean(ALL_BEH.map(val)), ...extra });
+    const localVal = (k) => (s) => getLocal(k, s, metric);
+    // Full-width probes have neighbourhood hit only (no clusters there), with Euclidean
+    // neighbours as in the reduced spaces.
+    const fullVal = (k, rep) => (s) => (metric === "neigh_hit_adj" ? PH.get(`${k}|${rep}|full|euclidean|${s}`) ?? null : null);
+    const rows = [];
+    let localShown = false;
+    if (tableDims === "none") {
+      for (const m of MODELS) {
+        const k = latentKey(fs, m, h);
+        if (k) rows.push(row(unreducedLabel(`${m} h${h}`, h), fullVal(k, "latent"), { key: m === KEY_MODEL }));
+      }
+      for (const m of MODELS) {
+        const c = controlFor(m, h);
+        if (c && c.feature_set === fs && c.latent_space === h) rows.push(row(unreducedLabel(`${m} h${h} (untrained)`, h), fullVal(c.key, "latent"), { base: true }));
+      }
+      if (plainKey && S[plainKey].config.feature_set === fs) {
+        rows.push(row(unreducedLabel("Raw input (padding-aware)"), fullVal(plainKey, "raw"), { base: true }));
+        rows.push(row(unreducedLabel("Raw input (padded)"), fullVal(plainKey, "raw_padded"), { base: true }));
+      }
+      for (const b of LOCAL_BASELINES) if (b.feature_set === fs && b.reducer_components === h) rows.push(row(configName(b.key), localVal(b.key), { base: true }));
+      localShown = rows.length > 0;
+    } else {
+      const d = Number(tableDims);
+      const trained = [];
+      for (const m of MODELS) {
+        for (const r of sweepReductions(fs, m, h)) {
+          if (r.dims === d) trained.push({ m, reducer: r.reducer, ...row(configLabel(`${m} h${h}`, reducerName(r.reducer), r.reducer === "umap", d), (s) => get1(fs, m, h, s, metric, r.reducer, d), { key: m === KEY_MODEL && r.reducer === "umap" }) });
+        }
+      }
+      for (const t of LOCAL_TRAINED) {
+        if (t.feature_set !== fs || t.latent_space !== h || t.reducer_components !== d) continue;
+        trained.push({ m: t.embedder, reducer: t.reducer, ...row(configName(t.key), localVal(t.key)) });
+        localShown = true;
+      }
+      // Grouped by reducer, so every UMAP row sits together and every row without it too.
+      trained.sort((a, b) => (a.reducer !== "umap") - (b.reducer !== "umap") || a.reducer.localeCompare(b.reducer) || MODELS.indexOf(a.m) - MODELS.indexOf(b.m));
+      rows.push(...trained);
+      for (const m of MODELS) {
+        const c = controlFor(m, h);
+        if (!c || c.feature_set !== fs || c.latent_space !== h || c.reducer_components !== d) continue;
+        rows.push(row(configName(c.key), localVal(c.key), { base: true }));
+        localShown = true;
+      }
+      for (const r of sweepReductions(fs, "UMAP-only", 0)) {
+        if (r.dims === d) rows.push(row(configLabel("Raw input", reducerName(r.reducer), r.reducer === "umap", d), (s) => get1(fs, "UMAP-only", 0, s, metric, r.reducer, d), { base: true }));
+      }
+      for (const b of LOCAL_BASELINES) {
+        if (b.feature_set !== fs || b.reducer_components !== d) continue;
+        rows.push(row(configName(b.key), localVal(b.key), { base: true }));
+        localShown = true;
+      }
     }
     rows.forEach((r) => (r.mean = mean(r.vals)));
     const colMax = D.focus.map((_, i) => Math.max(...rows.map((r) => r.vals[i] ?? 0), 0.001));
     const meanMax = Math.max(...rows.map((r) => r.mean ?? 0), 0.001);
     const allMax = Math.max(...rows.map((r) => r.all ?? 0), 0.001);
     const bar = (v, max) => `<div class="cell-bar"><div class="track"><div class="fill" style="width:${Math.max(0, (v ?? 0) / max) * 100}%"></div></div><span>${fmt(v, 3)}</span></div>`;
-    $("#rq1-table").innerHTML = `<thead><tr><th>Model</th>${D.focus.map((s) => `<th>${esc(behName(s))}<div class="muted small mono">${esc(s)}</div></th>`).join("")}<th>Mean of ${nFocus}</th><th>All ${ALL_BEH.length} Behavlets</th></tr></thead><tbody>${rows
-      .map((r) => `<tr class="${r.key ? "is-key" : ""} ${r.base ? "is-base" : ""}"><td>${esc(r.name)}</td>${r.vals.map((v, i) => `<td>${bar(v, colMax[i])}</td>`).join("")}<td>${bar(r.mean, meanMax)}</td><td>${bar(r.all, allMax)}</td></tr>`)
-      .join("")}</tbody>`;
+    const body = rows.length
+      ? rows.map((r) => `<tr class="${r.key ? "is-key" : ""} ${r.base ? "is-base" : ""}"><td>${esc(r.name)}</td>${r.vals.map((v, i) => `<td>${bar(v, colMax[i])}</td>`).join("")}<td>${bar(r.mean, meanMax)}</td><td>${bar(r.all, allMax)}</td></tr>`).join("")
+      : `<tr><td colspan="${nFocus + 3}" class="muted">No configuration was run at this combination.</td></tr>`;
+    $("#rq1-table").innerHTML = `<thead><tr><th>Configuration</th>${D.focus.map((s) => `<th>${esc(behName(s))}<div class="muted small mono">${esc(s)}</div></th>`).join("")}<th>Mean of ${nFocus}</th><th>All ${ALL_BEH.length} Behavlets</th></tr></thead><tbody>${body}</tbody>`;
     let note = metric === "NMI"
       ? "NMI compares HDBSCAN clusters with Behavlet levels, so it drops whenever HDBSCAN finds only a handful of clusters. Treat it as secondary."
       : "Adjusted neighbourhood hit: 0 is chance, 1 is a perfectly separated Behavlet. Bars are scaled within each column.";
-    const controlSizes = [...new Set(CONTROLS.filter((c) => c.feature_set === fs).map((c) => c.latent_space))];
-    if (controlsShown) note += " Untrained rows and baselines the sweep did not run come from local rebuilds (see Methods); every other row is the sweep's own result.";
-    else if (controlSizes.length) note += ` Untrained controls were run at ${controlSizes.map((x) => "h" + x).join(", ")} only.`;
+    note += tableDims === "none"
+      ? ` No reduction: each encoder's ${h}-dimensional latent and the raw input are scored as they are, with Euclidean neighbours; the raw input reduced to ${h} dimensions is the width-matched baseline.${metric === "NMI" ? " There are no clusters at full width, so only the reduced rows have NMI." : ""}`
+      : " Each configuration names what embeds the sequences (an encoder, or the raw input with no encoder), then what reduces them and to how many dimensions; the reduced space is what is scored.";
+    if (localShown) note += " Rows the sweep did not run come from local rebuilds (see Methods); the rest are the sweep's own results.";
+    const localSizes = [...new Set(LOCAL.filter((c) => c.kind !== "baseline").map((c) => c.latent_space))];
+    if (!rows.some((r) => !r.base) || (!localShown && tableDims === "2" && localSizes.length && !localSizes.includes(h))) note += ` Untrained controls and the encoders' other reductions were run at ${localSizes.map((x) => "h" + x).join(", ")} only.`;
     $("#rq1-table-note").textContent = note;
   }
 
@@ -500,7 +645,7 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
     const others = [{ c: ink, dash: "" }, { c: mark, dash: "" }, { c: muted, dash: "4 3" }, { c: ink, dash: "4 3" }, { c: mark, dash: "2 2" }];
     const styles = {}; let o = 0;
     for (const m of MODELS) styles[m] = m === KEY_MODEL ? { c: accent, w: 2.5, dash: "" } : { ...others[o++ % others.length], w: 1.5 };
-    const all = FEATURE_SETS.flatMap((fs) => [...MODELS.flatMap((m) => SIZES.map((h) => focusMean(fs, m, h))), focusMean(fs, "UMAP-only", 0)]).filter((v) => v != null);
+    const all = FEATURE_SETS.flatMap((fs) => [...MODELS.flatMap((m) => SIZES.map((h) => focusMean(fs, m, h))), focusMean(fs, "UMAP-only", 0), ...BASELINES_2D.filter((b) => b.feature_set === fs).map((b) => mean(D.focus.map((s) => getLocal(b.key, s, "neigh_hit_adj"))))]).filter((v) => v != null);
     const yMax = Math.ceil(Math.max(...all, 0.1) * 10) / 10 + 0.02;
     const l0 = Math.log2(SIZES[0]), l1 = Math.log2(SIZES[SIZES.length - 1]);
     for (const fs of FEATURE_SETS) {
@@ -522,7 +667,7 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
         svgEl("line", { x1: m.l, x2: W - m.r, y1: y(base), y2: y(base), stroke: ink, "stroke-dasharray": "2 3", "stroke-width": 1 }, svg);
         labels.push({ t: "UMAP only", y: y(base), c: ink });
       }
-      for (const b of LOCAL_BASELINES) {
+      for (const b of BASELINES_2D) {
         if (b.feature_set !== fs) continue;
         const v = mean(D.focus.map((s) => getLocal(b.key, s, "neigh_hit_adj")));
         if (v == null) continue;
@@ -541,7 +686,7 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
       labels.forEach((l) => svgEl("text", { x: W - m.r + 8, y: l.y + 4, style: `fill:${l.c};font-weight:${l.t === KEY_MODEL ? 700 : 400}` }, svg).textContent = l.t);
       const fig = document.createElement("div"); fig.appendChild(svg); host.appendChild(fig);
     }
-    $("#rq1-lines-cap").textContent = `Mean adjusted neighbourhood hit over the ${nFocus} focus Behavlets, by latent size. Dashed lines are the no-encoder baselines: UMAP on the padded sequences${LOCAL_BASELINES.length ? `, and ${LOCAL_BASELINES.map((b) => shortName(b.key)).join(", ")} (local rebuild)` : ""}. Each point is one training run.`;
+    $("#rq1-lines-cap").textContent = `Mean adjusted neighbourhood hit over the ${nFocus} focus Behavlets, by latent size. Every model line is the encoder followed by UMAP to 2-D. Dashed lines are the no-encoder baselines: UMAP on the padded sequences${BASELINES_2D.length ? `, and ${BASELINES_2D.map((b) => configName(b.key)).join(", ")} (local rebuilds)` : ""}. Each point is one training run.`;
   }
 
   // ------------------------------------------------------------------ RQ1 views (images)
@@ -550,25 +695,28 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
     const s = S[k], c = s.config, n = nOf(k);
     const where = `${c.sequence_type}, ${c.feature_set} features${n ? `, n = ${n.toLocaleString("en")}` : ""}`;
     if (s.kind === "untrained") return `${shortName(k)} (${where}): the same architecture with its initial random weights, same data, UMAP and seed, no training. Whatever the trained panel adds over this is what training bought.`;
+    if (s.kind === "trained" && !usesUmap(c)) return `${shortName(k)} with ${reducerName(c.reducer)} in place of UMAP (${where}): the same trained latent, projected linearly onto two dimensions.`;
     if (s.kind === "baseline" && c.embedder === "Masked UMAP") return `UMAP on the flattened sequences with the padding-aware distance, no encoder (${where}): two sequences are compared only over the steps both have, so their lengths no longer decide the layout.`;
+    if (s.kind === "baseline" && !usesUmap(c)) return `${reducerName(c.reducer)} straight from the flattened sequences to two dimensions, with no encoder and no UMAP (${where}). Its input keeps the padding, so the layout mainly follows sequence length.`;
     if (s.kind === "baseline") return `UMAP straight on the flattened sequences, with no encoder (${where}). Its input keeps the padding, so the layout mainly follows sequence length.`;
     return `${shortName(k)} (${where}). Grey points carry no instance of a count Behavlet.`;
   };
-  // One button per model; each shows the trained space with its untrained control below it.
+  const viewTag = (k) => {
+    const c = S[k].config, how = `${mapperOf(c)}${usesUmap(c) ? "" : " (no UMAP)"}`;
+    return { trained: `Trained – ${how}`, untrained: `Untrained (initial weights) – ${how}`, baseline: `No encoder – ${how}` }[S[k].kind];
+  };
+  // One button per model; each shows the trained space under every reducer, then its
+  // untrained control.
   const VIEW_GROUPS = [];
   for (const k of VIEWS) {
     const s = S[k], label = s.kind === "baseline" ? shortName(k) : `${s.config.embedder} h${s.config.latent_space}`;
     let group = VIEW_GROUPS.find((g) => g.label === label);
-    if (!group) VIEW_GROUPS.push((group = { label }));
-    group[s.kind] = k;
+    if (!group) VIEW_GROUPS.push((group = { label, keys: [] }));
+    group.keys.push(k);
   }
-  const KIND_LABEL = { trained: "Trained", untrained: "Untrained (initial weights)", baseline: "No encoder" };
   function showViewGroup(label) {
     const group = VIEW_GROUPS.find((g) => g.label === label);
-    $("#view-figs").innerHTML = ["trained", "untrained", "baseline"].filter((kind) => group[kind]).map((kind) => {
-      const k = group[kind];
-      return `<figure><span class="kind">${KIND_LABEL[kind]}</span><div class="plate"><img src="fig/${k}_focus_behavlets.jpg" alt="${esc(shortName(k))}: latent space coloured by the focus Behavlets"></div><figcaption>${esc(viewCaption(k))}</figcaption></figure>`;
-    }).join("");
+    $("#view-figs").innerHTML = group.keys.map((k) => `<figure><span class="kind">${esc(viewTag(k))}</span><div class="plate"><img src="fig/${k}_focus_behavlets.jpg" alt="${esc(configName(k))}, coloured by the focus Behavlets"></div><figcaption>${esc(viewCaption(k))}</figcaption></figure>`).join("");
   }
   if (VIEW_GROUPS.length) {
     segmented("#ctl-view", VIEW_GROUPS.map((g) => [g.label, g.label]), VIEW_GROUPS[0].label, showViewGroup);
@@ -586,77 +734,348 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
   }
 
   // ------------------------------------------------------------------ RQ1 probes
-  // Neighbourhood hit (and ridge R²) on either side of UMAP: does the structure exist before
-  // the 2-D reduction, in the encoder's latent space or in the raw input?
-  const PROBES = D.rq1.probes || { hits: [], ridge: [] };
-  const PH = new Map(), PR = new Map();
-  for (const [key, rep, space, metric, set, adj] of PROBES.hits) PH.set(`${key}|${rep}|${space}|${metric}|${set}`, adj);
-  for (const [key, rep, space, set, r2] of PROBES.ridge) PR.set(`${key}|${rep}|${space}|${set}`, r2);
-  const probeSets = (sel) => (sel === "focus" ? D.focus : [sel]);
-  const hitOf = (cell, space, metric, sel) => (cell ? mean(probeSets(sel).map((s) => PH.get(`${cell[0]}|${cell[1]}|${space}|${metric}|${s}`) ?? null)) : null);
-  const r2Of = (cell, space, sel) => (cell ? mean(probeSets(sel).map((s) => PR.get(`${cell[0]}|${cell[1]}|${space}|${s}`) ?? null)) : null);
-
-  const attackKey = (pred) => Object.keys(S).find((k) => S[k].config.sequence_type === ATTACK && pred(S[k]));
-  const plainKey = attackKey((s) => s.kind === "baseline" && s.config.embedder !== "Masked UMAP");
-  const maskedKey = attackKey((s) => s.config.embedder === "Masked UMAP");
-  const PROBE_ROWS = [];
-  if (plainKey) {
-    PROBE_ROWS.push({ label: "Raw input, padding-aware", raw: true, full: [plainKey, "raw"], map: maskedKey ? [maskedKey, "raw"] : null, mapName: "Masked UMAP" });
-    PROBE_ROWS.push({ label: "Raw input, padded", raw: true, full: [plainKey, "raw_padded"], map: [plainKey, "raw_padded"], noRidgeFull: true, mapName: "UMAP only" });
-  }
-  Object.keys(S)
-    .filter((k) => S[k].config.sequence_type === ATTACK && S[k].kind !== "baseline")
-    .sort((a, b) => (S[a].kind === "untrained") - (S[b].kind === "untrained") || MODELS.indexOf(S[a].config.embedder) - MODELS.indexOf(S[b].config.embedder))
-    .forEach((k) => PROBE_ROWS.push({ label: shortName(k), untrained: S[k].kind === "untrained", full: [k, "latent"], map: [k, "latent"] }));
+  // Neighbourhood hit on either side of the reduction: does the structure
+  // exist before it, in the encoder's latent space or in the raw input?
+  const PROBE_DIMS = [...new Set(Object.keys(S).filter((k) => isAttack(k) && S[k].kind !== "baseline" && !S[k].probe_only).map((k) => dimsOf(S[k].config)))].sort((a, b) => a - b);
   const PROBE_METRICS = [...new Set(PROBES.hits.filter((r) => r[2] === "full").map((r) => r[3]))].sort((a, b) => (a === "euclidean") - (b === "euclidean"));
+  const PROBE_SET_OPTIONS = [["focus", `Mean of the ${nFocus} focus Behavlets`], ...D.focus.map((s) => [s, behName(s)]), ["sequence_length", "Sequence length (leak check)"]];
+  const setOptionsHtml = PROBE_SET_OPTIONS.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
 
-  let probeSel = "focus", probeMetric = PROBE_METRICS[0];
+  function probeRows(d) {
+    const rows = [];
+    if (!plainKey) return rows;
+    const fs = S[plainKey].config.feature_set;
+    const keys = Object.keys(S).filter((k) => isAttack(k) && !S[k].probe_only && S[k].config.feature_set === fs && dimsOf(S[k].config) === d);
+    const masked = (k) => S[k].config.embedder === "Masked UMAP";
+    // The raw rows share their full-dimension point; each reducer then moves away from it.
+    keys.filter((k) => S[k].kind === "baseline")
+      .sort((a, b) => masked(b) - masked(a) || !usesUmap(S[a].config) - !usesUmap(S[b].config) || S[a].config.reducer.localeCompare(S[b].config.reducer))
+      .forEach((k) => {
+        const rep = masked(k) ? "raw" : "raw_padded";
+        rows.push({ label: configLabel(`Raw input (${rep === "raw" ? "padding-aware" : "padded"})`, mapperOf(S[k].config), usesUmap(S[k].config), d), raw: true, full: [plainKey, rep], map: [k, rep] });
+      });
+    keys.filter((k) => S[k].kind !== "baseline")
+      .sort((a, b) => (S[a].kind === "untrained") - (S[b].kind === "untrained") || !usesUmap(S[a].config) - !usesUmap(S[b].config) || MODELS.indexOf(S[a].config.embedder) - MODELS.indexOf(S[b].config.embedder))
+      .forEach((k) => rows.push({ label: configName(k), untrained: S[k].kind === "untrained", full: [reductionOnly(k) ? S[k].base : k, "latent"], map: [k, "latent"] }));
+    return rows;
+  }
+
+  let probeSel = "focus", probeMetric = PROBE_METRICS[0], probeDims = PROBE_DIMS[0] ?? 2;
   function drawProbes() {
-    const rows = PROBE_ROWS.map((r) => ({
+    const rows = probeRows(probeDims).map((r) => ({
       ...r,
       fullHit: hitOf(r.full, "full", probeMetric, probeSel),
-      mapHit: hitOf(r.map, "umap2d", "euclidean", probeSel),
-      fullR2: r.noRidgeFull ? null : r2Of(r.full, "full", probeSel),
-      mapR2: r2Of(r.map, "umap2d", probeSel),
+      mapHit: hitOf(r.map, "reduced", "euclidean", probeSel),
     })).filter((r) => r.fullHit != null || r.mapHit != null);
 
-    // Dumbbell: one row per space, full-dimension ring to after-UMAP dot.
+    // Dumbbell: one row per space, full-dimension ring to reduced dot.
     const host = $("#probe-chart"); host.innerHTML = "";
     const ink = cssVar("--ink"), accent = cssVar("--accent"), rule = cssVar("--rule"), muted = cssVar("--ink-muted");
     const vals = rows.flatMap((r) => [r.fullHit, r.mapHit]).filter((v) => v != null);
     const lo = Math.min(0, Math.floor(Math.min(...vals) * 10) / 10), hi = Math.max(0.1, Math.ceil(Math.max(...vals) * 10) / 10);
-    const W = 760, rowH = 26, m = { l: 230, r: 24, t: 26, b: 30 }, H = m.t + m.b + rows.length * rowH;
+    const W = 900, rowH = 26, m = { l: 370, r: 24, t: 26, b: 30 }, H = m.t + m.b + rows.length * rowH;
     const x = (v) => m.l + ((v - lo) / (hi - lo)) * (W - m.l - m.r);
-    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Adjusted neighbourhood hit before and after UMAP for each space" });
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `Adjusted neighbourhood hit at full dimension and reduced to ${probeDims}-D for each space` });
     for (let t = lo; t <= hi + 1e-9; t += 0.1) {
       svgEl("line", { x1: x(t), x2: x(t), y1: m.t - 6, y2: H - m.b, stroke: rule, "stroke-width": Math.abs(t) < 1e-9 ? 1.2 : 0.5 }, svg);
       svgEl("text", { x: x(t), y: H - m.b + 16, "text-anchor": "middle" }, svg).textContent = t.toFixed(1);
     }
     svgEl("text", { x: m.l, y: 12, style: `fill:${accent};font-weight:700` }, svg).textContent = "○ full dimension";
-    svgEl("text", { x: m.l + 130, y: 12, style: `fill:${ink};font-weight:700` }, svg).textContent = "● after UMAP (2-D)";
+    svgEl("text", { x: m.l + 130, y: 12, style: `fill:${ink};font-weight:700` }, svg).textContent = `● reduced to ${probeDims}-D`;
     rows.forEach((r, i) => {
       const cy = m.t + i * rowH + rowH / 2;
       svgEl("text", { x: m.l - 10, y: cy + 4, "text-anchor": "end", style: `fill:${r.untrained ? muted : ink};font-weight:${r.raw ? 700 : 400}` }, svg).textContent = r.label;
       if (r.fullHit != null && r.mapHit != null) svgEl("line", { x1: x(r.fullHit), x2: x(r.mapHit), y1: cy, y2: cy, stroke: muted, "stroke-width": 1.5 }, svg);
-      if (r.mapHit != null) { const c = svgEl("circle", { cx: x(r.mapHit), cy, r: 4.5, fill: ink }, svg); svgEl("title", {}, c).textContent = `${r.label}, after UMAP (${r.mapName || "UMAP"}): ${fmt(r.mapHit, 3)}`; }
+      if (r.mapHit != null) { const c = svgEl("circle", { cx: x(r.mapHit), cy, r: 4.5, fill: ink }, svg); svgEl("title", {}, c).textContent = `${r.label}, reduced: ${fmt(r.mapHit, 3)}`; }
       if (r.fullHit != null) { const c = svgEl("circle", { cx: x(r.fullHit), cy, r: 4.5, fill: cssVar("--ground"), stroke: accent, "stroke-width": 2 }, svg); svgEl("title", {}, c).textContent = `${r.label}, full dimension (${probeMetric}): ${fmt(r.fullHit, 3)}`; }
     });
     host.appendChild(svg);
 
     const signed = (v) => (v == null ? "–" : (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(3));
-    $("#probe-table").innerHTML = `<thead><tr><th>Space</th><th class="num">Full dimension</th><th class="num">After UMAP</th><th class="num">UMAP's change</th><th class="num">Ridge R², full</th><th class="num">Ridge R², after UMAP</th></tr></thead><tbody>${rows.map((r) =>
-      `<tr class="${r.raw ? "is-key" : ""} ${r.untrained ? "is-base" : ""}"><td>${esc(r.label)}${r.mapName ? ` <span class="muted small">→ ${esc(r.mapName)}</span>` : ""}</td><td class="num">${fmt(r.fullHit, 3)}</td><td class="num">${fmt(r.mapHit, 3)}</td><td class="num">${r.fullHit != null && r.mapHit != null ? signed(r.mapHit - r.fullHit) : "–"}</td><td class="num">${fmt(r.fullR2, 2)}</td><td class="num">${fmt(r.mapR2, 2)}</td></tr>`).join("")}</tbody>`;
-    $("#probe-cap").textContent = `Adjusted neighbourhood hit (0 = chance, five neighbours) for ${probeSel === "focus" ? `the mean of the ${nFocus} focus Behavlets` : probeSel === "sequence_length" ? "sequence length" : behName(probeSel)}, before and after UMAP. Full dimension: encoder latents with ${probeMetric} distance; the raw input with its padding-aware version, or plain on the padded input. After UMAP: the 2-D maps the sweep scores; for the raw rows, Masked UMAP and UMAP only.`;
-    $("#probe-note").textContent = "Ridge R²: out-of-fold (5 folds) linear prediction of the Behavlet's value from the space, on the same sequences the neighbourhood hit queries. The raw input repeats each sequence's last step over its padding, so the length is not handed over for free. Neighbourhoods in 512 dimensions and in two do not have the same geometry, so read the direction of each change more than its size. All probes come from local rebuilds.";
+    $("#probe-table").innerHTML = `<thead><tr><th>Configuration</th><th class="num">Full dimension</th><th class="num">Reduced (${probeDims}-D)</th><th class="num">Change</th></tr></thead><tbody>${rows.map((r) =>
+      `<tr class="${r.raw ? "is-key" : ""} ${r.untrained ? "is-base" : ""}"><td>${esc(r.label)}</td><td class="num">${fmt(r.fullHit, 3)}</td><td class="num">${fmt(r.mapHit, 3)}</td><td class="num">${r.fullHit != null && r.mapHit != null ? signed(r.mapHit - r.fullHit) : "–"}</td></tr>`).join("")}</tbody>`;
+    $("#probe-cap").textContent = `Adjusted neighbourhood hit (0 = chance, five neighbours) for ${setName(probeSel)}, in the full space and after the reduction named after the dash. Full dimension: encoder latents with ${probeMetric} distance; the raw input with its padding-aware version, or plain on the padded input. Reduced: Euclidean neighbours in the ${probeDims}-D space the reducer produced.`;
+    $("#probe-note").textContent = `Neighbourhoods in 512 dimensions and in ${probeDims} do not have the same geometry, so read the direction of each change more than its size. All probes come from local rebuilds.`;
   }
-  if (PROBE_ROWS.length && PROBES.hits.length) {
-    const opts = [["focus", `Mean of the ${nFocus} focus Behavlets`], ...D.focus.map((s) => [s, behName(s)]), ["sequence_length", "Sequence length (leak check)"]];
-    $("#ctl-probe-set").innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join("");
+  if (plainKey && PROBES.hits.length) {
+    $("#ctl-probe-set").innerHTML = setOptionsHtml;
     $("#ctl-probe-set").addEventListener("change", (e) => { probeSel = e.target.value; drawProbes(); });
     segmented("#ctl-probe-metric", PROBE_METRICS.map((mt) => [mt, mt[0].toUpperCase() + mt.slice(1)]), probeMetric, (v) => { probeMetric = v; drawProbes(); });
+    segmented("#ctl-probe-dims", PROBE_DIMS.map((d) => [String(d), `${d}-D`]), String(probeDims), (v) => { probeDims = Number(v); drawProbes(); });
     drawProbes(); onTheme(drawProbes);
   } else {
     $("#rq1-probes").hidden = true;
+  }
+
+  // ------------------------------------------------------------------ RQ1 matched widths
+  // Each encoder's latent unreduced, at every latent size, against the raw input reduced to
+  // the same width. Every neighbourhood here is Euclidean.
+  const MATCHED = (() => {
+    if (!plainKey) return null;
+    const fs = S[plainKey].config.feature_set;
+    const keys = Object.keys(S).filter((k) => isAttack(k) && S[k].config.feature_set === fs);
+    const lines = [];
+    for (const m of MODELS) {
+      const pts = keys.filter((k) => S[k].kind === "trained" && !S[k].overrides && S[k].config.embedder === m).map((k) => ({ x: S[k].config.latent_space, cell: [k, "latent"], space: "full" }));
+      if (pts.length > 1) lines.push({ label: `${m} – no reduction`, model: m, pts });
+      const untrained = keys.filter((k) => S[k].kind === "untrained" && S[k].config.embedder === m).map((k) => ({ x: S[k].config.latent_space, cell: [k, "latent"], space: "full" }));
+      if (untrained.length > 1) lines.push({ label: `${m} (untrained) – no reduction`, model: m, untrained: true, pts: untrained });
+    }
+    const raws = [
+      ["Masked UMAP", (c) => c.embedder === "Masked UMAP", "raw"],
+      ...["umap", "pca", "random_projection"].map((r) => [reducerName(r), (c) => c.embedder !== "Masked UMAP" && (c.reducer || "umap") === r, "raw_padded"]),
+    ];
+    for (const [name, pred, rep] of raws) {
+      const pts = keys.filter((k) => S[k].kind === "baseline" && pred(S[k].config)).map((k) => ({ x: dimsOf(S[k].config), cell: [k, rep], space: "reduced" }));
+      if (pts.length > 1) lines.push({ label: `Raw input – ${name}`, raw: true, pts });
+    }
+    lines.forEach((l) => l.pts.sort((a, b) => a.x - b.x));
+    const refs = [
+      { label: "Raw input (padding-aware), unreduced", cell: [plainKey, "raw"] },
+      { label: "Raw input (padded), unreduced", cell: [plainKey, "raw_padded"] },
+    ];
+    return lines.length ? { lines, refs, fs } : null;
+  })();
+  let matchedSel = "focus";
+  function drawMatched() {
+    const host = $("#matched-chart"); host.innerHTML = "";
+    const ink = cssVar("--ink"), muted = cssVar("--ink-muted"), accent = cssVar("--accent"), mark = cssVar("--mark"), rule = cssVar("--rule");
+    const val = (cell, space) => hitOf(cell, space, "euclidean", matchedSel);
+    const showUntrained = $("#matched-untrained").checked;
+    const lines = MATCHED.lines.filter((l) => !l.untrained || showUntrained).map((l) => ({ ...l, pts: l.pts.map((p) => ({ ...p, v: val(p.cell, p.space) })).filter((p) => p.v != null) })).filter((l) => l.pts.length);
+    const refs = MATCHED.refs.map((r) => ({ ...r, v: val(r.cell, "full") })).filter((r) => r.v != null);
+    const vals = [...lines.flatMap((l) => l.pts.map((p) => p.v)), ...refs.map((r) => r.v)];
+    if (!vals.length) return;
+    const lo = Math.min(0, Math.floor(Math.min(...vals) * 10) / 10), hi = Math.max(0.1, Math.ceil(Math.max(...vals) * 10) / 10);
+    const xs = [...new Set(lines.flatMap((l) => l.pts.map((p) => p.x)))].sort((a, b) => a - b);
+    const W = 840, H = 360, m = { l: 44, r: 250, t: 16, b: 44 };
+    const lx0 = Math.log2(xs[0]), lx1 = Math.log2(xs[xs.length - 1]);
+    const x = (d) => m.l + ((Math.log2(d) - lx0) / (lx1 - lx0 || 1)) * (W - m.l - m.r);
+    const y = (v) => H - m.b - ((v - lo) / (hi - lo)) * (H - m.t - m.b);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Adjusted neighbourhood hit by width: encoder latents unreduced against the raw input reduced to the same width" });
+    for (let t = lo; t <= hi + 1e-9; t += 0.1) {
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: rule, "stroke-width": Math.abs(t) < 1e-9 ? 1 : 0.5 }, svg);
+      svgEl("text", { x: m.l - 6, y: y(t) + 4, "text-anchor": "end" }, svg).textContent = t.toFixed(1);
+    }
+    xs.forEach((d) => { svgEl("text", { x: x(d), y: H - m.b + 16, "text-anchor": "middle" }, svg).textContent = d; });
+    svgEl("text", { x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle" }, svg).textContent = "dimensions: the encoder's latent size, or the width the raw input is reduced to";
+    const labels = [];
+    for (const r of refs) {
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: y(r.v), y2: y(r.v), stroke: muted, "stroke-dasharray": "1 3", "stroke-width": 1 }, svg);
+      labels.push({ t: r.label, y: y(r.v), c: muted });
+    }
+    const MODEL_COLOR = { LSTM: accent, MLP: ink, VAE: mark, Transformer: muted };
+    const rawStyle = { "Raw input – Masked UMAP": [ink, "6 3"], "Raw input – UMAP": [muted, "2 3"], "Raw input – PCA": [mark, "8 3 2 3"], "Raw input – Random projection": [mark, "1 4"] };
+    for (const l of lines) {
+      const st = l.raw
+        ? { c: (rawStyle[l.label] || [muted])[0], w: 1.5, dash: (rawStyle[l.label] || [0, "4 3"])[1] }
+        : { c: MODEL_COLOR[l.model] || ink, w: l.model === KEY_MODEL && !l.untrained ? 2.5 : 1.5, dash: l.untrained ? "5 3" : "" };
+      const pts = l.pts.map((p) => [x(p.x), y(p.v), p]);
+      svgEl("polyline", { points: pts.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: st.c, "stroke-width": st.w, "stroke-dasharray": st.dash }, svg);
+      pts.forEach(([px, py, p]) => { const c = svgEl("circle", { cx: px, cy: py, r: l.raw ? 2.2 : 3, fill: st.c }, svg); svgEl("title", {}, c).textContent = `${l.label}, ${p.x}-D: ${fmt(p.v, 3)}`; });
+      labels.push({ t: l.label, y: pts[pts.length - 1][1], c: st.c, bold: l.model === KEY_MODEL && !l.untrained });
+    }
+    labels.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 14) labels[i].y = labels[i - 1].y + 14;
+    labels.forEach((l) => svgEl("text", { x: W - m.r + 8, y: l.y + 4, style: `fill:${l.c};font-weight:${l.bold ? 700 : 400}` }, svg).textContent = l.t);
+    host.appendChild(svg);
+    $("#matched-cap").textContent = `Adjusted neighbourhood hit (Euclidean, five neighbours) for ${setName(matchedSel)}, ${MATCHED.fs} features. Solid lines: each trained encoder's latent at its own width, with no reduction, one point per latent size${showUntrained ? "; dashed in the same colour, its untrained control at the sizes it was run" : ""}. Dashed lines: the raw input with no encoder, reduced to that many dimensions (from 2 up). Dotted lines: the raw input at its full width. All from local rebuilds.`;
+  }
+  if (MATCHED) {
+    $("#ctl-matched-set").innerHTML = setOptionsHtml;
+    $("#ctl-matched-set").addEventListener("change", (e) => { matchedSel = e.target.value; drawMatched(); });
+    $("#matched-untrained").addEventListener("change", drawMatched);
+    drawMatched(); onTheme(drawMatched);
+  } else {
+    $("#rq1-matched").hidden = true;
+  }
+
+  // ------------------------------------------------------------------ RQ1 hit profile
+  // The chance-adjusted neighbourhood hit as the neighbourhood grows from five sequences to a
+  // thousand (calculate_neighborhood_hit_profile): how far each label's structure reaches.
+  const PROFILE_ROWS = PROBES.profile || [];
+  const PP = new Map();
+  for (const [key, rep, space, metric, set, k, adj] of PROFILE_ROWS) {
+    const id = `${key}|${rep}|${space}|${metric}|${set}`;
+    if (!PP.has(id)) PP.set(id, new Map());
+    PP.get(id).set(k, adj);
+  }
+  const PROFILE_KS = [...new Set(PROFILE_ROWS.map((r) => r[5]))].sort((a, b) => a - b);
+  // One curve: the selected sets' mean at each k, for [key, representation, space, metric].
+  const profileOf = (cell, sel) => PROFILE_KS
+    .map((k) => [k, mean(probeSets(sel).map((s) => (PP.get(`${cell.join("|")}|${s}`) || new Map()).get(k) ?? null))])
+    .filter((pt) => pt[1] != null);
+  function profileLines(view) {
+    if (!plainKey) return [];
+    const fs = S[plainKey].config.feature_set;
+    const keys = Object.keys(S).filter((k) => isAttack(k) && !S[k].probe_only && S[k].config.feature_set === fs);
+    const byModel = (a, b) => MODELS.indexOf(S[a].config.embedder) - MODELS.indexOf(S[b].config.embedder);
+    const encoders = keys.filter((k) => S[k].kind !== "baseline").sort(byModel);
+    const lines = [];
+    if (view === "full") {
+      // The trained spaces as the sweep configured them, and the untrained controls.
+      for (const k of encoders.filter((k) => !S[k].overrides || S[k].kind === "untrained")) {
+        lines.push({ label: unreducedLabel(shortName(k)), model: S[k].config.embedder, untrained: S[k].kind === "untrained", cell: [k, "latent", "full", "euclidean"] });
+      }
+      lines.push({ label: unreducedLabel("Raw input (padding-aware)"), raw: "Masked UMAP", cell: [plainKey, "raw", "full", "euclidean"] });
+      lines.push({ label: unreducedLabel("Raw input (padded)"), raw: "UMAP", cell: [plainKey, "raw_padded", "full", "euclidean"] });
+    } else {
+      const d = Number(view);
+      for (const k of encoders.filter((k) => dimsOf(S[k].config) === d)) {
+        lines.push({ label: configName(k), model: S[k].config.embedder, untrained: S[k].kind === "untrained", pca: !usesUmap(S[k].config), cell: [k, "latent", "reduced", "euclidean"] });
+      }
+      for (const k of keys.filter((k) => S[k].kind === "baseline" && dimsOf(S[k].config) === d)) {
+        lines.push({ label: configName(k), raw: mapperOf(S[k].config), cell: [k, S[k].config.embedder === "Masked UMAP" ? "raw" : "raw_padded", "reduced", "euclidean"] });
+      }
+    }
+    return lines;
+  }
+  let profileSel = "focus", profileView = "full";
+  function drawProfile() {
+    const host = $("#profile-chart"); host.innerHTML = "";
+    const ink = cssVar("--ink"), muted = cssVar("--ink-muted"), accent = cssVar("--accent"), mark = cssVar("--mark"), rule = cssVar("--rule");
+    const show = { untrained: $("#pf-untrained").checked, pca: $("#pf-pca").checked, raw: $("#pf-raw").checked };
+    $("#pf-pca").disabled = profileView === "full";
+    const MODEL_COLOR = { LSTM: accent, MLP: ink, VAE: mark, Transformer: muted };
+    const RAW_DASH = { "Masked UMAP": "9 3", UMAP: "4 3", PCA: "9 3 2 3", "Random projection": "2 3" };
+    const lines = profileLines(profileView)
+      .filter((l) => (l.raw ? show.raw : (!l.untrained || show.untrained) && (!l.pca || show.pca)))
+      .map((l) => ({
+        ...l,
+        pts: profileOf(l.cell, profileSel),
+        style: l.raw
+          ? { c: ink, w: 1.25, dash: RAW_DASH[l.raw] || "4 3" }
+          : { c: MODEL_COLOR[l.model] || ink, w: l.model === KEY_MODEL && !l.untrained && !l.pca ? 2.5 : 1.75, dash: l.untrained ? "5 3" : l.pca ? "1 3" : "" },
+      }))
+      .filter((l) => l.pts.length);
+    if (!lines.length) { host.innerHTML = `<p class="small muted">No profile for this choice.</p>`; $("#profile-legend").innerHTML = ""; return; }
+    const vals = lines.flatMap((l) => l.pts.map((pt) => pt[1]));
+    const lo = Math.min(0, Math.floor(Math.min(...vals) * 10) / 10), hi = Math.max(0.1, Math.ceil(Math.max(...vals) * 10) / 10);
+    const W = 840, H = 340, m = { l: 44, r: 16, t: 14, b: 44 };
+    const lx0 = Math.log10(PROFILE_KS[0]), lx1 = Math.log10(PROFILE_KS[PROFILE_KS.length - 1]);
+    const x = (k) => m.l + ((Math.log10(k) - lx0) / (lx1 - lx0 || 1)) * (W - m.l - m.r);
+    const y = (v) => H - m.b - ((v - lo) / (hi - lo)) * (H - m.t - m.b);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Adjusted neighbourhood hit against neighbourhood size" });
+    for (let t = lo; t <= hi + 1e-9; t += 0.1) {
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: rule, "stroke-width": Math.abs(t) < 1e-9 ? 1 : 0.5 }, svg);
+      svgEl("text", { x: m.l - 6, y: y(t) + 4, "text-anchor": "end" }, svg).textContent = t.toFixed(1);
+    }
+    PROFILE_KS.forEach((k) => { svgEl("text", { x: x(k), y: H - m.b + 16, "text-anchor": "middle" }, svg).textContent = k; });
+    svgEl("text", { x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle" }, svg).textContent = "neighbourhood size k (sequences)";
+    for (const l of lines) {
+      const pts = l.pts.map(([k, v]) => [x(k), y(v), k, v]);
+      svgEl("polyline", { points: pts.map((pt) => `${pt[0]},${pt[1]}`).join(" "), fill: "none", stroke: l.style.c, "stroke-width": l.style.w, "stroke-dasharray": l.style.dash }, svg);
+      pts.forEach(([px, py, k, v]) => { const c = svgEl("circle", { cx: px, cy: py, r: 2.4, fill: l.style.c }, svg); svgEl("title", {}, c).textContent = `${l.label}, k = ${k}: ${fmt(v, 3)}`; });
+    }
+    host.appendChild(svg);
+    $("#profile-legend").innerHTML = lines.map((l) => `<span><svg width="30" height="10" aria-hidden="true" style="vertical-align:0;margin-right:6px"><line x1="0" x2="30" y1="5" y2="5" stroke="${l.style.c}" stroke-width="${l.style.w}" stroke-dasharray="${l.style.dash}"/></svg>${esc(l.label)}</span>`).join("");
+    const where = profileView === "full" ? "each space at its full width (encoder latents at 512 dimensions, the raw input flattened)" : `each space reduced to ${profileView} dimensions`;
+    $("#profile-cap").textContent = `Adjusted neighbourhood hit for ${setName(profileSel)} as the neighbourhood grows from the ${PROFILE_KS[0]} nearest sequences to ${PROFILE_KS[PROFILE_KS.length - 1]}, in ${where}; Euclidean neighbours (padding-aware for the raw input). k = 5 is the score used everywhere else. A curve that stays flat and then drops marks groups of about that size; one that falls at once, structure that is only local. All from local rebuilds.`;
+  }
+  if (plainKey && PROFILE_ROWS.length) {
+    $("#ctl-profile-set").innerHTML = setOptionsHtml;
+    $("#ctl-profile-set").addEventListener("change", (e) => { profileSel = e.target.value; drawProfile(); });
+    segmented("#ctl-profile-view", [["full", "Full dimension"], ...PROBE_DIMS.map((d) => [String(d), `${d}-D`])], profileView, (v) => { profileView = v; drawProfile(); });
+    for (const id of ["#pf-untrained", "#pf-pca", "#pf-raw"]) $(id).addEventListener("change", drawProfile);
+    drawProfile(); onTheme(drawProfile);
+  } else {
+    $("#rq1-profile").hidden = true;
+  }
+
+  // ------------------------------------------------------------------ RQ1 ridge
+  // The one supervised measure: out-of-fold ridge R² from a space to each Behavlet's value
+  // (calculate_probe_measures). It asks what a representation retains, so it is read against
+  // the raw input and against sequence length alone, never as evidence of discovery.
+  const RIDGE = (() => {
+    if (!plainKey) return null;
+    const fs = S[plainKey].config.feature_set;
+    const keys = Object.keys(S).filter((k) => isAttack(k) && S[k].config.feature_set === fs);
+    const lines = [];
+    for (const m of MODELS) {
+      for (const untrained of [false, true]) {
+        const pts = keys.filter((k) => S[k].kind === (untrained ? "untrained" : "trained") && (untrained || !S[k].overrides) && S[k].config.embedder === m)
+          .map((k) => ({ x: S[k].config.latent_space, cell: [k, "latent"] }))
+          .sort((a, b) => a.x - b.x);
+        if (pts.length) lines.push({ label: `${m}${untrained ? " (untrained)" : ""}`, model: m, untrained, pts });
+      }
+    }
+    const refs = [
+      { label: "Raw input, unreduced", cell: [plainKey, "raw"] },
+      { label: "Sequence length alone", cell: [plainKey, "length"] },
+    ];
+    // At the largest latent size: the full latent against its 5-D and 2-D reductions.
+    const h = Math.max(...lines.filter((l) => !l.untrained).flatMap((l) => l.pts.map((p) => p.x)));
+    const reduced = (base, reducer, d) => keys.find((k) => S[k].base === base && (S[k].config.reducer || "umap") === reducer && dimsOf(S[k].config) === d) || null;
+    const table = [];
+    for (const untrained of [false, true]) {
+      for (const m of MODELS) {
+        const k = keys.find((k) => S[k].config.embedder === m && S[k].config.latent_space === h && (untrained ? S[k].kind === "untrained" : S[k].kind === "trained" && !S[k].overrides));
+        if (!k) continue;
+        const p5 = untrained ? null : reduced(k, "pca", 5), u5 = untrained ? null : reduced(k, "umap", 5);
+        table.push({ label: `${m} h${h}${untrained ? " (untrained)" : ""}`, untrained, key: m === KEY_MODEL && !untrained, full: [k, "latent", "full"], pca5: p5 && [p5, "latent", "reduced"], umap5: u5 && [u5, "latent", "reduced"], map2: [k, "latent", "reduced"] });
+      }
+    }
+    table.push({ label: "Raw input (last step held over the padding)", raw: true, full: [plainKey, "raw", "full"] });
+    table.push({ label: "Sequence length alone", raw: true, full: [plainKey, "length", "full"] });
+    return { lines, refs, table, h, fs };
+  })();
+  let ridgeSel = "focus";
+  const ridgeOf = (cell, sel) => (cell ? r2Of(cell, cell[2] || "full", sel) : null);
+  function drawRidge() {
+    const host = $("#ridge-chart"); host.innerHTML = "";
+    const ink = cssVar("--ink"), muted = cssVar("--ink-muted"), accent = cssVar("--accent"), mark = cssVar("--mark"), rule = cssVar("--rule");
+    const showUntrained = $("#ridge-untrained").checked;
+    const lines = RIDGE.lines.filter((l) => !l.untrained || showUntrained)
+      .map((l) => ({ ...l, pts: l.pts.map((p) => ({ ...p, v: r2Of(p.cell, "full", ridgeSel) })).filter((p) => p.v != null) }))
+      .filter((l) => l.pts.length);
+    const refs = RIDGE.refs.map((r) => ({ ...r, v: r2Of(r.cell, "full", ridgeSel) })).filter((r) => r.v != null);
+    const vals = [...lines.flatMap((l) => l.pts.map((p) => p.v)), ...refs.map((r) => r.v)];
+    if (!vals.length) { host.innerHTML = `<p class="small muted">No ridge probe for this choice.</p>`; return; }
+    const lo = Math.min(0, Math.floor(Math.min(...vals) * 10) / 10), hi = Math.min(1, Math.max(0.1, Math.ceil(Math.max(...vals) * 10) / 10));
+    const xs = [...new Set(lines.flatMap((l) => l.pts.map((p) => p.x)))].sort((a, b) => a - b);
+    const W = 840, H = 340, m = { l: 44, r: 230, t: 16, b: 44 };
+    const lx0 = Math.log2(xs[0]), lx1 = Math.log2(xs[xs.length - 1]);
+    const x = (d) => m.l + ((Math.log2(d) - lx0) / (lx1 - lx0 || 1)) * (W - m.l - m.r);
+    const y = (v) => H - m.b - ((v - lo) / (hi - lo)) * (H - m.t - m.b);
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Ridge R² of each unreduced latent by latent size, against the raw input and sequence length alone" });
+    for (let t = lo; t <= hi + 1e-9; t += 0.1) {
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: y(t), y2: y(t), stroke: rule, "stroke-width": Math.abs(t) < 1e-9 ? 1 : 0.5 }, svg);
+      svgEl("text", { x: m.l - 6, y: y(t) + 4, "text-anchor": "end" }, svg).textContent = t.toFixed(1);
+    }
+    xs.forEach((d) => { svgEl("text", { x: x(d), y: H - m.b + 16, "text-anchor": "middle" }, svg).textContent = d; });
+    svgEl("text", { x: (m.l + W - m.r) / 2, y: H - 6, "text-anchor": "middle" }, svg).textContent = "latent size (the latent is probed unreduced)";
+    const labels = [];
+    for (const r of refs) {
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: y(r.v), y2: y(r.v), stroke: ink, "stroke-dasharray": r.cell[1] === "length" ? "2 3" : "7 3", "stroke-width": 1.25 }, svg);
+      labels.push({ t: `${r.label} ${fmt(r.v, 2)}`, y: y(r.v), c: ink });
+    }
+    const MODEL_COLOR = { LSTM: accent, MLP: ink, VAE: mark, Transformer: muted };
+    for (const l of lines) {
+      const st = { c: MODEL_COLOR[l.model] || ink, w: l.model === KEY_MODEL && !l.untrained ? 2.5 : 1.5, dash: l.untrained ? "5 3" : "" };
+      const pts = l.pts.map((p) => [x(p.x), y(p.v), p]);
+      svgEl("polyline", { points: pts.map((p) => `${p[0]},${p[1]}`).join(" "), fill: "none", stroke: st.c, "stroke-width": st.w, "stroke-dasharray": st.dash }, svg);
+      pts.forEach(([px, py, p]) => { const c = svgEl("circle", { cx: px, cy: py, r: 3, fill: l.untrained ? cssVar("--ground") : st.c, stroke: st.c, "stroke-width": 1.5 }, svg); svgEl("title", {}, c).textContent = `${l.label} h${p.x}: ${fmt(p.v, 3)}`; });
+      labels.push({ t: l.label, y: pts[pts.length - 1][1], c: st.c, bold: l.model === KEY_MODEL && !l.untrained });
+    }
+    labels.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 14) labels[i].y = labels[i - 1].y + 14;
+    labels.forEach((l) => svgEl("text", { x: W - m.r + 8, y: l.y + 4, style: `fill:${l.c};font-weight:${l.bold ? 700 : 400}` }, svg).textContent = l.t);
+    host.appendChild(svg);
+    $("#ridge-cap").textContent = `Out-of-fold ridge R² (5 folds) for ${setName(ridgeSel)}, ${RIDGE.fs} features, from each encoder's latent at its own width with no reduction: 1 is a perfect linear read-out, 0 no better than predicting the mean. Solid lines: trained encoders${showUntrained ? "; dashed with open points, the untrained controls at the sizes they were run" : ""}. Reference lines: the raw input at full width, and a one-column space holding only each sequence's length.${ridgeSel === "sequence_length" ? " (The length-alone line is absent here: it would predict itself.)" : ""} All from local rebuilds.`;
+
+    const cols = [["full", "Unreduced"], ["pca5", "PCA, 5-D"], ["umap5", "UMAP, 5-D"], ["map2", "UMAP, 2-D"]];
+    const rows = RIDGE.table.map((r) => ({ ...r, vals: cols.map(([c]) => ridgeOf(r[c], ridgeSel)) })).filter((r) => r.vals.some((v) => v != null));
+    $("#ridge-table").innerHTML = `<thead><tr><th>Representation</th>${cols.map(([, l]) => `<th class="num">${l}</th>`).join("")}</tr></thead><tbody>${rows.map((r) =>
+      `<tr class="${r.key ? "is-key" : ""} ${r.untrained || r.raw ? "is-base" : ""}"><td>${esc(r.label)}</td>${r.vals.map((v) => `<td class="num">${fmt(v, 2)}</td>`).join("")}</tr>`).join("")}</tbody>`;
+    $("#ridge-note").textContent = `Ridge R² for ${setName(ridgeSel)} at latent size ${RIDGE.h}, unreduced and after each reduction of the same latent. The raw input repeats each sequence's last step over its padding, so the padding does not hand the probe the length; the sequence-length row measures what the length alone is worth. Each Behavlet is fitted on the sequences its neighbourhood hit queries (for ghost kills, only attacks with a kill). Standardised features are clipped at ±10 so that one rare value cannot wreck a held-out prediction.`;
+  }
+  if (RIDGE && PROBES.ridge.length) {
+    $("#ctl-ridge-set").innerHTML = setOptionsHtml;
+    $("#ctl-ridge-set").addEventListener("change", (e) => { ridgeSel = e.target.value; drawRidge(); });
+    $("#ridge-untrained").addEventListener("change", drawRidge);
+    drawRidge(); onTheme(drawRidge);
+  } else {
+    $("#rq1-ridge").hidden = true;
   }
 
   // ------------------------------------------------------------------ canvas helpers
@@ -908,13 +1327,13 @@ ul.plain { margin: 0; padding-left: 1.1em; display: grid; gap: 8px; max-width: v
   // ------------------------------------------------------------------ provenance
   function drawProvenance() {
     const seqName = (c) => (c.sequence_type === ATTACK ? "Attack" : c.sequence_type.replace(/_/g, " "));
-    $("#prov-table").innerHTML = `<thead><tr><th>Space</th><th>Sweep run</th><th>Configuration</th><th class="num">Sequences</th><th class="num">Clusters (sweep / rebuilt)</th><th class="num">Max |Δ| adj. hit</th><th>Check</th></tr></thead><tbody>${Object.entries(S).map(([k, e]) => {
-      const name = `${seqName(e.config)} · ${shortName(k)}`; const r = e.reproduction;
-      if (!r) return `<tr><td>${esc(name)}</td><td class="mono">${esc(e.run_dir || "")}</td><td>${e.kind === "untrained" ? "Untrained weights, same data, seed and UMAP" : esc(e.label || "")}</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td><span class="status ok">${e.kind === "untrained" ? "control" : "–"}</span></td></tr>`;
+    $("#prov-table").innerHTML = `<thead><tr><th>Configuration</th><th>Sweep run</th><th>Run label</th><th class="num">Sequences</th><th class="num">Clusters (sweep / rebuilt)</th><th class="num">Max |Δ| adj. hit</th><th>Check</th></tr></thead><tbody>${Object.entries(S).filter(([, e]) => e.reproduction).map(([k, e]) => {
+      const name = `${seqName(e.config)} · ${configName(k)}`; const r = e.reproduction;
+      if (!r) return `<tr><td>${esc(name)}</td><td class="mono">${esc(e.run_dir || "")}</td><td>${e.kind === "untrained" ? "Untrained weights, same data, seed and UMAP" : `<span class="mono">${esc(e.label || "")}</span>`}</td><td class="num">–</td><td class="num">–</td><td class="num">–</td><td><span class="status ok">${e.kind === "untrained" ? "control" : "–"}</span></td></tr>`;
       const d = r.max_abs_diff_neigh_hit_adj;
       const [cls, word] = d < 0.001 ? ["ok", "identical"] : d < 0.02 ? ["ok", "close"] : ["warn", "drifted"];
       return `<tr><td>${esc(name)}</td><td class="mono">${esc(e.run_dir)}</td><td class="mono">${esc(e.label)}</td><td class="num">${r.n_samples.toLocaleString("en")}</td><td class="num">${r.n_clusters_sweep} / ${r.n_clusters_rebuilt}</td><td class="num">${fmt(d, 3)}</td><td><span class="status ${cls}">${word}</span></td></tr>`;
-    }).join("")}</tbody>`;
+    }).join("")}<tr><td colspan="7" class="muted">Plus ${Object.values(S).filter((e) => !e.reproduction).length} spaces built only on this machine from these runs (untrained controls, other reducers and widths), which have no sweep result to check against.</td></tr></tbody>`;
   }
 
   // ------------------------------------------------------------------ boot
